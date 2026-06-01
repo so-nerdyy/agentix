@@ -1,2 +1,70 @@
-# agentix
-Agentix. Your introduction to the agentic era.
+# Agentix
+
+Agentix is a Hermes-class agent platform with an Agentix-owned backend.
+
+- Hermes owns the user-facing shell, setup wizard, update flow, cron UX, gateway UX, and command surface.
+- Agentix owns task orchestration, validation, approvals, memory, healing, Pi agents, and runtime services.
+
+## Quick Start
+
+```powershell
+npm install -g agentix
+agentix setup
+agentix
+```
+
+From any project folder, `agentix` opens the interactive shell. Use `agentix server` if you want the backend bridge and dashboard/API runtime.
+
+## Commands
+
+- `agentix` - open the interactive Hermes-style shell
+- `agentix setup` - first-run setup wizard
+- `agentix model` - configure provider and model
+- `agentix update` - check update/install options
+- `agentix doctor` - validate config and runtime health
+- `agentix cron` - manage scheduled jobs
+- `agentix gateway` - manage integrations
+- `agentix skills` - manage skills/plugins
+- `agentix tools` - manage tools
+- `agentix memory` - search memory
+- `agentix logs` - inspect logs
+- `agentix server` - start the Agentix backend bridge/API
+- `agentix support` - generate support info
+
+## Configuration
+
+Agentix uses workspace-scoped configuration and environment variables:
+
+- `AGENTIX_DATA_DIR` - persistent data location
+- `AGENTIX_BRIDGE_URL` - backend bridge URL
+- `AGENTIX_BRIDGE_PORT` - bridge port
+- `AGENTIX_INBOX_PORT` - inbox/dashboard port
+- `AGENTIX_MODEL` - default model
+- `AGENTIX_LLM_API_KEY` - runtime API key
+- `AGENTIX_SESSION_TOKEN` - session token for event streaming
+- `AGENTIX_SESSION_TTL` - session retention
+- `AGENTIX_APPROVAL_TIMEOUT` - approval timeout
+
+Secrets are not written to disk. Use `agentix setup` to create workspace-local configuration and export keys in your shell environment or secret manager.
+
+## Project Layout
+
+- `bin/` - installed entrypoint
+- `src/` - Agentix backend, shell fallback, and bridge
+- `hermes-agent/` - Hermes frontend runtime used by the launcher
+- `docs/` - install, operations, and security notes
+
+## Development
+
+```powershell
+npm install
+npm run build
+npm test
+```
+
+## Documentation
+
+- [Install](docs/INSTALL.md)
+- [Operations](docs/OPERATIONS.md)
+- [Security](docs/SECURITY.md)
+- [Architecture](docs/ARCHITECTURE.md)

@@ -1,0 +1,167 @@
+"""
+Agentix backend adapter for the Hermes frontend.
+"""
+
+import json
+import os
+import subprocess
+import threading
+import time
+import urllib.request
+from pathlib import Path
+from typing import Any, Callable, Dict, Optional
+
+BRIDGE_PORT = int(os.environ.get("AGENTIX_BRIDGE_PORT", "3456"))
+BRIDGE_URL = f"http://127.0.0.1:{BRIDGE_PORT}"
+_bridge_lock = threading.Lock()
+
+
+def _get_bridge_url() -> str:
+    return (
+        os.environ.get("AGENTIX_BRIDGE_URL")
+        or os.environ.get("HERMES_BRIDGE_URL")
+        or BRIDGE_URL
+    )
+
+
+def _bridge_healthcheck() -> bool:
+    try:
+        req = urllib.request.Request(f"{_get_bridge_url()}/health")
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
+def ensure_bridge_running() -> None:
+    with _bridge_lock:
+        if _bridge_healthcheck():
+            return
+
+        project_root = Path(__file__).resolve().parents[2]
+        bridge_entry = project_root / "dist" / "bridge" / "entry.js"
+        if not bridge_entry.exists():
+            raise RuntimeError(
+                f"Bridge entry not found at {bridge_entry}. Run `npm run build` first."
+            )
+
+        subprocess.Popen(
+            ["node", str(bridge_entry)],
+            cwd=str(project_root),
+            env={
+                **os.environ,
+                "AGENTIX_BRIDGE_PORT": str(BRIDGE_PORT),
+                "AGENTIX_BRIDGE_URL": _get_bridge_url(),
+            },
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
+        for _ in range(60):
+            time.sleep(0.1)
+            if _bridge_healthcheck():
+                return
+
+        raise RuntimeError("Agentix bridge failed to start within 6 seconds.")
+
+
+class AgentixBackend:
+    def __init__(
+        self,
+        model: Optional[str] = None,
+        session_id: Optional[str] = None,
+        **_: Any,
+    ):
+        self.model = model or os.environ.get("AGENTIX_MODEL")
+        self.session_id = session_id or f"session-{os.getpid()}"
+        ensure_bridge_running()
+
+    def _post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        data = json.dumps(body).encode("utf-8")
+        req = urllib.request.Request(
+            f"{_get_bridge_url()}{path}",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    def execute(
+        self,
+        stimulus: str,
+        session_id: Optional[str] = None,
+        stream_callback: Optional[Callable[[str], None]] = None,
+        **_: Any,
+    ) -> str:
+        body: Dict[str, Any] = {"stimulus": stimulus}
+        if session_id:
+            body["sessionId"] = session_id
+        if self.model:
+            body["model"] = self.model
+
+        req = urllib.request.Request(
+            f"{_get_bridge_url()}/execute/stream",
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        response = ""
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            for raw_line in resp:
+                line = raw_line.decode("utf-8").strip()
+                if not line.startswith("data: "):
+                    continue
+                payload = line[6:].replace("\\n", "\n")
+                if payload == "[DONE]":
+                    break
+                try:
+                    parsed = json.loads(payload)
+                    if parsed.get("error"):
+                        raise RuntimeError(parsed["error"])
+                    delta = parsed.get("delta")
+                    if delta:
+                        if stream_callback:
+                            stream_callback(delta)
+                        response += delta
+                except json.JSONDecodeError:
+                    if stream_callback:
+                        stream_callback(payload)
+                    response += payload
+
+        return response
+
+    def get_sessions(self) -> Any:
+        req = urllib.request.Request(f"{_get_bridge_url()}/sessions")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    def create_session(self, model: Optional[str] = None) -> Any:
+        body: Dict[str, Any] = {}
+        if model:
+            body["model"] = model
+        return self._post("/sessions", body)
+
+    def delete_session(self, session_id: str) -> None:
+        req = urllib.request.Request(
+            f"{_get_bridge_url()}/sessions/{session_id}",
+            method="DELETE",
+        )
+        with urllib.request.urlopen(req, timeout=10):
+            return None
+
+    def memory_search(self, query: str) -> Any:
+        from urllib.parse import quote
+
+        req = urllib.request.Request(
+            f"{_get_bridge_url()}/memory/search?q={quote(query)}"
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    def list_tools(self) -> Any:
+        req = urllib.request.Request(f"{_get_bridge_url()}/tools")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode("utf-8"))
