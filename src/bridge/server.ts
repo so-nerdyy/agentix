@@ -1,15 +1,12 @@
-// HTTP bridge server - listens on 127.0.0.1:3456 and proxies
-// execute/stream requests to the Python AgentixBackend, returning SSE stream.
-
 import Fastify from "fastify";
 import cors from "@fastify/cors";
-import { AgentixBackend as HttpBridgeClient } from "../agentix_backend.js";
+import { LocalAgentixRuntime } from "../runtime/LocalAgentixRuntime.js";
 
 const PORT = parseInt(process.env.AGENTIX_BRIDGE_PORT || "3456", 10);
 const HOST = "127.0.0.1";
 
 export async function startBridge() {
-  const backend = new HttpBridgeClient();
+  const runtime = new LocalAgentixRuntime();
 
   const server = Fastify({ logger: false });
 
@@ -18,10 +15,8 @@ export async function startBridge() {
     methods: ["GET", "POST", "OPTIONS"],
   });
 
-  // Health check endpoint
-  server.get("/health", async () => ({ status: "ok", backend: "hermes" }));
+  server.get("/health", async () => ({ status: "ok", backend: "agentix" }));
 
-  // Streaming execute endpoint - SSE
   server.post("/execute/stream", async (request, reply) => {
     const body = request.body as Record<string, unknown>;
 
@@ -30,59 +25,50 @@ export async function startBridge() {
     reply.raw!.setHeader("Connection", "keep-alive");
     reply.raw!.setHeader("X-Accel-Buffering", "no");
 
-    let streamEnded = false;
-
     try {
-      await backend.executeStream({
+      await runtime.execute({
         stimulus: body.stimulus as string,
         sessionId: body.sessionId as string | undefined,
-        streamCallback: (delta: string) => {
-          if (streamEnded) return;
+        onDelta: (delta: string) => {
           reply.raw!.write(`data: ${delta.replace(/\n/g, "\\n")}\n\n`);
         },
       });
     } catch (err: unknown) {
-      if (!streamEnded) {
-        const msg = err instanceof Error ? err.message : String(err);
-        reply.raw!.write(`data: ${JSON.stringify({ error: msg }).replace(/\n/g, "\\n")}\n\n`);
-      }
+      const msg = err instanceof Error ? err.message : String(err);
+      reply.raw!.write(
+        `data: ${JSON.stringify({ error: msg }).replace(/\n/g, "\\n")}\n\n`,
+      );
     }
 
-    if (!streamEnded) {
-      reply.raw!.write("data: [DONE]\n\n");
-    }
+    reply.raw!.write("data: [DONE]\n\n");
     reply.raw!.end();
     return reply;
   });
 
-  // Non-streaming execute
   server.post("/execute", async (request, reply) => {
     const body = request.body as Record<string, unknown>;
-    return backend.execute({
+    return runtime.execute({
       stimulus: body.stimulus as string,
       sessionId: body.sessionId as string | undefined,
     });
   });
 
-  // Session management
-  server.get("/sessions", async () => backend.listSessions());
+  server.get("/sessions", async () => runtime.listSessions());
   server.post("/sessions", async (request, reply) => {
     const body = request.body as Record<string, unknown>;
-    return backend.createSession({ model: body.model as string | undefined });
+    return runtime.createSession({ model: body.model as string | undefined });
   });
   server.delete("/sessions/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
-    return backend.deleteSession(id);
+    return runtime.deleteSession(id);
   });
 
-  // Memory search
   server.get("/memory/search", async (request, reply) => {
     const q = (request.query as Record<string, string>).q || "";
-    return backend.memorySearch(q);
+    return runtime.memorySearch(q);
   });
 
-  // Tools list
-  server.get("/tools", async () => backend.listTools());
+  server.get("/tools", async () => runtime.listTools());
 
   await server.listen({ port: PORT, host: HOST });
   console.error(`Bridge listening on ${HOST}:${PORT}`);

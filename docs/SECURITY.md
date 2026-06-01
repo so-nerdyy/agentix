@@ -1,0 +1,30 @@
+# Security
+
+## Threat Model
+
+Agentix assumes the local workspace may contain untrusted inputs, scripts, and task outputs. The backend should treat all external content as untrusted until validated.
+
+## Secrets
+
+- API keys should come from environment variables or secret managers
+- Secrets are not persisted to the workspace config file
+- Session tokens should be scoped to the current workspace or deployment
+
+## Execution Boundaries
+
+- Pi workers run backend-approved work
+- Approval-gated actions must remain explicit in the backend
+- Shell/UI layers must not become a second source of truth for task state
+
+## Validation
+
+- Validate tool arguments before execution
+- Validate file paths before writing artifacts
+- Validate update/install instructions before mutating config
+
+## Operational Checklist
+
+- Keep Node and Python dependencies current
+- Review gateway credentials before enabling integrations
+- Rotate session tokens if event stream access is suspected to be exposed
+

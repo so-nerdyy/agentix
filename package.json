@@ -3,13 +3,34 @@
   "version": "2.1.0",
   "description": "Agentix CLI - AI coding agent with Hermes frontend",
   "type": "module",
+  "license": "MIT",
   "bin": {
     "agentix": "./bin/agentix.js"
   },
+  "keywords": [
+    "agentix",
+    "hermes",
+    "cli",
+    "agent",
+    "ai",
+    "coding"
+  ],
+  "files": [
+    "bin",
+    "dist",
+    "hermes-agent",
+    "hermes-agent-upstream",
+    "README.md",
+    "LICENSE",
+    "docs"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
-    "test:unit": "vitest run",
-    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test": "vitest run tests/unit",
     "dev": "tsc --watch"
   },
   "dependencies": {

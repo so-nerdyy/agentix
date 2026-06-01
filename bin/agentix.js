@@ -1,62 +1,142 @@
 #!/usr/bin/env node
-// bin/agentix.js - Smart routing launcher for Agentix.
-// Routes user-facing Hermes commands to Python CLI, backend commands to Node.js.
 
-import { spawn } from "child_process";
+import { existsSync, mkdirSync } from "fs";
+import { spawn, spawnSync } from "child_process";
 import { createRequire } from "module";
 import { fileURLToPath } from "url";
-import { dirname, resolve } from "path";
+import { dirname, join, resolve } from "path";
+import os from "os";
 import http from "http";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PROJECT_ROOT = resolve(__dirname, "..");
 const require = createRequire(import.meta.url);
+const pkg = require("../package.json");
 
-// ---------------------------------------------------------------------------
-// Backend commands owned by Agentix Node.js (not Hermes)
-// ---------------------------------------------------------------------------
 const BACKEND_COMMANDS = new Set([
-  "server", "support", "mods", "plugin", "extension",
-  "broadcast", "eval", "shell",
+  "server",
+  "support",
+  "mods",
+  "plugin",
+  "extension",
+  "broadcast",
+  "eval",
+  "shell",
+  "version",
 ]);
 
-// ---------------------------------------------------------------------------
-// Hermes UX commands routed to Python hermes_cli.main
-// ---------------------------------------------------------------------------
 const HERMES_COMMANDS = new Set([
-  "setup", "model", "update", "doctor", "usage",
-  "cron", "gateway", "sessions", "skills", "tools",
-  "memory", "logs", "auth", "config", "plugins",
+  "setup",
+  "model",
+  "update",
+  "doctor",
+  "usage",
+  "cron",
+  "gateway",
+  "sessions",
+  "skills",
+  "tools",
+  "memory",
+  "logs",
+  "auth",
+  "config",
+  "plugins",
   "fortune",
+  "dashboard",
+  "web",
 ]);
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+function resolveHermesRoot() {
+  const candidates = [
+    resolve(PROJECT_ROOT, "hermes-agent", "hermes-agent-upstream"),
+    resolve(PROJECT_ROOT, "hermes-agent-upstream"),
+    resolve(PROJECT_ROOT, "hermes-agent"),
+  ];
+
+  for (const candidate of candidates) {
+    if (existsSync(join(candidate, "pyproject.toml"))) {
+      return candidate;
+    }
+  }
+
+  return candidates[candidates.length - 1];
+}
+
+const HERMES_ROOT = resolveHermesRoot();
+const VENV_ROOT = resolve(os.homedir(), ".agentix", "hermes-python");
+
 function bridgeUrl() {
-  return process.env.AGENTIX_BRIDGE_URL || process.env.HERMES_BRIDGE_URL || "http://127.0.0.1:3456";
+  return (
+    process.env.AGENTIX_BRIDGE_URL ||
+    process.env.HERMES_BRIDGE_URL ||
+    "http://127.0.0.1:3456"
+  );
 }
 
 function healthCheck(timeoutMs = 2000) {
-  return new Promise<boolean>((resolve) => {
+  return new Promise((resolveHealth) => {
     const req = http.get(`${bridgeUrl()}/health`, { timeout: timeoutMs }, (res) => {
-      resolve(res.statusCode === 200);
+      resolveHealth(res.statusCode === 200);
     });
-    req.on("error", () => resolve(false));
-    req.on("timeout", () => { req.destroy(); resolve(false); });
+    req.on("error", () => resolveHealth(false));
+    req.on("timeout", () => {
+      req.destroy();
+      resolveHealth(false);
+    });
   });
 }
 
-/**
- * Ensure the Node.js bridge server is running.
- * If the bridge is not responding, spawn it as a detached background process.
- */
-async function ensureBridgeRunning() {
-  const alive = await healthCheck();
-  if (alive) return;
+function venvPython() {
+  return process.platform === "win32"
+    ? resolve(VENV_ROOT, "Scripts", "python.exe")
+    : resolve(VENV_ROOT, "bin", "python");
+}
 
-  console.error("[agentix] Bridge not running, starting it...");
+function ensureVenv() {
+  if (existsSync(venvPython())) {
+    return venvPython();
+  }
+
+  mkdirSync(VENV_ROOT, { recursive: true });
+  const created = spawnSync("python", ["-m", "venv", VENV_ROOT], {
+    cwd: PROJECT_ROOT,
+    stdio: "inherit",
+  });
+  if (created.status !== 0) {
+    throw new Error("failed to create Hermes Python virtual environment");
+  }
+  return venvPython();
+}
+
+function ensureHermesInstalled(pythonExe) {
+  const check = spawnSync(pythonExe, ["-c", "import hermes_cli.main"], {
+    cwd: HERMES_ROOT,
+    env: {
+      ...process.env,
+      PYTHONPATH: HERMES_ROOT,
+    },
+    stdio: "ignore",
+  });
+
+  if (check.status === 0) {
+    return;
+  }
+
+  const installed = spawnSync(pythonExe, ["-m", "pip", "install", "-e", HERMES_ROOT], {
+    cwd: HERMES_ROOT,
+    stdio: "inherit",
+  });
+  if (installed.status !== 0) {
+    throw new Error("failed to install Hermes frontend dependencies");
+  }
+}
+
+async function ensureBridgeRunning() {
+  if (await healthCheck()) {
+    return;
+  }
+
   const child = spawn("node", [resolve(PROJECT_ROOT, "dist", "bridge", "entry.js")], {
     detached: true,
     stdio: "ignore",
@@ -64,27 +144,22 @@ async function ensureBridgeRunning() {
   });
   child.unref();
 
-  // Give the bridge time to bind
-  await new Promise((r) => setTimeout(r, 900));
-
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, 1200));
   if (!(await healthCheck(3000))) {
-    console.error("[agentix] WARNING: Bridge failed to start. Commands may not work.");
+    throw new Error("Agentix bridge failed to start");
   }
 }
 
-/**
- * Spawn a Python subcommand using hermes_cli.main as the entrypoint.
- * Runs with stdio: inherit so the user interacts with the wizard directly.
- */
 async function spawnHermes(args) {
-  const pythonCmd = "python";
-  const cliMain = resolve(PROJECT_ROOT, "hermes-agent", "hermes_cli", "main.py");
+  const pythonExe = ensureVenv();
+  ensureHermesInstalled(pythonExe);
 
-  const child = spawn(pythonCmd, [cliMain, ...args], {
-    cwd: PROJECT_ROOT,
+  const child = spawn(pythonExe, ["-m", "hermes_cli.main", ...args], {
+    cwd: HERMES_ROOT,
     stdio: "inherit",
     env: {
       ...process.env,
+      PYTHONPATH: HERMES_ROOT,
       HERMES_BRIDGE_URL: bridgeUrl(),
       AGENTIX_BRIDGE_URL: bridgeUrl(),
       AGENTIX_FRONTEND: "hermes",
@@ -92,94 +167,94 @@ async function spawnHermes(args) {
     },
   });
 
-  await new Promise<void>((resolve) => {
+  await new Promise((resolveExit) => {
     child.on("close", (code) => {
-      if (code === 0) resolve();
-      else process.exit(code ?? 1);
+      if (code === 0) {
+        resolveExit();
+        return;
+      }
+      process.exit(code ?? 1);
     });
   });
 }
 
-// ---------------------------------------------------------------------------
-// Main routing logic
-// ---------------------------------------------------------------------------
-async function main() {
-  const [cmd, ...args] = process.argv.slice(2);
+async function spawnNodeCli(args) {
+  const child = spawn(process.execPath, [resolve(PROJECT_ROOT, "dist", "cli.js"), ...args], {
+    cwd: PROJECT_ROOT,
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      AGENTIX_BRIDGE_URL: bridgeUrl(),
+      HERMES_BRIDGE_URL: bridgeUrl(),
+    },
+  });
 
-  // No args + interactive TTY → launch TypeScript HermesShell with bridge
-  if (!cmd && process.stdin.isTTY) {
+  await new Promise((resolveExit) => {
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolveExit();
+        return;
+      }
+      process.exit(code ?? 1);
+    });
+  });
+}
+
+async function main() {
+  const argv = process.argv.slice(2);
+  const [cmd, ...args] = argv;
+
+  if (argv.includes("--agentix-cli")) {
+    await spawnNodeCli(argv.filter((arg) => arg !== "--agentix-cli"));
+    return;
+  }
+
+  if (argv.includes("--node-shell")) {
     await ensureBridgeRunning();
-    const shellEntry = resolve(PROJECT_ROOT, "dist", "shell", "entry.js");
-    const child = spawn(process.execPath, [shellEntry], {
+    const child = spawn(process.execPath, [resolve(PROJECT_ROOT, "dist", "shell", "entry.js")], {
       cwd: PROJECT_ROOT,
       stdio: "inherit",
       env: {
         ...process.env,
-        HERMES_BRIDGE_URL: bridgeUrl(),
         AGENTIX_BRIDGE_URL: bridgeUrl(),
+        HERMES_BRIDGE_URL: bridgeUrl(),
       },
     });
-    await new Promise<void>((resolve) => child.on("close", resolve));
+    await new Promise((resolveExit) => child.on("close", resolveExit));
     return;
   }
 
-  // Version flag
+  if (!cmd && process.stdin.isTTY) {
+    await ensureBridgeRunning();
+    await spawnHermes([]);
+    return;
+  }
+
   if (cmd === "version" || cmd === "--version" || cmd === "-V") {
-    console.log("Agentix 2.1.0");
+    await spawnNodeCli(["version"]);
     return;
   }
 
-  // Help flag
   if (cmd === "help" || cmd === "--help" || cmd === "-h") {
     if (args[0] && HERMES_COMMANDS.has(args[0])) {
-      await spawnHermes(["--help", args[0]]);
-    } else {
-      console.log(`Agentix 2.1.0
-
-Usage: agentix [command] [options]
-
-Commands:
-  setup          First-run setup wizard (Python)
-  model          Configure model provider (Python)
-  update         Check for updates (Python)
-  doctor         Run system diagnostics (Python)
-  usage          Show API usage stats (Python)
-  cron           Manage scheduled tasks (Python)
-  gateway        Manage API gateway (Python)
-  sessions       Manage sessions (Python)
-  skills         Manage skills (Python)
-  tools          Manage tools (Python)
-  memory [q]     Search conversation memory (Python)
-  logs [q]       Search logs (Python)
-  server         Start backend server (Node.js)
-  support        Get support info (Node.js)
-  mods           Manage mods (Node.js)
-
-No command + TTY: starts interactive shell (Node.js + Python bridge)
-
-See 'agentix help <command>' for subcommand-specific help.
-`);
-    }
-    return;
-  }
-
-  // Backend commands stay on Node.js
-  if (cmd && BACKEND_COMMANDS.has(cmd)) {
-    await ensureBridgeRunning();
-    if (cmd === "server") {
-      const { startBridge } = await import(resolve(PROJECT_ROOT, "dist", "bridge", "server.js"));
-      await startBridge();
+      await spawnHermes([args[0], "--help"]);
       return;
     }
-    console.log(`Backend command '${cmd}' routed to Agentix backend.`);
+    await spawnHermes(["--help"]);
     return;
   }
 
-  // Default: route to Hermes Python CLI
-  await spawnHermes([cmd, ...args].filter(Boolean));
+  if (cmd && BACKEND_COMMANDS.has(cmd)) {
+    await spawnNodeCli([cmd, ...args]);
+    return;
+  }
+
+  await ensureBridgeRunning();
+  await spawnHermes(argv.filter(Boolean));
 }
 
 main().catch((err) => {
-  console.error(`agentix: ${err.message}`);
+  const message = err instanceof Error ? err.message : String(err);
+  console.error(`agentix ${pkg.version}: ${message}`);
   process.exit(1);
 });

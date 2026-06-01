@@ -9,3 +9,8 @@ coverage/
 tmp/
 temp/
 sandboxes/
+data/
+.agentix/
+*.pyc
+__pycache__/
+nul
