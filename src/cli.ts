@@ -2,6 +2,7 @@ import { createRequire } from "module";
 import { startBridge } from "./bridge/server.js";
 import { PATHS, ensureDataDirs } from "./config/paths.js";
 import { startInboxServer } from "./config/InboxServer.js";
+import { getBackendRuntime } from "./runtime/backend.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json");
@@ -51,9 +52,10 @@ async function main() {
       console.log(`Inbox entry: ${PATHS.inboxEntry}`);
       return;
     case "mods":
-      console.log(
-        "Mod management is not restored yet; the Hermes frontend is wired back in.",
-      );
+      ensureDataDirs();
+      for (const tool of getBackendRuntime().listTools()) {
+        console.log(`${tool.name}: ${tool.description}`);
+      }
       return;
     default:
       console.log(

@@ -44,6 +44,20 @@ export class TaskQueue {
     bucket.push(task.id);
   }
 
+  hydrate(tasks: Task[]): void {
+    for (const task of tasks) {
+      this.byId.set(task.id, task);
+      if (task.status === "queued") {
+        const bucket = this.bucket(task.priority, task.sessionId);
+        if (!bucket.includes(task.id)) bucket.push(task.id);
+      }
+    }
+  }
+
+  upsert(task: Task): void {
+    this.byId.set(task.id, task);
+  }
+
   nextForSession(sessionId: string): Task | undefined {
     const user = this.pendingUser.get(sessionId);
     const bg = this.pendingBg.get(sessionId);

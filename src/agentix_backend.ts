@@ -100,6 +100,10 @@ export class AgentixBackend {
     return this.get(`/memory/search?q=${encodeURIComponent(query)}`);
   }
 
+  async consolidateMemory(sessionId?: string): Promise<Record<string, unknown>> {
+    return this.post("/memory/consolidate", { sessionId });
+  }
+
   async listTools(): Promise<Array<{ name: string; description: string }>> {
     return this.get("/tools");
   }
@@ -119,5 +123,38 @@ export class AgentixBackend {
 
   async reject(taskId: string, reason?: string): Promise<Record<string, unknown>> {
     return this.post(`/approvals/${encodeURIComponent(taskId)}/reject`, { reason });
+  }
+
+  async listAudit(): Promise<Array<Record<string, unknown>>> {
+    return this.get("/audit");
+  }
+
+  async healingStats(): Promise<Record<string, unknown>> {
+    return this.get("/healing/stats");
+  }
+
+  async promoteHealingProcedure(id: string): Promise<Record<string, unknown>> {
+    return this.post(`/healing/procedures/${encodeURIComponent(id)}/promote`);
+  }
+
+  async deprecateHealingProcedure(id: string): Promise<Record<string, unknown>> {
+    return this.post(`/healing/procedures/${encodeURIComponent(id)}/deprecate`);
+  }
+
+  async listScheduledJobs(): Promise<Array<Record<string, unknown>>> {
+    return this.get("/scheduler/jobs");
+  }
+
+  async createScheduledJob(input: {
+    name: string;
+    stimulus: string;
+    intervalMs: number;
+    enabled?: boolean;
+  }): Promise<Record<string, unknown>> {
+    return this.post("/scheduler/jobs", input);
+  }
+
+  async runScheduledJob(id: string): Promise<Record<string, unknown>> {
+    return this.post(`/scheduler/jobs/${encodeURIComponent(id)}/run`);
   }
 }

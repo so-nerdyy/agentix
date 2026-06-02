@@ -5,6 +5,7 @@ export interface PlanStep {
   kind: TaskKind;
   priority: TaskPriority;
   payload: Record<string, unknown>;
+  dependsOn: string[];
   requiresApproval: boolean;
   maxAttempts: number;
 }
@@ -25,6 +26,7 @@ export interface StepValidation {
 
 export interface SymphonyResult {
   ok: boolean;
+  status: "complete" | "awaiting-approval" | "failed";
   plan: SymphonyPlan;
   outputs: Array<{
     stepId: string;
@@ -32,6 +34,7 @@ export interface SymphonyResult {
     ok: boolean;
     output?: unknown;
     error?: string;
+    attempts: number;
   }>;
   validations: StepValidation[];
   response: string;

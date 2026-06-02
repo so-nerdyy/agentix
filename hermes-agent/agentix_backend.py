@@ -160,6 +160,9 @@ class AgentixBackend:
 
         return self._get(f"/memory/search?q={quote(query)}")
 
+    def consolidate_memory(self, session_id: Optional[str] = None) -> Any:
+        return self._post("/memory/consolidate", {"sessionId": session_id})
+
     def list_tools(self) -> Any:
         return self._get("/tools")
 
@@ -177,3 +180,38 @@ class AgentixBackend:
 
     def reject(self, task_id: str, reason: Optional[str] = None) -> Any:
         return self._post(f"/approvals/{task_id}/reject", {"reason": reason})
+
+    def list_audit(self) -> Any:
+        return self._get("/audit")
+
+    def healing_stats(self) -> Any:
+        return self._get("/healing/stats")
+
+    def promote_healing_procedure(self, procedure_id: str) -> Any:
+        return self._post(f"/healing/procedures/{procedure_id}/promote", {})
+
+    def deprecate_healing_procedure(self, procedure_id: str) -> Any:
+        return self._post(f"/healing/procedures/{procedure_id}/deprecate", {})
+
+    def list_scheduled_jobs(self) -> Any:
+        return self._get("/scheduler/jobs")
+
+    def create_scheduled_job(
+        self,
+        name: str,
+        stimulus: str,
+        interval_ms: int,
+        enabled: bool = True,
+    ) -> Any:
+        return self._post(
+            "/scheduler/jobs",
+            {
+                "name": name,
+                "stimulus": stimulus,
+                "intervalMs": interval_ms,
+                "enabled": enabled,
+            },
+        )
+
+    def run_scheduled_job(self, job_id: str) -> Any:
+        return self._post(f"/scheduler/jobs/{job_id}/run", {})

@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ConversationAgent } from "../../src/pi/ConversationAgent.js";
+import { AuditLog } from "../../src/audit/AuditLog.js";
 import { HealingEngine } from "../../src/healing/HealingEngine.js";
 import { MemoryStore } from "../../src/memory/MemoryStore.js";
 import { ApprovalWorkflow } from "../../src/powerhouse/ApprovalWorkflow.js";
@@ -11,6 +12,9 @@ import { Powerhouse } from "../../src/powerhouse/Powerhouse.js";
 import { SessionCoordinator } from "../../src/powerhouse/SessionCoordinator.js";
 import { TaskQueue } from "../../src/powerhouse/TaskQueue.js";
 import { LocalAgentixRuntime } from "../../src/runtime/LocalAgentixRuntime.js";
+import { TaskStore } from "../../src/powerhouse/TaskStore.js";
+import { SchedulerService } from "../../src/scheduler/SchedulerService.js";
+import { ScheduledJobStore } from "../../src/scheduler/ScheduledJobStore.js";
 
 const tempDirs: string[] = [];
 
@@ -31,7 +35,9 @@ function makePowerhouse(): Powerhouse {
     approvals: new ApprovalWorkflow({ timeoutMs: 10_000 }),
     agents: registry,
     memory: new MemoryStore(join(dir, "memory.jsonl")),
-    healing: new HealingEngine(),
+    healing: new HealingEngine(join(dir, "healing.json")),
+    taskStore: new TaskStore(join(dir, "tasks.json")),
+    audit: new AuditLog(join(dir, "audit.jsonl")),
   });
 }
 
@@ -90,5 +96,105 @@ describe("Powerhouse restored runtime", () => {
     expect(runtime.listApprovals()).toHaveLength(0);
 
     runtime.shutdown();
+  });
+
+  it("runs explicit multi-step plans with dependencies", async () => {
+    const powerhouse = makePowerhouse();
+    const plan = {
+      steps: [
+        {
+          id: "say",
+          kind: "user-message",
+          payload: { stimulus: "first" },
+        },
+        {
+          id: "follow",
+          kind: "user-message",
+          dependsOn: ["say"],
+          payload: { stimulus: "second" },
+        },
+      ],
+    };
+
+    const result = await powerhouse.executeStimulus({
+      stimulus: `plan: ${JSON.stringify(plan)}`,
+    });
+
+    expect(result.status).toBe("complete");
+    expect(result.taskIds).toHaveLength(2);
+    expect(powerhouse.listTasks().map((task) => task.stepId)).toEqual(["say", "follow"]);
+
+    powerhouse.stop();
+  });
+
+  it("persists tasks for recovery and API listing", async () => {
+    const dir = tempDir("agentix-persist-");
+    const taskStore = new TaskStore(join(dir, "tasks.json"));
+    const powerhouse = new Powerhouse({
+      sessions: new SessionCoordinator(join(dir, "sessions")),
+      queue: new TaskQueue(),
+      approvals: new ApprovalWorkflow({ timeoutMs: 10_000 }),
+      memory: new MemoryStore(join(dir, "memory.jsonl")),
+      healing: new HealingEngine(join(dir, "healing.json")),
+      taskStore,
+      audit: new AuditLog(join(dir, "audit.jsonl")),
+    });
+
+    await powerhouse.executeStimulus({ stimulus: "persist me" });
+    expect(taskStore.list()).toHaveLength(1);
+    expect(new TaskStore(join(dir, "tasks.json")).list()[0]?.status).toBe("complete");
+
+    powerhouse.stop();
+  });
+
+  it("creates healing procedure candidates after repeated failures", async () => {
+    const powerhouse = makePowerhouse();
+
+    await powerhouse.executeStimulus({ stimulus: "sandbox: process.exit(1)" });
+    await powerhouse.executeStimulus({ stimulus: "sandbox: process.exit(1)" });
+
+    const procedures = powerhouse.healing.listProcedures();
+    expect(procedures.some((procedure) => procedure.status === "candidate")).toBe(true);
+
+    const promoted = powerhouse.healing.promoteProcedure(procedures[0]!.id);
+    expect(promoted?.status).toBe("promoted");
+
+    powerhouse.stop();
+  });
+
+  it("consolidates memory into a system record", async () => {
+    const powerhouse = makePowerhouse();
+    const result = await powerhouse.executeStimulus({ stimulus: "remember this" });
+
+    const record = powerhouse.memory.consolidate(result.sessionId);
+
+    expect(record.role).toBe("system");
+    expect(record.tags).toContain("consolidated");
+    expect(record.content).toContain("Consolidated");
+
+    powerhouse.stop();
+  });
+
+  it("runs scheduled jobs through Powerhouse", async () => {
+    const powerhouse = makePowerhouse();
+    const dir = tempDir("agentix-scheduler-");
+    const scheduler = new SchedulerService(
+      powerhouse,
+      new ScheduledJobStore(join(dir, "jobs.json")),
+      new AuditLog(join(dir, "audit.jsonl")),
+    );
+    const job = scheduler.create({
+      name: "smoke",
+      stimulus: "scheduled hello",
+      intervalMs: 60_000,
+    });
+
+    const result = await scheduler.runNow(job.id);
+
+    expect(result.ok).toBe(true);
+    expect(powerhouse.memory.search("scheduled")).not.toHaveLength(0);
+
+    scheduler.stop();
+    powerhouse.stop();
   });
 });

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { AuditLog } from "../audit/AuditLog.js";
 import { EventBus } from "../config/EventBus.js";
 import { PATHS } from "../config/paths.js";
 import { BashAgent } from "../pi/BashAgent.js";
@@ -13,6 +14,7 @@ import { ApprovalWorkflow } from "./ApprovalWorkflow.js";
 import { PIAgentRegistry } from "./PIAgentRegistry.js";
 import { SessionCoordinator } from "./SessionCoordinator.js";
 import { TaskQueue } from "./TaskQueue.js";
+import { TaskStore } from "./TaskStore.js";
 import type { Session, Task, TaskResult } from "./types.js";
 
 export interface ExecuteStimulusOptions {
@@ -36,6 +38,8 @@ export class Powerhouse {
   readonly memory: MemoryStore;
   readonly healing: HealingEngine;
   readonly symphony: SymphonyEngine;
+  readonly taskStore: TaskStore;
+  readonly audit: AuditLog;
   private started = false;
 
   constructor(opts: {
@@ -46,6 +50,8 @@ export class Powerhouse {
     memory?: MemoryStore;
     healing?: HealingEngine;
     symphony?: SymphonyEngine;
+    taskStore?: TaskStore;
+    audit?: AuditLog;
   } = {}) {
     this.sessions = opts.sessions ?? new SessionCoordinator();
     this.queue = opts.queue ?? new TaskQueue();
@@ -54,15 +60,36 @@ export class Powerhouse {
     this.memory = opts.memory ?? new MemoryStore();
     this.healing = opts.healing ?? new HealingEngine();
     this.symphony = opts.symphony ?? new SymphonyEngine();
+    this.taskStore = opts.taskStore ?? new TaskStore();
+    this.audit = opts.audit ?? new AuditLog();
   }
 
   start(): void {
     if (this.started) return;
     EventBus.emit("powerhouse:starting", {});
     this.sessions.recover();
+    const recoveredTasks = this.taskStore.recoverOpen().map((task) => {
+      if (task.status === "running") {
+        task.status = "queued";
+        task.startedAt = undefined;
+        this.taskStore.upsert(task);
+      }
+      return task;
+    });
+    this.queue.hydrate(recoveredTasks);
     this.registerDefaultAgents();
+    for (const task of recoveredTasks) {
+      if (task.status === "awaiting-approval") {
+        this.approvals.request(task);
+      }
+    }
     this.agents.startHealthMonitor();
     this.started = true;
+    this.audit.record({
+      type: "powerhouse.started",
+      actor: "system",
+      data: { recoveredTasks: recoveredTasks.length },
+    });
     EventBus.emit("powerhouse:started", {});
   }
 
@@ -72,6 +99,7 @@ export class Powerhouse {
     this.approvals.shutdown();
     this.agents.shutdown();
     this.started = false;
+    this.audit.record({ type: "powerhouse.stopped", actor: "system", data: {} });
     EventBus.emit("powerhouse:stopped", {});
   }
 
@@ -93,7 +121,7 @@ export class Powerhouse {
   }
 
   listTasks(sessionId?: string): Task[] {
-    return this.queue.list(sessionId);
+    return this.taskStore.list(sessionId);
   }
 
   listApprovals(): Task[] {
@@ -107,6 +135,13 @@ export class Powerhouse {
       return { ok: false, error: `task is not awaiting approval: ${taskId}` };
     }
     this.queue.transition(task, "running");
+    this.taskStore.upsert(task);
+    this.audit.record({
+      type: "approval.approved",
+      actor: "user",
+      subjectId: task.id,
+      data: { sessionId: task.sessionId, kind: task.kind },
+    });
     EventBus.emit("task:running", { taskId: task.id, sessionId: task.sessionId });
     return this.runTask(task);
   }
@@ -117,7 +152,15 @@ export class Powerhouse {
     const rejected = this.approvals.reject(taskId, reason);
     if (rejected && task.status === "awaiting-approval") {
       this.queue.transition(task, "rejected");
+      task.error = reason ?? "rejected";
+      this.taskStore.upsert(task);
       this.sessions.removePendingTask(task.sessionId, task.id);
+      this.audit.record({
+        type: "approval.rejected",
+        actor: "user",
+        subjectId: task.id,
+        data: { sessionId: task.sessionId, reason: reason ?? null },
+      });
     }
     return rejected;
   }
@@ -142,14 +185,7 @@ export class Powerhouse {
       },
     });
 
-    const status = result.ok
-      ? "complete"
-      : result.outputs.some((output) => {
-          const task = this.queue.get(output.taskId);
-          return task?.status === "awaiting-approval";
-        })
-        ? "awaiting-approval"
-        : "failed";
+    const status = result.status;
 
     const response = status === "awaiting-approval"
       ? this.approvalResponse(taskIds)
@@ -167,12 +203,20 @@ export class Powerhouse {
       taskId: taskIds[taskIds.length - 1],
     });
 
+    this.audit.record({
+      type: "stimulus.executed",
+      actor: "user",
+      subjectId: session.id,
+      data: { status, taskIds, planId: result.plan.id },
+    });
+
     return { response, sessionId: session.id, taskIds, status };
   }
 
   private async executeStep(sessionId: string, step: PlanStep): Promise<{ task: Task; result: TaskResult }> {
     const task = this.createTask(sessionId, step);
     this.queue.enqueue(task);
+    this.taskStore.upsert(task);
     this.sessions.addPendingTask(sessionId, task.id);
     EventBus.emit("task:queued", { taskId: task.id, sessionId, kind: task.kind });
 
@@ -182,10 +226,18 @@ export class Powerhouse {
     }
 
     EventBus.emit("task:running", { taskId: running.id, sessionId });
+    this.taskStore.upsert(running);
 
     if (running.requiresApproval) {
       this.queue.transition(running, "awaiting-approval");
+      this.taskStore.upsert(running);
       this.approvals.request(running);
+      this.audit.record({
+        type: "approval.requested",
+        actor: "system",
+        subjectId: running.id,
+        data: { sessionId, kind: running.kind, payload: running.payload },
+      });
       return {
         task: running,
         result: {
@@ -213,7 +265,14 @@ export class Powerhouse {
 
     if (result.ok) {
       this.queue.transition(task, "complete");
+      this.taskStore.upsert(task);
       this.sessions.removePendingTask(task.sessionId, task.id);
+      this.audit.record({
+        type: "task.completed",
+        actor: "system",
+        subjectId: task.id,
+        data: { sessionId: task.sessionId, kind: task.kind },
+      });
       EventBus.emit("task:complete", {
         taskId: task.id,
         sessionId: task.sessionId,
@@ -231,8 +290,15 @@ export class Powerhouse {
       this.queue.transition(task, "failed");
     }
     task.error = error;
+    this.taskStore.upsert(task);
     this.sessions.removePendingTask(task.sessionId, task.id);
     this.healing.observeFailure(task.id, task.sessionId, error);
+    this.audit.record({
+      type: "task.failed",
+      actor: "system",
+      subjectId: task.id,
+      data: { sessionId: task.sessionId, kind: task.kind, error },
+    });
   }
 
   private ensureSession(sessionId?: string): Session {
@@ -248,6 +314,9 @@ export class Powerhouse {
     return {
       id: `task-${randomUUID().slice(0, 8)}`,
       sessionId,
+      planId: undefined,
+      stepId: step.id,
+      dependsOn: step.dependsOn,
       kind: step.kind,
       priority: step.priority,
       status: "queued",

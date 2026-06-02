@@ -19,6 +19,9 @@ export type TaskPriority = "user" | "background";
 export interface Task {
   id: string;
   sessionId: string;
+  planId?: string;
+  stepId?: string;
+  dependsOn?: string[];
   kind: TaskKind;
   priority: TaskPriority;
   status: TaskStatus;
@@ -31,6 +34,8 @@ export interface Task {
   attempts: number;
   maxAttempts: number;
   requiresApproval: boolean;
+  approvalId?: string;
+  validation?: unknown;
 }
 
 export type SessionStatus = "pending" | "active" | "complete" | "failed";

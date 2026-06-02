@@ -1,7 +1,13 @@
 import { Powerhouse } from "../powerhouse/Powerhouse.js";
+import { SchedulerService } from "../scheduler/SchedulerService.js";
 
 export class LocalAgentixRuntime {
   private readonly powerhouse = new Powerhouse();
+  private readonly scheduler = new SchedulerService(this.powerhouse);
+
+  constructor() {
+    this.scheduler.start();
+  }
 
   listSessions(): Array<{ id: string; createdAt: string }> {
     this.powerhouse.start();
@@ -25,6 +31,10 @@ export class LocalAgentixRuntime {
 
   memorySearch(query: string): Array<{ content: string; score: number }> {
     return this.powerhouse.memory.search(query);
+  }
+
+  consolidateMemory(sessionId?: string): Record<string, unknown> {
+    return { ...this.powerhouse.memory.consolidate(sessionId) };
   }
 
   listTools(): Array<{ name: string; description: string }> {
@@ -59,6 +69,53 @@ export class LocalAgentixRuntime {
     }));
   }
 
+  listAudit(): Array<Record<string, unknown>> {
+    return this.powerhouse.audit.list().map((entry) => ({ ...entry }));
+  }
+
+  healingStats(): Record<string, unknown> {
+    return {
+      failures: this.powerhouse.healing.list(),
+      procedures: this.powerhouse.healing.listProcedures(),
+    };
+  }
+
+  promoteHealingProcedure(id: string): Record<string, unknown> {
+    const procedure = this.powerhouse.healing.promoteProcedure(id);
+    return { ok: Boolean(procedure), procedure };
+  }
+
+  deprecateHealingProcedure(id: string): Record<string, unknown> {
+    const procedure = this.powerhouse.healing.deprecateProcedure(id);
+    return { ok: Boolean(procedure), procedure };
+  }
+
+  listJobs(): Array<Record<string, unknown>> {
+    return this.scheduler.list().map((job) => ({ ...job }));
+  }
+
+  createJob(input: {
+    name: string;
+    stimulus: string;
+    intervalMs: number;
+    enabled?: boolean;
+  }): Record<string, unknown> {
+    return this.scheduler.create(input) as unknown as Record<string, unknown>;
+  }
+
+  setJobEnabled(id: string, enabled: boolean): Record<string, unknown> {
+    const job = this.scheduler.setEnabled(id, enabled);
+    return { ok: Boolean(job), job };
+  }
+
+  removeJob(id: string): Record<string, unknown> {
+    return { ok: this.scheduler.remove(id) };
+  }
+
+  async runJob(id: string): Promise<Record<string, unknown>> {
+    return this.scheduler.runNow(id) as unknown as Record<string, unknown>;
+  }
+
   async approve(taskId: string): Promise<Record<string, unknown>> {
     const result = await this.powerhouse.approve(taskId);
     return {
@@ -89,6 +146,7 @@ export class LocalAgentixRuntime {
   }
 
   shutdown(): void {
+    this.scheduler.stop();
     this.powerhouse.stop();
   }
 }

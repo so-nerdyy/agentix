@@ -21,6 +21,7 @@ import {
 } from "./EventStreamBridge.js";
 import { EventBus } from "./EventBus.js";
 import { ensureDataDirs, PATHS } from "./paths.js";
+import { getBackendRuntime } from "../runtime/backend.js";
 
 const VERSION = "2.1.0";
 
@@ -36,6 +37,7 @@ export async function startInboxServer(): Promise<{
   const host = "127.0.0.1";
 
   const server = Fastify({ logger: false });
+  const runtime = getBackendRuntime();
 
   await server.register(cors, {
     origin: false,
@@ -51,9 +53,75 @@ export async function startInboxServer(): Promise<{
     sseClients: subscriberCount(),
   }));
 
-  server.get("/healing/stats", async () => {
-    // Phase 3 will fill this in. Return a placeholder so clients don't 404.
-    return { ready: false };
+  server.post("/execute", async (request) => {
+    const body = request.body as Record<string, unknown>;
+    return runtime.execute({
+      stimulus: String(body.stimulus ?? body.text ?? ""),
+      sessionId: body.sessionId as string | undefined,
+    });
+  });
+  server.get("/sessions", async () => runtime.listSessions());
+  server.post("/sessions", async (request) => {
+    const body = request.body as Record<string, unknown>;
+    return runtime.createSession({ model: body.model as string | undefined });
+  });
+  server.get("/tasks", async (request) => {
+    const query = request.query as Record<string, string | undefined>;
+    return runtime.listTasks(query.sessionId);
+  });
+  server.get("/approvals", async () => runtime.listApprovals());
+  server.post("/approvals/:id/approve", async (request) => {
+    const { id } = request.params as { id: string };
+    return runtime.approve(id);
+  });
+  server.post("/approvals/:id/reject", async (request) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as Record<string, unknown> | undefined;
+    return runtime.reject(id, body?.reason as string | undefined);
+  });
+  server.get("/memory/search", async (request) => {
+    const q = (request.query as Record<string, string>).q || "";
+    return runtime.memorySearch(q);
+  });
+  server.post("/memory/consolidate", async (request) => {
+    const body = request.body as Record<string, unknown> | undefined;
+    return runtime.consolidateMemory(body?.sessionId as string | undefined);
+  });
+  server.get("/audit", async () => runtime.listAudit());
+  server.get("/healing/stats", async () => runtime.healingStats());
+  server.post("/healing/procedures/:id/promote", async (request) => {
+    const { id } = request.params as { id: string };
+    return runtime.promoteHealingProcedure(id);
+  });
+  server.post("/healing/procedures/:id/deprecate", async (request) => {
+    const { id } = request.params as { id: string };
+    return runtime.deprecateHealingProcedure(id);
+  });
+  server.get("/scheduler/jobs", async () => runtime.listJobs());
+  server.post("/scheduler/jobs", async (request) => {
+    const body = request.body as Record<string, unknown>;
+    return runtime.createJob({
+      name: String(body.name ?? "scheduled task"),
+      stimulus: String(body.stimulus ?? ""),
+      intervalMs: Number(body.intervalMs ?? 60_000),
+      enabled: body.enabled === undefined ? true : Boolean(body.enabled),
+    });
+  });
+  server.post("/scheduler/jobs/:id/run", async (request) => {
+    const { id } = request.params as { id: string };
+    return runtime.runJob(id);
+  });
+  server.post("/scheduler/jobs/:id/enable", async (request) => {
+    const { id } = request.params as { id: string };
+    return runtime.setJobEnabled(id, true);
+  });
+  server.post("/scheduler/jobs/:id/disable", async (request) => {
+    const { id } = request.params as { id: string };
+    return runtime.setJobEnabled(id, false);
+  });
+  server.delete("/scheduler/jobs/:id", async (request) => {
+    const { id } = request.params as { id: string };
+    return runtime.removeJob(id);
   });
 
   registerEventStreamRoutes(server);

@@ -23,37 +23,117 @@ export class SymphonyEngine {
     const plan = this.planner.plan(stimulus);
     const outputs: SymphonyResult["outputs"] = [];
     const validations: SymphonyResult["validations"] = [];
+    const completed = new Set<string>();
+    const failed = new Set<string>();
+    const pending = new Map(plan.steps.map((step) => [step.id, step]));
 
-    for (const step of plan.steps) {
-      const { taskId, result } = await executor.executeStep(step);
-      const validation = this.validator.validate(step.id, result);
-      outputs.push({
-        stepId: step.id,
-        taskId,
-        ok: result.ok,
-        output: result.output,
-        error: result.error,
-      });
-      validations.push(validation);
+    while (pending.size > 0) {
+      const runnable = Array.from(pending.values()).filter((step) =>
+        step.dependsOn.every((dep) => completed.has(dep)),
+      );
 
-      if (!validation.ok) {
+      if (runnable.length === 0) {
+        const blocked = Array.from(pending.keys()).join(", ");
         return {
           ok: false,
+          status: "failed",
           plan,
           outputs,
           validations,
-          response: this.formatFailure(step.id, validation.error ?? result.error ?? "validation failed"),
-          error: validation.error ?? result.error,
+          response: `Agentix could not schedule remaining steps: ${blocked}`,
+          error: `unsatisfied dependencies for ${blocked}`,
         };
+      }
+
+      for (const step of runnable) {
+        const outcome = await this.executeWithRetries(step, executor);
+        outputs.push(outcome.output);
+        validations.push(...outcome.validations);
+        pending.delete(step.id);
+
+        if (outcome.awaitingApproval) {
+          return {
+            ok: false,
+            status: "awaiting-approval",
+            plan,
+            outputs,
+            validations,
+            response: `Approval required before Agentix can continue ${step.id}.`,
+            error: "approval_pending",
+          };
+        }
+
+        if (!outcome.output.ok) {
+          failed.add(step.id);
+          return {
+            ok: false,
+            status: "failed",
+            plan,
+            outputs,
+            validations,
+            response: this.formatFailure(step.id, outcome.output.error ?? "validation failed"),
+            error: outcome.output.error,
+          };
+        }
+
+        completed.add(step.id);
       }
     }
 
     return {
       ok: true,
+      status: "complete",
       plan,
       outputs,
       validations,
       response: this.formatSuccess(outputs),
+    };
+  }
+
+  private async executeWithRetries(
+    step: PlanStep,
+    executor: SymphonyExecutor,
+  ): Promise<{
+    output: SymphonyResult["outputs"][number];
+    validations: SymphonyResult["validations"];
+    awaitingApproval: boolean;
+  }> {
+    const validations: SymphonyResult["validations"] = [];
+    let lastOutput: SymphonyResult["outputs"][number] | null = null;
+    const maxAttempts = Math.max(1, step.maxAttempts);
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const { taskId, result } = await executor.executeStep(step);
+      const validation = this.validator.validate(step.id, result);
+      validations.push(validation);
+      lastOutput = {
+        stepId: step.id,
+        taskId,
+        ok: result.ok,
+        output: result.output,
+        error: validation.error ?? result.error,
+        attempts: attempt,
+      };
+
+      if (validation.error === "approval_pending") {
+        return { output: lastOutput, validations, awaitingApproval: true };
+      }
+
+      if (validation.ok) {
+        return { output: lastOutput, validations, awaitingApproval: false };
+      }
+    }
+
+    return {
+      output: lastOutput ?? {
+        stepId: step.id,
+        taskId: "",
+        ok: false,
+        error: "step did not execute",
+        attempts: 0,
+      },
+      validations,
+      awaitingApproval: false,
     };
   }
 

@@ -15,6 +15,19 @@ export class ResultValidator {
     }
     checks.push("result_present:pass");
 
+    if (
+      typeof result.output === "object" &&
+      result.output !== null &&
+      "awaitingApproval" in result.output
+    ) {
+      return {
+        stepId,
+        ok: false,
+        checks: [...checks, "approval_pending"],
+        error: "approval_pending",
+      };
+    }
+
     if (!result.ok) {
       return {
         stepId,

@@ -60,6 +60,24 @@ export class MemoryStore {
       : [...this.records];
   }
 
+  consolidate(sessionId?: string): MemoryRecord {
+    const records = this.list(sessionId);
+    const recent = records.slice(-20);
+    const summary = recent.length === 0
+      ? "No memory records available for consolidation."
+      : [
+          `Consolidated ${recent.length} memory records.`,
+          ...recent.map((record) => `${record.role}: ${record.content.slice(0, 180)}`),
+        ].join("\n");
+
+    return this.add({
+      sessionId: sessionId ?? "global",
+      role: "system",
+      content: summary,
+      tags: ["consolidated"],
+    });
+  }
+
   private ensureLoaded(): void {
     if (this.loaded) return;
     this.loaded = true;
