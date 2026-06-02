@@ -69,7 +69,27 @@ export async function startBridge() {
   });
 
   server.get("/tools", async () => runtime.listTools());
+  server.get("/tasks", async (request) => {
+    const query = request.query as Record<string, string | undefined>;
+    return runtime.listTasks(query.sessionId);
+  });
+  server.get("/approvals", async () => runtime.listApprovals());
+  server.post("/approvals/:id/approve", async (request) => {
+    const { id } = request.params as { id: string };
+    return runtime.approve(id);
+  });
+  server.post("/approvals/:id/reject", async (request) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as Record<string, unknown> | undefined;
+    return runtime.reject(id, body?.reason as string | undefined);
+  });
 
   await server.listen({ port: PORT, host: HOST });
   console.error(`Bridge listening on ${HOST}:${PORT}`);
+  return {
+    close: async () => {
+      runtime.shutdown();
+      await server.close();
+    },
+  };
 }

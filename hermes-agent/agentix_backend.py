@@ -38,7 +38,7 @@ def ensure_bridge_running() -> None:
         if _bridge_healthcheck():
             return
 
-        project_root = Path(__file__).resolve().parents[2]
+        project_root = Path(__file__).resolve().parents[1]
         bridge_entry = project_root / "dist" / "bridge" / "entry.js"
         if not bridge_entry.exists():
             raise RuntimeError(
@@ -88,6 +88,11 @@ class AgentixBackend:
         with urllib.request.urlopen(req, timeout=60) as resp:
             return json.loads(resp.read().decode("utf-8"))
 
+    def _get(self, path: str) -> Any:
+        req = urllib.request.Request(f"{_get_bridge_url()}{path}")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
     def execute(
         self,
         stimulus: str,
@@ -134,9 +139,7 @@ class AgentixBackend:
         return response
 
     def get_sessions(self) -> Any:
-        req = urllib.request.Request(f"{_get_bridge_url()}/sessions")
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        return self._get("/sessions")
 
     def create_session(self, model: Optional[str] = None) -> Any:
         body: Dict[str, Any] = {}
@@ -155,13 +158,22 @@ class AgentixBackend:
     def memory_search(self, query: str) -> Any:
         from urllib.parse import quote
 
-        req = urllib.request.Request(
-            f"{_get_bridge_url()}/memory/search?q={quote(query)}"
-        )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        return self._get(f"/memory/search?q={quote(query)}")
 
     def list_tools(self) -> Any:
-        req = urllib.request.Request(f"{_get_bridge_url()}/tools")
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        return self._get("/tools")
+
+    def list_tasks(self, session_id: Optional[str] = None) -> Any:
+        from urllib.parse import quote
+
+        suffix = f"?sessionId={quote(session_id)}" if session_id else ""
+        return self._get(f"/tasks{suffix}")
+
+    def list_approvals(self) -> Any:
+        return self._get("/approvals")
+
+    def approve(self, task_id: str) -> Any:
+        return self._post(f"/approvals/{task_id}/approve", {})
+
+    def reject(self, task_id: str, reason: Optional[str] = None) -> Any:
+        return self._post(f"/approvals/{task_id}/reject", {"reason": reason})

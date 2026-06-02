@@ -1,0 +1,288 @@
+import { randomUUID } from "node:crypto";
+import { EventBus } from "../config/EventBus.js";
+import { PATHS } from "../config/paths.js";
+import { BashAgent } from "../pi/BashAgent.js";
+import { CodeAgent } from "../pi/CodeAgent.js";
+import { ConversationAgent } from "../pi/ConversationAgent.js";
+import { SandboxAgent } from "../pi/SandboxAgent.js";
+import { HealingEngine } from "../healing/HealingEngine.js";
+import { MemoryStore } from "../memory/MemoryStore.js";
+import { SymphonyEngine } from "../symphony/SymphonyEngine.js";
+import type { PlanStep } from "../symphony/types.js";
+import { ApprovalWorkflow } from "./ApprovalWorkflow.js";
+import { PIAgentRegistry } from "./PIAgentRegistry.js";
+import { SessionCoordinator } from "./SessionCoordinator.js";
+import { TaskQueue } from "./TaskQueue.js";
+import type { Session, Task, TaskResult } from "./types.js";
+
+export interface ExecuteStimulusOptions {
+  stimulus: string;
+  sessionId?: string;
+  onDelta?: (delta: string) => void;
+}
+
+export interface ExecuteStimulusResult {
+  response: string;
+  sessionId: string;
+  taskIds: string[];
+  status: "complete" | "awaiting-approval" | "failed";
+}
+
+export class Powerhouse {
+  readonly sessions: SessionCoordinator;
+  readonly queue: TaskQueue;
+  readonly approvals: ApprovalWorkflow;
+  readonly agents: PIAgentRegistry;
+  readonly memory: MemoryStore;
+  readonly healing: HealingEngine;
+  readonly symphony: SymphonyEngine;
+  private started = false;
+
+  constructor(opts: {
+    sessions?: SessionCoordinator;
+    queue?: TaskQueue;
+    approvals?: ApprovalWorkflow;
+    agents?: PIAgentRegistry;
+    memory?: MemoryStore;
+    healing?: HealingEngine;
+    symphony?: SymphonyEngine;
+  } = {}) {
+    this.sessions = opts.sessions ?? new SessionCoordinator();
+    this.queue = opts.queue ?? new TaskQueue();
+    this.approvals = opts.approvals ?? new ApprovalWorkflow();
+    this.agents = opts.agents ?? new PIAgentRegistry();
+    this.memory = opts.memory ?? new MemoryStore();
+    this.healing = opts.healing ?? new HealingEngine();
+    this.symphony = opts.symphony ?? new SymphonyEngine();
+  }
+
+  start(): void {
+    if (this.started) return;
+    EventBus.emit("powerhouse:starting", {});
+    this.sessions.recover();
+    this.registerDefaultAgents();
+    this.agents.startHealthMonitor();
+    this.started = true;
+    EventBus.emit("powerhouse:started", {});
+  }
+
+  stop(): void {
+    if (!this.started) return;
+    EventBus.emit("powerhouse:stopping", {});
+    this.approvals.shutdown();
+    this.agents.shutdown();
+    this.started = false;
+    EventBus.emit("powerhouse:stopped", {});
+  }
+
+  listSessions(): Session[] {
+    this.sessions.recover();
+    return this.sessions.list();
+  }
+
+  createSession(metadata: Record<string, unknown> = {}): Session {
+    this.start();
+    const session = this.sessions.create(metadata);
+    EventBus.emit("session:create", { sessionId: session.id });
+    return session;
+  }
+
+  closeSession(id: string): void {
+    this.sessions.close(id);
+    EventBus.emit("session:close", { sessionId: id });
+  }
+
+  listTasks(sessionId?: string): Task[] {
+    return this.queue.list(sessionId);
+  }
+
+  listApprovals(): Task[] {
+    return this.approvals.listPending();
+  }
+
+  async approve(taskId: string): Promise<TaskResult> {
+    const task = this.queue.get(taskId);
+    if (!task) return { ok: false, error: `unknown task: ${taskId}` };
+    if (!this.approvals.approve(taskId)) {
+      return { ok: false, error: `task is not awaiting approval: ${taskId}` };
+    }
+    this.queue.transition(task, "running");
+    EventBus.emit("task:running", { taskId: task.id, sessionId: task.sessionId });
+    return this.runTask(task);
+  }
+
+  reject(taskId: string, reason?: string): boolean {
+    const task = this.queue.get(taskId);
+    if (!task) return false;
+    const rejected = this.approvals.reject(taskId, reason);
+    if (rejected && task.status === "awaiting-approval") {
+      this.queue.transition(task, "rejected");
+      this.sessions.removePendingTask(task.sessionId, task.id);
+    }
+    return rejected;
+  }
+
+  async executeStimulus(opts: ExecuteStimulusOptions): Promise<ExecuteStimulusResult> {
+    this.start();
+    const session = this.ensureSession(opts.sessionId);
+    const taskIds: string[] = [];
+
+    this.memory.add({
+      sessionId: session.id,
+      role: "user",
+      content: opts.stimulus,
+      tags: ["stimulus"],
+    });
+
+    const result = await this.symphony.run(opts.stimulus, {
+      executeStep: async (step) => {
+        const { task, result } = await this.executeStep(session.id, step);
+        taskIds.push(task.id);
+        return { taskId: task.id, result };
+      },
+    });
+
+    const status = result.ok
+      ? "complete"
+      : result.outputs.some((output) => {
+          const task = this.queue.get(output.taskId);
+          return task?.status === "awaiting-approval";
+        })
+        ? "awaiting-approval"
+        : "failed";
+
+    const response = status === "awaiting-approval"
+      ? this.approvalResponse(taskIds)
+      : result.response;
+
+    for (const chunk of this.streamChunks(response)) {
+      opts.onDelta?.(chunk);
+    }
+
+    this.memory.add({
+      sessionId: session.id,
+      role: "assistant",
+      content: response,
+      tags: [status],
+      taskId: taskIds[taskIds.length - 1],
+    });
+
+    return { response, sessionId: session.id, taskIds, status };
+  }
+
+  private async executeStep(sessionId: string, step: PlanStep): Promise<{ task: Task; result: TaskResult }> {
+    const task = this.createTask(sessionId, step);
+    this.queue.enqueue(task);
+    this.sessions.addPendingTask(sessionId, task.id);
+    EventBus.emit("task:queued", { taskId: task.id, sessionId, kind: task.kind });
+
+    const running = this.queue.dequeue(sessionId);
+    if (!running) {
+      return { task, result: { ok: false, error: "failed to dequeue task" } };
+    }
+
+    EventBus.emit("task:running", { taskId: running.id, sessionId });
+
+    if (running.requiresApproval) {
+      this.queue.transition(running, "awaiting-approval");
+      this.approvals.request(running);
+      return {
+        task: running,
+        result: {
+          ok: false,
+          error: `approval required for task ${running.id}`,
+          output: { awaitingApproval: true, taskId: running.id },
+        },
+      };
+    }
+
+    return { task: running, result: await this.runTask(running) };
+  }
+
+  private async runTask(task: Task): Promise<TaskResult> {
+    const agent = this.agents.pickFor(task);
+    if (!agent) {
+      const error = `no Pi agent registered for ${task.kind}`;
+      this.failTask(task, error);
+      return { ok: false, error };
+    }
+
+    const result = await agent.execute(task);
+    task.result = result.output;
+    task.error = result.error;
+
+    if (result.ok) {
+      this.queue.transition(task, "complete");
+      this.sessions.removePendingTask(task.sessionId, task.id);
+      EventBus.emit("task:complete", {
+        taskId: task.id,
+        sessionId: task.sessionId,
+        result: result.output,
+      });
+      return result;
+    }
+
+    this.failTask(task, result.error ?? "Pi agent failed");
+    return result;
+  }
+
+  private failTask(task: Task, error: string): void {
+    if (task.status !== "failed") {
+      this.queue.transition(task, "failed");
+    }
+    task.error = error;
+    this.sessions.removePendingTask(task.sessionId, task.id);
+    this.healing.observeFailure(task.id, task.sessionId, error);
+  }
+
+  private ensureSession(sessionId?: string): Session {
+    this.sessions.recover();
+    if (sessionId) {
+      const existing = this.sessions.get(sessionId);
+      if (existing) return existing;
+    }
+    return this.createSession({ source: "hermes-frontend" });
+  }
+
+  private createTask(sessionId: string, step: PlanStep): Task {
+    return {
+      id: `task-${randomUUID().slice(0, 8)}`,
+      sessionId,
+      kind: step.kind,
+      priority: step.priority,
+      status: "queued",
+      payload: step.payload,
+      createdAt: Date.now(),
+      attempts: 0,
+      maxAttempts: step.maxAttempts,
+      requiresApproval: step.requiresApproval,
+    };
+  }
+
+  private registerDefaultAgents(): void {
+    if (this.agents.forKind("user-message")) return;
+    this.agents.register(new ConversationAgent());
+    this.agents.register(new BashAgent({ cwd: process.cwd() }));
+    this.agents.register(new CodeAgent({ projectRoot: PATHS.projectRoot }));
+    this.agents.register(new SandboxAgent());
+  }
+
+  private approvalResponse(taskIds: string[]): string {
+    const pending = taskIds
+      .map((id) => this.queue.get(id))
+      .filter((task): task is Task => Boolean(task && task.status === "awaiting-approval"));
+    if (pending.length === 0) return "Approval required.";
+
+    return pending
+      .map((task) => [
+        `Approval required for ${task.kind} task ${task.id}.`,
+        "Use the Hermes approval command or call the Agentix approval endpoint to continue.",
+        `Payload: ${JSON.stringify(task.payload, null, 2)}`,
+      ].join("\n"))
+      .join("\n\n");
+  }
+
+  private streamChunks(text: string): string[] {
+    return text.split(/(\s+)/).filter((part) => part.length > 0);
+  }
+}

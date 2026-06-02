@@ -103,4 +103,21 @@ export class AgentixBackend {
   async listTools(): Promise<Array<{ name: string; description: string }>> {
     return this.get("/tools");
   }
+
+  async listTasks(sessionId?: string): Promise<Array<Record<string, unknown>>> {
+    const suffix = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
+    return this.get(`/tasks${suffix}`);
+  }
+
+  async listApprovals(): Promise<Array<Record<string, unknown>>> {
+    return this.get("/approvals");
+  }
+
+  async approve(taskId: string): Promise<Record<string, unknown>> {
+    return this.post(`/approvals/${encodeURIComponent(taskId)}/approve`);
+  }
+
+  async reject(taskId: string, reason?: string): Promise<Record<string, unknown>> {
+    return this.post(`/approvals/${encodeURIComponent(taskId)}/reject`, { reason });
+  }
 }
