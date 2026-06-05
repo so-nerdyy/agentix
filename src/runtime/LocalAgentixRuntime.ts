@@ -525,8 +525,8 @@ export class LocalAgentixRuntime {
     };
   }
 
-  controlTask(taskId: string, action: TaskAction): Record<string, unknown> {
-    const result = this.powerhouse.controlTask(taskId, action);
+  async controlTask(taskId: string, action: TaskAction): Promise<Record<string, unknown>> {
+    const result = await this.powerhouse.controlTask(taskId, action);
     return {
       ok: result.ok,
       output: result.output ?? null,

@@ -205,9 +205,10 @@ describe("Powerhouse restored runtime", () => {
     const detail = runtime.getTask(taskId);
     expect(detail?.task.status).toBe("complete");
 
-    const restarted = runtime.controlTask(taskId, "restart");
+    const restarted = await runtime.controlTask(taskId, "restart");
     expect(restarted.ok).toBe(true);
-    expect(restarted.output).toMatchObject({ action: "restart", taskId });
+    expect(restarted.output).toMatchObject({ action: "restart", taskId, status: "complete" });
+    expect(runtime.getTask(taskId)?.task.status).toBe("complete");
 
     runtime.shutdown();
   });

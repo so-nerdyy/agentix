@@ -169,7 +169,7 @@ export class Powerhouse {
     return rejected;
   }
 
-  controlTask(taskId: string, action: TaskAction): TaskResult {
+  async controlTask(taskId: string, action: TaskAction): Promise<TaskResult> {
     const task = this.queue.get(taskId);
     if (!task) return { ok: false, error: `unknown task: ${taskId}` };
     if (action === "cancel") {
@@ -206,7 +206,12 @@ export class Powerhouse {
         sessionId: retried.sessionId,
         kind: retried.kind,
       });
-      return { ok: true, output: { action, taskId: retried.id, status: retried.status } };
+      const result = await this.dispatchQueuedTask(retried);
+      return {
+        ok: result.ok,
+        output: { action, taskId: retried.id, status: retried.status, result: result.output ?? null },
+        error: result.error,
+      };
     }
     if (action === "restart") {
       const restarted = this.queue.retry(taskId) ?? task;
@@ -214,6 +219,7 @@ export class Powerhouse {
       restarted.startedAt = undefined;
       restarted.finishedAt = undefined;
       restarted.error = undefined;
+      this.queue.requeue(restarted);
       this.taskStore.upsert(restarted);
       this.audit.record({
         type: "task.restarted",
@@ -226,7 +232,12 @@ export class Powerhouse {
         sessionId: restarted.sessionId,
         kind: restarted.kind,
       });
-      return { ok: true, output: { action, taskId: restarted.id, status: restarted.status } };
+      const result = await this.dispatchQueuedTask(restarted);
+      return {
+        ok: result.ok,
+        output: { action, taskId: restarted.id, status: restarted.status, result: result.output ?? null },
+        error: result.error,
+      };
     }
     return { ok: false, error: `unsupported task action: ${action}` };
   }
@@ -315,6 +326,34 @@ export class Powerhouse {
     }
 
     return { task: running, result: await this.runTask(running) };
+  }
+
+  private async dispatchQueuedTask(task: Task): Promise<TaskResult> {
+    const running = this.queue.dequeueTask(task.id);
+    if (!running) {
+      return { ok: false, error: `failed to dispatch queued task: ${task.id}` };
+    }
+
+    EventBus.emit("task:running", { taskId: running.id, sessionId: running.sessionId });
+    this.taskStore.upsert(running);
+
+    if (running.requiresApproval) {
+      this.queue.transition(running, "awaiting-approval");
+      this.taskStore.upsert(running);
+      this.approvals.request(running);
+      this.audit.record({
+        type: "approval.requested",
+        actor: "system",
+        subjectId: running.id,
+        data: { sessionId: running.sessionId, kind: running.kind, payload: running.payload, control: true },
+      });
+      return {
+        ok: true,
+        output: { awaitingApproval: true, taskId: running.id },
+      };
+    }
+
+    return this.runTask(running);
   }
 
   private async runTask(task: Task): Promise<TaskResult> {

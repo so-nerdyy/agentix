@@ -88,6 +88,21 @@ export class TaskQueue {
     return task;
   }
 
+  dequeueTask(taskId: string): Task | undefined {
+    const task = this.byId.get(taskId);
+    if (!task || task.status !== "queued") return undefined;
+    for (const bucket of [this.pendingUser, this.pendingBg]) {
+      const arr = bucket.get(task.sessionId);
+      const index = arr?.indexOf(taskId) ?? -1;
+      if (arr && index >= 0) {
+        arr.splice(index, 1);
+      }
+    }
+    this.transition(task, "running");
+    task.startedAt = Date.now();
+    return task;
+  }
+
   requeue(task: Task): void {
     if (!this.byId.has(task.id)) {
       this.byId.set(task.id, task);
