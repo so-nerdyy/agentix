@@ -326,6 +326,10 @@ button:hover {
   word-break: break-word;
 }
 
+#supportSummary {
+  white-space: pre-wrap;
+}
+
 .shortcuts {
   margin-top: 6px;
   max-width: 820px;

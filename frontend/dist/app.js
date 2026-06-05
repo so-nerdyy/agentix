@@ -14,6 +14,7 @@ const state = {
   memory: [],
   healing: { failures: [], procedures: [] },
   audit: [],
+  supportBundle: null,
   events: [],
   health: null,
   eventSource: null,
@@ -36,6 +37,7 @@ const refs = {
   reloadJobsButton: el("reloadJobsButton"),
   reloadHealingButton: el("reloadHealingButton"),
   reloadAuditButton: el("reloadAuditButton"),
+  createSupportButton: el("createSupportButton"),
   reloadSessionsButton: el("reloadSessionsButton"),
   consolidateButton: el("consolidateButton"),
   newSessionButton: el("newSessionButton"),
@@ -58,6 +60,8 @@ const refs = {
   memoryList: el("memoryList"),
   healingList: el("healingList"),
   auditList: el("auditList"),
+  supportSummary: el("supportSummary"),
+  supportList: el("supportList"),
   sessionsList: el("sessionsList"),
   composeHistory: el("composeHistory"),
 };
@@ -71,6 +75,7 @@ const viewTitles = {
   memory: "Memory search and consolidation",
   healing: "Healing and procedures",
   audit: "Audit trail",
+  support: "Support bundle",
   sessions: "Sessions",
   compose: "Compose a task",
 };
@@ -389,6 +394,18 @@ function auditCard(entry) {
   `;
 }
 
+function supportCard(bundle) {
+  return `
+    <div class="card">
+      <div class="row">
+        <h4>Bundle created</h4>
+        <span class="pill success">${escapeHtml(bundle.bundleDir || "ok")}</span>
+      </div>
+      <div class="muted">Files: ${(bundle.files || []).map((file) => escapeHtml(file)).join(", ")}</div>
+    </div>
+  `;
+}
+
 function sessionCard(session) {
   return `
     <div class="card">
@@ -420,6 +437,12 @@ function renderLists() {
   refs.memoryList.innerHTML = state.memory.map(memoryCard).join("") || '<div class="card muted">Search memory to see results.</div>';
   refs.healingList.innerHTML = healingView();
   refs.auditList.innerHTML = state.audit.map(auditCard).join("") || '<div class="card muted">No audit entries yet.</div>';
+  refs.supportSummary.textContent = state.supportBundle
+    ? `Support bundle written to ${state.supportBundle.bundleDir}`
+    : "Generate a support bundle with runtime snapshots, logs, and diagnostics.";
+  refs.supportList.innerHTML = state.supportBundle
+    ? supportCard(state.supportBundle)
+    : '<div class="card muted">No support bundle generated yet.</div>';
   refs.sessionsList.innerHTML = state.sessions.map(sessionCard).join("") || '<div class="card muted">No sessions yet.</div>';
 }
 
@@ -635,6 +658,10 @@ async function handleSlash(text) {
       setView("audit");
       await refreshAll();
       break;
+    case "support":
+      setView("support");
+      await refreshAll();
+      break;
     case "sessions":
       setView("sessions");
       await refreshAll();
@@ -767,6 +794,12 @@ function boot() {
   refs.reloadJobsButton.addEventListener("click", refreshAll);
   refs.reloadHealingButton.addEventListener("click", refreshAll);
   refs.reloadAuditButton.addEventListener("click", refreshAll);
+  refs.createSupportButton.addEventListener("click", async () => {
+    state.supportBundle = await api("/support/bundle", { method: "POST" });
+    appendEvent("support bundle", `Created bundle at ${state.supportBundle.bundleDir}`, "success");
+    setView("support");
+    render();
+  });
   refs.reloadSessionsButton.addEventListener("click", refreshAll);
   refs.consolidateButton.addEventListener("click", consolidateMemory);
   refs.newSessionButton.addEventListener("click", async () => {

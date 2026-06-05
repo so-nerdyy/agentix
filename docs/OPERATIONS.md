@@ -25,7 +25,11 @@
 
 ## Support Bundle
 
-Use `agentix support` to collect the current runtime snapshot, logs, and diagnostic metadata.
+Use `agentix support` to create a timestamped bundle under `data/support/` with:
+
+- manifest metadata
+- sanitized config
+- sessions, tasks, approvals, jobs, audit, healing, and memory snapshots
 
 ## Recovery
 

@@ -94,6 +94,7 @@ export async function startInboxServer(): Promise<{
     return runtime.consolidateMemory(body?.sessionId as string | undefined);
   });
   server.get("/audit", async () => runtime.listAudit());
+  server.post("/support/bundle", async () => runtime.createSupportBundle());
   server.get("/healing/stats", async () => runtime.healingStats());
   server.post("/healing/procedures/:id/promote", async (request) => {
     const { id } = request.params as { id: string };

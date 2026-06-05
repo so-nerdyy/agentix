@@ -30,7 +30,7 @@ From any project folder, `agentix` opens the interactive shell. Use `agentix ser
 - `agentix memory` - search memory
 - `agentix logs` - inspect logs
 - `agentix server` - start the Agentix backend bridge/API
-- `agentix support` - generate support info
+- `agentix support` - generate a support bundle with runtime snapshots
 
 ## Configuration
 

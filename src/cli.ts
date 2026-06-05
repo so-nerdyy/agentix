@@ -44,12 +44,16 @@ async function main() {
       return;
     case "support":
       ensureDataDirs();
-      console.log(`Agentix v${pkg.version}`);
-      console.log(`Project root: ${PATHS.projectRoot}`);
-      console.log(`Hermes root: ${PATHS.hermesRoot}`);
-      console.log(`Data dir: ${PATHS.dataDir}`);
-      console.log(`Bridge entry: ${PATHS.bridgeEntry}`);
-      console.log(`Inbox entry: ${PATHS.inboxEntry}`);
+      {
+        const bundle = getBackendRuntime().createSupportBundle();
+        console.log(`Agentix v${pkg.version}`);
+        console.log(`Project root: ${PATHS.projectRoot}`);
+        console.log(`Hermes root: ${PATHS.hermesRoot}`);
+        console.log(`Data dir: ${PATHS.dataDir}`);
+        console.log(`Bridge entry: ${PATHS.bridgeEntry}`);
+        console.log(`Inbox entry: ${PATHS.inboxEntry}`);
+        console.log(`Support bundle: ${(bundle as { bundleDir?: string }).bundleDir ?? "n/a"}`);
+      }
       return;
     case "mods":
       ensureDataDirs();

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ConversationAgent } from "../../src/pi/ConversationAgent.js";
@@ -209,5 +210,22 @@ describe("Powerhouse restored runtime", () => {
 
     scheduler.stop();
     powerhouse.stop();
+  });
+
+  it("creates a support bundle with runtime snapshots", async () => {
+    const runtime = new LocalAgentixRuntime();
+
+    await runtime.execute({ stimulus: "support bundle smoke" });
+    const bundle = runtime.createSupportBundle() as { bundleDir: string; files: string[] };
+
+    expect(existsSync(join(bundle.bundleDir, "manifest.json"))).toBe(true);
+    expect(existsSync(join(bundle.bundleDir, "tasks.json"))).toBe(true);
+    expect(bundle.files).toContain("manifest.json");
+
+    const manifest = JSON.parse(readFileSync(join(bundle.bundleDir, "manifest.json"), "utf-8"));
+    expect(manifest.counts.tasks).toBeGreaterThanOrEqual(1);
+    expect(manifest.counts.sessions).toBeGreaterThanOrEqual(1);
+
+    runtime.shutdown();
   });
 });

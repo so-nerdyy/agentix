@@ -1,5 +1,10 @@
 import { Powerhouse } from "../powerhouse/Powerhouse.js";
 import { SchedulerService } from "../scheduler/SchedulerService.js";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { PATHS } from "../config/paths.js";
+import { loadConfig } from "../config/index.js";
+import { randomUUID } from "node:crypto";
 
 export class LocalAgentixRuntime {
   private readonly powerhouse = new Powerhouse();
@@ -116,6 +121,84 @@ export class LocalAgentixRuntime {
     return this.scheduler.runNow(id) as unknown as Record<string, unknown>;
   }
 
+  createSupportBundle(): Record<string, unknown> {
+    this.powerhouse.start();
+    const bundleId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
+    const bundleDir = join(PATHS.dataDir, "support", `bundle-${bundleId}`);
+    mkdirSync(bundleDir, { recursive: true });
+
+    const writeJson = (name: string, value: unknown): string => {
+      const file = join(bundleDir, name);
+      writeFileSync(file, JSON.stringify(value, null, 2), "utf-8");
+      return file;
+    };
+
+    const config = loadConfig();
+    const safeConfig = {
+      ...config,
+      llmApiKey: config.llmApiKey ? "[redacted]" : null,
+    };
+
+    const sessions = this.listSessions();
+    const tasks = this.listTasks();
+    const approvals = this.listApprovals();
+    const jobs = this.listJobs();
+    const audit = this.listAudit();
+    const healing = this.healingStats();
+    const memory = this.powerhouse.memory.list().slice(-250);
+
+    writeJson("manifest.json", {
+      createdAt: new Date().toISOString(),
+      bundleId,
+      version: "2.1.0",
+      nodeVersion: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      projectRoot: PATHS.projectRoot,
+      dataDir: PATHS.dataDir,
+      counts: {
+        sessions: sessions.length,
+        tasks: tasks.length,
+        approvals: approvals.length,
+        jobs: jobs.length,
+        audit: audit.length,
+        memory: memory.length,
+        healingFailures: Array.isArray((healing as { failures?: unknown[] }).failures)
+          ? ((healing as { failures?: unknown[] }).failures?.length ?? 0)
+          : 0,
+        healingProcedures: Array.isArray((healing as { procedures?: unknown[] }).procedures)
+          ? ((healing as { procedures?: unknown[] }).procedures?.length ?? 0)
+          : 0,
+      },
+    });
+    writeJson("config.json", safeConfig);
+    writeJson("sessions.json", sessions);
+    writeJson("tasks.json", tasks);
+    writeJson("approvals.json", approvals);
+    writeJson("jobs.json", jobs);
+    writeJson("audit.json", audit);
+    writeJson("healing.json", healing);
+    writeJson("memory.json", memory);
+    this.copyDirectory(PATHS.logsDir, join(bundleDir, "logs"));
+
+    return {
+      ok: true,
+      bundleDir,
+      files: [
+        "manifest.json",
+        "config.json",
+        "sessions.json",
+        "tasks.json",
+        "approvals.json",
+        "jobs.json",
+        "audit.json",
+        "healing.json",
+      "memory.json",
+        "logs/",
+      ],
+    };
+  }
+
   async approve(taskId: string): Promise<Record<string, unknown>> {
     const result = await this.powerhouse.approve(taskId);
     return {
@@ -148,5 +231,19 @@ export class LocalAgentixRuntime {
   shutdown(): void {
     this.scheduler.stop();
     this.powerhouse.stop();
+  }
+
+  private copyDirectory(sourceDir: string, targetDir: string): void {
+    if (!existsSync(sourceDir)) return;
+    mkdirSync(targetDir, { recursive: true });
+    for (const entry of readdirSync(sourceDir, { withFileTypes: true })) {
+      const sourcePath = join(sourceDir, entry.name);
+      const targetPath = join(targetDir, entry.name);
+      if (entry.isDirectory()) {
+        this.copyDirectory(sourcePath, targetPath);
+      } else if (entry.isFile()) {
+        copyFileSync(sourcePath, targetPath);
+      }
+    }
   }
 }
