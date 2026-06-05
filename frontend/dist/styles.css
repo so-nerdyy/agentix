@@ -330,6 +330,11 @@ button:hover {
   white-space: pre-wrap;
 }
 
+.log-line {
+  display: grid;
+  gap: 6px;
+}
+
 .shortcuts {
   margin-top: 6px;
   max-width: 820px;

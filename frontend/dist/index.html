@@ -39,6 +39,7 @@
           <button class="nav" data-view="memory">Memory</button>
           <button class="nav" data-view="healing">Healing</button>
           <button class="nav" data-view="audit">Audit</button>
+          <button class="nav" data-view="logs">Logs</button>
           <button class="nav" data-view="support">Support</button>
           <button class="nav" data-view="sessions">Sessions</button>
           <button class="nav" data-view="compose">Compose</button>
@@ -57,6 +58,7 @@
               <button class="ghost" data-quick="/approvals">/approvals</button>
               <button class="ghost" data-quick="/scheduler">/scheduler</button>
               <button class="ghost" data-quick="/memory">/memory</button>
+              <button class="ghost" data-quick="/logs">/logs</button>
               <button class="ghost" data-quick="/support">/support</button>
             </div>
           </section>
@@ -169,6 +171,16 @@
                 </div>
               </div>
               <div class="list" id="auditList"></div>
+            </article>
+
+            <article class="panel" data-panel="logs">
+              <div class="panel-head">
+                <h3>Logs</h3>
+                <div class="panel-tools">
+                  <button class="ghost" id="reloadLogsButton" type="button">Reload</button>
+                </div>
+              </div>
+              <div class="list" id="logsList"></div>
             </article>
 
             <article class="panel" data-panel="support">

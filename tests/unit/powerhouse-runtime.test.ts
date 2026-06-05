@@ -99,6 +99,21 @@ describe("Powerhouse restored runtime", () => {
     runtime.shutdown();
   });
 
+  it("exposes audit-backed runtime logs", async () => {
+    const runtime = new LocalAgentixRuntime();
+
+    await runtime.execute({
+      stimulus: "log me",
+    });
+
+    const logs = runtime.listLogs();
+
+    expect(logs.length).toBeGreaterThan(0);
+    expect(logs[0]?.message).toContain("stimulus.executed");
+
+    runtime.shutdown();
+  });
+
   it("deletes sessions through the runtime facade", async () => {
     const runtime = new LocalAgentixRuntime();
 

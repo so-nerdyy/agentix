@@ -75,6 +75,7 @@ export async function startInboxServer(): Promise<{
     return runtime.listTasks(query.sessionId);
   });
   server.get("/tools", async () => runtime.listTools());
+  server.get("/logs", async () => runtime.listLogs());
   server.get("/approvals", async () => runtime.listApprovals());
   server.post("/approvals/:id/approve", async (request) => {
     const { id } = request.params as { id: string };

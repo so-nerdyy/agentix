@@ -61,6 +61,20 @@ async function main() {
         console.log(`${tool.name}: ${tool.description}`);
       }
       return;
+    case "logs":
+      ensureDataDirs();
+      for (const entry of getBackendRuntime().listLogs()) {
+        const logEntry = entry as {
+          timestamp?: string;
+          level?: string;
+          source?: string;
+          message?: string;
+        };
+        console.log(
+          `[${logEntry.timestamp ?? "n/a"}] ${(logEntry.level ?? "info").toUpperCase()} ${(logEntry.source ?? "system")}: ${logEntry.message ?? ""}`,
+        );
+      }
+      return;
     default:
       console.log(
         "Agentix backend ready. Use `agentix` for the Hermes shell or `agentix server` to start backend services.",

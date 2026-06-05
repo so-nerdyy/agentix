@@ -78,6 +78,15 @@ export class LocalAgentixRuntime {
     return this.powerhouse.audit.list().map((entry) => ({ ...entry }));
   }
 
+  listLogs(limit = 100): Array<Record<string, unknown>> {
+    return this.powerhouse.audit.list(limit).map((entry) => ({
+      timestamp: new Date(entry.createdAt).toISOString(),
+      level: this.logLevelFor(entry.type),
+      source: entry.actor,
+      message: this.formatLogMessage(entry),
+    }));
+  }
+
   healingStats(): Record<string, unknown> {
     return {
       failures: this.powerhouse.healing.list(),
@@ -245,5 +254,21 @@ export class LocalAgentixRuntime {
         copyFileSync(sourcePath, targetPath);
       }
     }
+  }
+
+  private logLevelFor(type: string): "info" | "warn" | "error" {
+    if (type.includes("failed") || type.includes("error") || type.includes("rejected")) {
+      return "error";
+    }
+    if (type.includes("warning") || type.includes("disabled") || type.includes("deprecated")) {
+      return "warn";
+    }
+    return "info";
+  }
+
+  private formatLogMessage(entry: { type: string; subjectId?: string; data: Record<string, unknown> }): string {
+    const subject = entry.subjectId ? ` ${entry.subjectId}` : "";
+    const data = Object.keys(entry.data || {}).length > 0 ? ` ${JSON.stringify(entry.data)}` : "";
+    return `${entry.type}${subject}${data}`.trim();
   }
 }

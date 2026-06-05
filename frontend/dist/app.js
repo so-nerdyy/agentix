@@ -14,6 +14,7 @@ const state = {
   memory: [],
   healing: { failures: [], procedures: [] },
   audit: [],
+  logs: [],
   supportBundle: null,
   events: [],
   health: null,
@@ -37,6 +38,7 @@ const refs = {
   reloadJobsButton: el("reloadJobsButton"),
   reloadHealingButton: el("reloadHealingButton"),
   reloadAuditButton: el("reloadAuditButton"),
+  reloadLogsButton: el("reloadLogsButton"),
   createSupportButton: el("createSupportButton"),
   reloadSessionsButton: el("reloadSessionsButton"),
   consolidateButton: el("consolidateButton"),
@@ -60,6 +62,7 @@ const refs = {
   memoryList: el("memoryList"),
   healingList: el("healingList"),
   auditList: el("auditList"),
+  logsList: el("logsList"),
   supportSummary: el("supportSummary"),
   supportList: el("supportList"),
   sessionsList: el("sessionsList"),
@@ -75,6 +78,7 @@ const viewTitles = {
   memory: "Memory search and consolidation",
   healing: "Healing and procedures",
   audit: "Audit trail",
+  logs: "Logs",
   support: "Support bundle",
   sessions: "Sessions",
   compose: "Compose a task",
@@ -394,6 +398,19 @@ function auditCard(entry) {
   `;
 }
 
+function logCard(entry) {
+  return `
+    <div class="card log-line">
+      <div class="row">
+        <strong>${escapeHtml(entry.level)}</strong>
+        <span class="pill">${escapeHtml(entry.source)}</span>
+        <span class="meta">${escapeHtml(entry.timestamp)}</span>
+      </div>
+      <div class="muted">${escapeHtml(entry.message)}</div>
+    </div>
+  `;
+}
+
 function supportCard(bundle) {
   return `
     <div class="card">
@@ -437,6 +454,7 @@ function renderLists() {
   refs.memoryList.innerHTML = state.memory.map(memoryCard).join("") || '<div class="card muted">Search memory to see results.</div>';
   refs.healingList.innerHTML = healingView();
   refs.auditList.innerHTML = state.audit.map(auditCard).join("") || '<div class="card muted">No audit entries yet.</div>';
+  refs.logsList.innerHTML = state.logs.map(logCard).join("") || '<div class="card muted">No logs available yet.</div>';
   refs.supportSummary.textContent = state.supportBundle
     ? `Support bundle written to ${state.supportBundle.bundleDir}`
     : "Generate a support bundle with runtime snapshots, logs, and diagnostics.";
@@ -513,11 +531,12 @@ function render() {
 
 async function refreshAll() {
   try {
-    const [health, sessions, tasks, tools, approvals, jobs, audit, healing] = await Promise.all([
+    const [health, sessions, tasks, tools, logs, approvals, jobs, audit, healing] = await Promise.all([
       api("/health"),
       api("/sessions"),
       api(`/tasks${state.sessionId ? `?sessionId=${encodeURIComponent(state.sessionId)}` : ""}`),
       api("/tools").catch(() => []),
+      api("/logs").catch(() => []),
       api("/approvals"),
       api("/scheduler/jobs"),
       api("/audit"),
@@ -527,6 +546,7 @@ async function refreshAll() {
     state.sessions = sessions || [];
     state.tasks = tasks || [];
     state.tools = tools || [];
+    state.logs = logs || [];
     state.approvals = approvals || [];
     state.jobs = jobs || [];
     state.audit = audit || [];
@@ -658,6 +678,10 @@ async function handleSlash(text) {
       setView("audit");
       await refreshAll();
       break;
+    case "logs":
+      setView("logs");
+      await refreshAll();
+      break;
     case "support":
       setView("support");
       await refreshAll();
@@ -771,7 +795,8 @@ function boot() {
   document.querySelectorAll("[data-quick]").forEach((button) => {
     button.addEventListener("click", () => {
       refs.composeInput.value = button.dataset.quick;
-      setView("compose");
+      const quick = button.dataset.quick?.replace(/^\//, "") || "compose";
+      setView(quick === "scheduler" ? "scheduler" : quick === "support" ? "support" : quick === "logs" ? "logs" : quick === "memory" ? "memory" : quick === "tasks" ? "tasks" : quick === "tools" ? "tools" : quick === "approvals" ? "approvals" : quick);
     });
   });
   refs.saveTokenButton.addEventListener("click", async () => {
@@ -794,6 +819,7 @@ function boot() {
   refs.reloadJobsButton.addEventListener("click", refreshAll);
   refs.reloadHealingButton.addEventListener("click", refreshAll);
   refs.reloadAuditButton.addEventListener("click", refreshAll);
+  refs.reloadLogsButton.addEventListener("click", refreshAll);
   refs.createSupportButton.addEventListener("click", async () => {
     state.supportBundle = await api("/support/bundle", { method: "POST" });
     appendEvent("support bundle", `Created bundle at ${state.supportBundle.bundleDir}`, "success");

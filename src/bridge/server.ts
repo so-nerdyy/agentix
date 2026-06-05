@@ -73,6 +73,7 @@ export async function startBridge() {
   });
 
   server.get("/tools", async () => runtime.listTools());
+  server.get("/logs", async () => runtime.listLogs());
   server.get("/tasks", async (request) => {
     const query = request.query as Record<string, string | undefined>;
     return runtime.listTasks(query.sessionId);
