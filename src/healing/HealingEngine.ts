@@ -21,6 +21,11 @@ export interface HealingProcedure {
   uses: number;
 }
 
+export interface HealingDetail {
+  failure: FailureFingerprint | null;
+  procedure: HealingProcedure | null;
+}
+
 interface HealingStoreFile {
   failures: FailureFingerprint[];
   procedures: HealingProcedure[];
@@ -86,6 +91,14 @@ export class HealingEngine {
 
   listProcedures(): HealingProcedure[] {
     return this.store.read().procedures.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  getFailure(fingerprint: string): FailureFingerprint | undefined {
+    return this.store.read().failures.find((item) => item.fingerprint === fingerprint);
+  }
+
+  getProcedure(id: string): HealingProcedure | undefined {
+    return this.store.read().procedures.find((item) => item.id === id);
   }
 
   promoteProcedure(id: string): HealingProcedure | undefined {

@@ -53,6 +53,9 @@ export function startEventStreamBridge(): void {
     "task:failed",
     "session:create",
     "session:close",
+    "gateway:message",
+    "gateway:enabled",
+    "gateway:disabled",
     "powerhouse:starting",
     "powerhouse:started",
     "powerhouse:stopping",
@@ -79,6 +82,9 @@ export function stopEventStreamBridge(): void {
   EventBus.removeAllListeners("task:failed");
   EventBus.removeAllListeners("session:create");
   EventBus.removeAllListeners("session:close");
+  EventBus.removeAllListeners("gateway:message");
+  EventBus.removeAllListeners("gateway:enabled");
+  EventBus.removeAllListeners("gateway:disabled");
   EventBus.removeAllListeners("powerhouse:starting");
   EventBus.removeAllListeners("powerhouse:started");
   EventBus.removeAllListeners("powerhouse:stopping");

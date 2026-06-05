@@ -122,6 +122,31 @@ export class TaskQueue {
     }
   }
 
+  cancel(taskId: string): Task | undefined {
+    const task = this.byId.get(taskId);
+    if (!task) return undefined;
+    if (!["queued", "running", "awaiting-approval"].includes(task.status)) {
+      return undefined;
+    }
+    this.remove(taskId);
+    task.status = "rejected";
+    task.finishedAt = Date.now();
+    task.error = task.error ?? "cancelled";
+    return task;
+  }
+
+  retry(taskId: string): Task | undefined {
+    const task = this.byId.get(taskId);
+    if (!task) return undefined;
+    if (!["failed", "rejected"].includes(task.status)) return undefined;
+    task.status = "queued";
+    task.startedAt = undefined;
+    task.finishedAt = undefined;
+    task.error = undefined;
+    this.requeue(task);
+    return task;
+  }
+
   pendingForSession(sessionId: string): number {
     const u = this.pendingUser.get(sessionId)?.length ?? 0;
     const b = this.pendingBg.get(sessionId)?.length ?? 0;

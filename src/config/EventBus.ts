@@ -27,6 +27,16 @@ export type AgentixEventMap = {
   "session:create": { sessionId: string };
   "session:close": { sessionId: string };
 
+  // Gateway lifecycle
+  "gateway:message": {
+    gatewayId: string;
+    gatewayPlatform: string;
+    sessionId: string;
+    taskIds: string[];
+  };
+  "gateway:enabled": { gatewayId: string; gatewayPlatform: string; enabled: boolean };
+  "gateway:disabled": { gatewayId: string; gatewayPlatform: string; enabled: boolean };
+
   // Powerhouse lifecycle
   "powerhouse:starting": Record<string, never>;
   "powerhouse:started": Record<string, never>;

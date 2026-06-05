@@ -85,6 +85,10 @@ export class AgentixBackend {
     return this.get("/sessions");
   }
 
+  async getSession(sessionId: string): Promise<Record<string, unknown>> {
+    return this.get(`/sessions/${encodeURIComponent(sessionId)}`);
+  }
+
   async createSession(opts?: { model?: string }): Promise<{ id: string }> {
     return this.post("/sessions", opts);
   }
@@ -108,13 +112,33 @@ export class AgentixBackend {
     return this.get("/tools");
   }
 
+  async getTool(toolId: string): Promise<Record<string, unknown>> {
+    return this.get(`/tools/${encodeURIComponent(toolId)}`);
+  }
+
+  async search(query: string): Promise<Record<string, unknown>> {
+    return this.get(`/search?q=${encodeURIComponent(query)}`);
+  }
+
   async listTasks(sessionId?: string): Promise<Array<Record<string, unknown>>> {
     const suffix = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
     return this.get(`/tasks${suffix}`);
   }
 
+  async getTask(taskId: string): Promise<Record<string, unknown>> {
+    return this.get(`/tasks/${encodeURIComponent(taskId)}`);
+  }
+
+  async controlTask(taskId: string, action: "cancel" | "retry" | "restart"): Promise<Record<string, unknown>> {
+    return this.post(`/tasks/${encodeURIComponent(taskId)}/action`, { action });
+  }
+
   async listApprovals(): Promise<Array<Record<string, unknown>>> {
     return this.get("/approvals");
+  }
+
+  async getApproval(taskId: string): Promise<Record<string, unknown>> {
+    return this.get(`/approvals/${encodeURIComponent(taskId)}`);
   }
 
   async approve(taskId: string): Promise<Record<string, unknown>> {
@@ -129,8 +153,24 @@ export class AgentixBackend {
     return this.get("/audit");
   }
 
+  async getAudit(id: string): Promise<Record<string, unknown>> {
+    return this.get(`/audit/${encodeURIComponent(id)}`);
+  }
+
+  async listLogs(): Promise<Array<Record<string, unknown>>> {
+    return this.get("/logs");
+  }
+
+  async getLog(index: number): Promise<Record<string, unknown>> {
+    return this.get(`/logs/${encodeURIComponent(index)}`);
+  }
+
   async healingStats(): Promise<Record<string, unknown>> {
     return this.get("/healing/stats");
+  }
+
+  async getHealingDetail(id: string): Promise<Record<string, unknown>> {
+    return this.get(`/healing/detail/${encodeURIComponent(id)}`);
   }
 
   async promoteHealingProcedure(id: string): Promise<Record<string, unknown>> {
@@ -145,6 +185,10 @@ export class AgentixBackend {
     return this.get("/scheduler/jobs");
   }
 
+  async getScheduledJob(id: string): Promise<Record<string, unknown>> {
+    return this.get(`/scheduler/jobs/${encodeURIComponent(id)}`);
+  }
+
   async createScheduledJob(input: {
     name: string;
     stimulus: string;
@@ -156,5 +200,40 @@ export class AgentixBackend {
 
   async runScheduledJob(id: string): Promise<Record<string, unknown>> {
     return this.post(`/scheduler/jobs/${encodeURIComponent(id)}/run`);
+  }
+
+  async setScheduledJobEnabled(id: string, enabled: boolean): Promise<Record<string, unknown>> {
+    return this.post(`/scheduler/jobs/${encodeURIComponent(id)}/${enabled ? "enable" : "disable"}`);
+  }
+
+  async deleteScheduledJob(id: string): Promise<Record<string, unknown>> {
+    const res = await fetch(`${this.baseUrl}/scheduler/jobs/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`Bridge ${res.status}: ${await res.text()}`);
+    return res.json() as Promise<Record<string, unknown>>;
+  }
+
+  async listGateways(): Promise<Array<Record<string, unknown>>> {
+    return this.get("/gateway");
+  }
+
+  async getGateway(id: string): Promise<Record<string, unknown>> {
+    return this.get(`/gateway/${encodeURIComponent(id)}`);
+  }
+
+  async setGatewayEnabled(id: string, enabled: boolean): Promise<Record<string, unknown>> {
+    return this.post(`/gateway/${encodeURIComponent(id)}/${enabled ? "enable" : "disable"}`);
+  }
+
+  async receiveGatewayMessage(input: {
+    gatewayId: string;
+    stimulus: string;
+    sessionId?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<Record<string, unknown>> {
+    return this.post(`/gateway/${encodeURIComponent(input.gatewayId)}/message`, {
+      stimulus: input.stimulus,
+      sessionId: input.sessionId,
+      metadata: input.metadata,
+    });
   }
 }

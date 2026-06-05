@@ -32,10 +32,12 @@
       <div class="workspace">
         <aside class="sidebar">
           <button class="nav active" data-view="live">Live</button>
+          <button class="nav" data-view="search">Search</button>
           <button class="nav" data-view="tasks">Tasks</button>
           <button class="nav" data-view="tools">Tools</button>
           <button class="nav" data-view="approvals">Approvals</button>
           <button class="nav" data-view="scheduler">Scheduler</button>
+          <button class="nav" data-view="gateway">Gateway</button>
           <button class="nav" data-view="memory">Memory</button>
           <button class="nav" data-view="healing">Healing</button>
           <button class="nav" data-view="audit">Audit</button>
@@ -50,13 +52,16 @@
             <div>
               <div class="eyebrow">Command surface</div>
               <h2 id="viewTitle">Live activity</h2>
-              <div class="muted">Shortcuts: Alt+1 Live · Alt+2 Tasks · Alt+3 Tools · Alt+4 Approvals · Alt+5 Scheduler · Alt+6 Memory · Alt+7 Healing · Alt+8 Audit · Alt+9 Sessions · Alt+0 Compose</div>
+              <div class="muted">Shortcuts: Alt+1 Live · Alt+2 Search · Alt+3 Tasks · Alt+4 Tools · Alt+5 Approvals · Alt+6 Scheduler · Alt+7 Gateway · Alt+8 Memory · Alt+9 Healing · Alt+0 Compose</div>
             </div>
             <div class="hero-actions">
+              <button class="ghost" id="openPaletteButton" type="button">Command palette</button>
+              <button class="ghost" data-quick="/search">/search</button>
               <button class="ghost" data-quick="/tasks">/tasks</button>
               <button class="ghost" data-quick="/tools">/tools</button>
               <button class="ghost" data-quick="/approvals">/approvals</button>
               <button class="ghost" data-quick="/scheduler">/scheduler</button>
+              <button class="ghost" data-quick="/gateway">/gateway</button>
               <button class="ghost" data-quick="/memory">/memory</button>
               <button class="ghost" data-quick="/logs">/logs</button>
               <button class="ghost" data-quick="/support">/support</button>
@@ -75,6 +80,52 @@
                 </div>
               </div>
               <div class="stream" id="eventStream"></div>
+            </article>
+
+            <article class="panel" data-panel="search">
+              <div class="panel-head">
+                <h3>Search</h3>
+                <div class="panel-tools">
+                  <button class="ghost" id="reloadSearchButton" type="button">Refresh</button>
+                </div>
+              </div>
+              <form class="inline-form" id="searchForm">
+                <input name="query" id="searchInput" placeholder="Search tasks, sessions, memory, logs, audit, jobs..." />
+                <button class="primary" type="submit">Search</button>
+              </form>
+              <div id="searchSummary" class="card muted">Search the runtime to find tasks, sessions, memory, logs, jobs, and healing records.</div>
+              <div class="panel-section">
+                <div class="eyebrow">Tasks</div>
+                <div class="list" id="searchTasksList"></div>
+              </div>
+              <div class="panel-section">
+                <div class="eyebrow">Sessions</div>
+                <div class="list" id="searchSessionsList"></div>
+              </div>
+              <div class="panel-section">
+                <div class="eyebrow">Memory</div>
+                <div class="list" id="searchMemoryList"></div>
+              </div>
+              <div class="panel-section">
+                <div class="eyebrow">Logs</div>
+                <div class="list" id="searchLogsList"></div>
+              </div>
+              <div class="panel-section">
+                <div class="eyebrow">Audit</div>
+                <div class="list" id="searchAuditList"></div>
+              </div>
+              <div class="panel-section">
+                <div class="eyebrow">Jobs</div>
+                <div class="list" id="searchJobsList"></div>
+              </div>
+              <div class="panel-section">
+                <div class="eyebrow">Gateways</div>
+                <div class="list" id="searchGatewaysList"></div>
+              </div>
+              <div class="panel-section">
+                <div class="eyebrow">Healing</div>
+                <div class="list" id="searchHealingList"></div>
+              </div>
             </article>
 
             <article class="panel" data-panel="tasks">
@@ -107,6 +158,7 @@
                   <button class="ghost" id="reloadToolsButton" type="button">Reload</button>
                 </div>
               </div>
+              <div id="toolDetail" class="detail"></div>
               <div class="list" id="toolsList"></div>
             </article>
 
@@ -120,6 +172,7 @@
               <div class="filter-bar">
                 <input id="approvalFilterInput" type="search" placeholder="Filter approvals by id, kind, session..." />
               </div>
+              <div id="approvalDetail" class="detail"></div>
               <div class="list" id="approvalsList"></div>
             </article>
 
@@ -136,7 +189,22 @@
                 <input name="intervalMs" type="number" min="1000" step="1000" value="60000" required />
                 <button class="primary" type="submit">Create</button>
               </form>
+              <div id="jobDetail" class="detail"></div>
               <div class="list" id="jobsList"></div>
+            </article>
+
+            <article class="panel" data-panel="gateway">
+              <div class="panel-head">
+                <h3>Gateway</h3>
+                <div class="panel-tools">
+                  <button class="ghost" id="reloadGatewayButton" type="button">Reload</button>
+                </div>
+              </div>
+              <div class="filter-bar">
+                <input id="gatewayFilterInput" type="search" placeholder="Filter gateways by id, name, platform, status..." />
+              </div>
+              <div id="gatewayDetail" class="detail"></div>
+              <div class="list" id="gatewayList"></div>
             </article>
 
             <article class="panel" data-panel="memory">
@@ -160,6 +228,7 @@
                   <button class="ghost" id="reloadHealingButton" type="button">Reload</button>
                 </div>
               </div>
+              <div id="healingDetail" class="detail"></div>
               <div class="list" id="healingList"></div>
             </article>
 
@@ -170,6 +239,7 @@
                   <button class="ghost" id="reloadAuditButton" type="button">Reload</button>
                 </div>
               </div>
+              <div id="auditDetail" class="detail"></div>
               <div class="list" id="auditList"></div>
             </article>
 
@@ -180,6 +250,7 @@
                   <button class="ghost" id="reloadLogsButton" type="button">Reload</button>
                 </div>
               </div>
+              <div id="logDetail" class="detail"></div>
               <div class="list" id="logsList"></div>
             </article>
 
@@ -201,6 +272,7 @@
                   <button class="ghost" id="reloadSessionsButton" type="button">Reload</button>
                 </div>
               </div>
+              <div id="sessionDetail" class="detail"></div>
               <div class="list" id="sessionsList"></div>
             </article>
 
@@ -225,6 +297,20 @@
             </article>
           </section>
         </main>
+      </div>
+    </div>
+
+    <div class="palette-backdrop" id="paletteBackdrop" hidden>
+      <div class="palette">
+        <div class="palette-head">
+          <div>
+            <div class="eyebrow">Command palette</div>
+            <h3>Search actions, views, and task commands</h3>
+          </div>
+          <button class="ghost" id="closePaletteButton" type="button">Close</button>
+        </div>
+        <input id="paletteInput" type="search" placeholder="Type to filter actions..." autocomplete="off" />
+        <div class="palette-results" id="paletteResults"></div>
       </div>
     </div>
 

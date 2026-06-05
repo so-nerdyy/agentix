@@ -15,7 +15,7 @@ import { PIAgentRegistry } from "./PIAgentRegistry.js";
 import { SessionCoordinator } from "./SessionCoordinator.js";
 import { TaskQueue } from "./TaskQueue.js";
 import { TaskStore } from "./TaskStore.js";
-import type { Session, Task, TaskResult } from "./types.js";
+import type { Session, Task, TaskAction, TaskResult } from "./types.js";
 
 export interface ExecuteStimulusOptions {
   stimulus: string;
@@ -41,6 +41,7 @@ export class Powerhouse {
   readonly taskStore: TaskStore;
   readonly audit: AuditLog;
   private started = false;
+  private recoveryScheduled = false;
 
   constructor(opts: {
     sessions?: SessionCoordinator;
@@ -91,6 +92,9 @@ export class Powerhouse {
       data: { recoveredTasks: recoveredTasks.length },
     });
     EventBus.emit("powerhouse:started", {});
+    if (recoveredTasks.length > 0) {
+      void this.resumeRecoveredWork(recoveredTasks);
+    }
   }
 
   stop(): void {
@@ -163,6 +167,68 @@ export class Powerhouse {
       });
     }
     return rejected;
+  }
+
+  controlTask(taskId: string, action: TaskAction): TaskResult {
+    const task = this.queue.get(taskId);
+    if (!task) return { ok: false, error: `unknown task: ${taskId}` };
+    if (action === "cancel") {
+      const cancelled = this.queue.cancel(taskId);
+      if (!cancelled) return { ok: false, error: `task cannot be cancelled: ${taskId}` };
+      cancelled.error = cancelled.error ?? "cancelled";
+      this.taskStore.upsert(cancelled);
+      this.sessions.removePendingTask(cancelled.sessionId, cancelled.id);
+      this.audit.record({
+        type: "task.cancelled",
+        actor: "user",
+        subjectId: cancelled.id,
+        data: { sessionId: cancelled.sessionId, kind: cancelled.kind },
+      });
+      EventBus.emit("task:failed", {
+        taskId: cancelled.id,
+        sessionId: cancelled.sessionId,
+        error: cancelled.error ?? "cancelled",
+      });
+      return { ok: true, output: { action, taskId: cancelled.id, status: cancelled.status } };
+    }
+    if (action === "retry") {
+      const retried = this.queue.retry(taskId);
+      if (!retried) return { ok: false, error: `task cannot be retried: ${taskId}` };
+      this.taskStore.upsert(retried);
+      this.audit.record({
+        type: "task.retried",
+        actor: "user",
+        subjectId: retried.id,
+        data: { sessionId: retried.sessionId, kind: retried.kind },
+      });
+      EventBus.emit("task:queued", {
+        taskId: retried.id,
+        sessionId: retried.sessionId,
+        kind: retried.kind,
+      });
+      return { ok: true, output: { action, taskId: retried.id, status: retried.status } };
+    }
+    if (action === "restart") {
+      const restarted = this.queue.retry(taskId) ?? task;
+      restarted.status = "queued";
+      restarted.startedAt = undefined;
+      restarted.finishedAt = undefined;
+      restarted.error = undefined;
+      this.taskStore.upsert(restarted);
+      this.audit.record({
+        type: "task.restarted",
+        actor: "user",
+        subjectId: restarted.id,
+        data: { sessionId: restarted.sessionId, kind: restarted.kind },
+      });
+      EventBus.emit("task:queued", {
+        taskId: restarted.id,
+        sessionId: restarted.sessionId,
+        kind: restarted.kind,
+      });
+      return { ok: true, output: { action, taskId: restarted.id, status: restarted.status } };
+    }
+    return { ok: false, error: `unsupported task action: ${action}` };
   }
 
   async executeStimulus(opts: ExecuteStimulusOptions): Promise<ExecuteStimulusResult> {
@@ -283,6 +349,44 @@ export class Powerhouse {
 
     this.failTask(task, result.error ?? "Pi agent failed");
     return result;
+  }
+
+  private async resumeRecoveredWork(tasks: Task[]): Promise<void> {
+    if (this.recoveryScheduled || tasks.length === 0) return;
+    this.recoveryScheduled = true;
+    try {
+      const sessionIds = [...new Set(tasks.map((task) => task.sessionId))];
+      for (const sessionId of sessionIds) {
+        if (!this.started) break;
+        const session = this.sessions.get(sessionId);
+        if (!session || session.status !== "active") continue;
+
+        while (this.started) {
+          const next = this.queue.nextForSession(sessionId);
+          if (!next) break;
+          const running = this.queue.dequeue(sessionId);
+          if (!running) break;
+          EventBus.emit("task:running", { taskId: running.id, sessionId });
+          this.taskStore.upsert(running);
+
+          if (running.requiresApproval) {
+            this.approvals.request(running);
+            this.audit.record({
+              type: "approval.requested",
+              actor: "system",
+              subjectId: running.id,
+              data: { sessionId, kind: running.kind, payload: running.payload, recovered: true },
+            });
+            break;
+          }
+
+          const result = await this.runTask(running);
+          if (!result.ok) break;
+        }
+      }
+    } finally {
+      this.recoveryScheduled = false;
+    }
   }
 
   private failTask(task: Task, error: string): void {

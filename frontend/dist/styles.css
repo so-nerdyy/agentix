@@ -148,6 +148,87 @@ button:hover {
   border-color: rgba(255, 180, 84, 0.28);
 }
 
+.chip.syncing {
+  color: #9cc7ff;
+  border-color: rgba(156, 199, 255, 0.3);
+}
+
+.palette-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 10, 16, 0.72);
+  backdrop-filter: blur(10px);
+  display: grid;
+  place-items: start center;
+  padding: 72px 18px 18px;
+  z-index: 40;
+}
+
+.palette {
+  width: min(760px, 100%);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(16, 24, 37, 0.98), rgba(10, 15, 21, 0.98));
+  box-shadow: 0 28px 100px rgba(0, 0, 0, 0.55);
+  padding: 16px;
+  display: grid;
+  gap: 14px;
+}
+
+.palette-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 12px;
+}
+
+.palette input {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 14px;
+  padding: 14px 16px;
+  outline: none;
+  font-size: 15px;
+}
+
+.palette input:focus {
+  border-color: rgba(87, 214, 199, 0.55);
+  box-shadow: 0 0 0 3px rgba(87, 214, 199, 0.14);
+}
+
+.palette-results {
+  display: grid;
+  gap: 8px;
+  max-height: min(60vh, 560px);
+  overflow: auto;
+}
+
+.palette-item {
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--bg-alt);
+  color: var(--text);
+  padding: 14px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+}
+
+.palette-item.active,
+.palette-item:hover {
+  border-color: rgba(87, 214, 199, 0.55);
+  background: rgba(87, 214, 199, 0.08);
+}
+
+.palette-item strong,
+.palette-item .muted {
+  display: block;
+}
+
 .token-field,
 .session-picker {
   display: grid;
@@ -326,6 +407,15 @@ button:hover {
   word-break: break-word;
 }
 
+.panel-section {
+  display: grid;
+  gap: 10px;
+}
+
+.panel-section .eyebrow {
+  margin-top: 4px;
+}
+
 #supportSummary {
   white-space: pre-wrap;
 }
@@ -453,6 +543,11 @@ button:hover {
 .danger {
   color: var(--danger);
   border-color: rgba(255, 113, 113, 0.3);
+}
+
+.ghost.danger:hover {
+  border-color: rgba(255, 113, 113, 0.5);
+  background: rgba(255, 113, 113, 0.08);
 }
 
 .success {

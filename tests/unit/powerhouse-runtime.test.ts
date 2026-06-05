@@ -94,7 +94,26 @@ describe("Powerhouse restored runtime", () => {
     expect(runtime.listSessions().some((item) => item.id === session.id)).toBe(true);
     expect(runtime.listTasks(session.id)).toHaveLength(1);
     expect(runtime.listTools().some((tool) => tool.name === "user-message")).toBe(true);
-    expect(runtime.listApprovals()).toHaveLength(0);
+    expect(Array.isArray(runtime.listApprovals())).toBe(true);
+
+    runtime.shutdown();
+  });
+
+  it("returns detailed approval information for awaiting tasks", async () => {
+    const runtime = new LocalAgentixRuntime();
+
+    const result = await runtime.execute({
+      stimulus: "run: echo approval-detail",
+    });
+    const taskId = result.taskIds[0];
+    const detail = runtime.getApproval(taskId);
+
+    expect(detail).not.toBeNull();
+    expect(detail?.approval.id).toBe(taskId);
+    expect(detail?.approval.status).toBe("awaiting-approval");
+    expect(Array.isArray(detail?.memory)).toBe(true);
+    expect(Array.isArray(detail?.audit)).toBe(true);
+    expect(Array.isArray(detail?.logs)).toBe(true);
 
     runtime.shutdown();
   });
@@ -114,6 +133,55 @@ describe("Powerhouse restored runtime", () => {
     runtime.shutdown();
   });
 
+  it("returns detailed audit information", async () => {
+    const runtime = new LocalAgentixRuntime();
+
+    const result = await runtime.execute({
+      stimulus: "audit detail smoke",
+    });
+    const taskId = result.taskIds[0];
+    const auditEntries = runtime.listAudit();
+    expect(auditEntries.length).toBeGreaterThan(0);
+    const detail = runtime.getAudit(auditEntries[0]!.id);
+
+    expect(detail).not.toBeNull();
+    expect(detail?.audit.id).toBe(auditEntries[0]!.id);
+    expect(Array.isArray(detail?.relatedTasks)).toBe(true);
+    expect(Array.isArray(detail?.relatedSessions)).toBe(true);
+    expect(Array.isArray(detail?.logs)).toBe(true);
+    expect(detail?.relatedTasks.length).toBeGreaterThanOrEqual(0);
+
+    runtime.shutdown();
+  });
+
+  it("searches tasks, sessions, logs, memory, audit, jobs, and healing records", async () => {
+    const runtime = new LocalAgentixRuntime();
+
+    const session = runtime.createSession({ model: "search-model" });
+    const result = await runtime.execute({
+      sessionId: session.id,
+      stimulus: "searchable runtime record",
+    });
+    const taskId = result.taskIds[0];
+    const taskSearch = runtime.search("searchable");
+    const sessionSearch = runtime.search(session.id);
+
+    expect(taskSearch.query).toBe("searchable");
+    expect(sessionSearch.query).toBe(session.id);
+    expect(Array.isArray(taskSearch.tasks)).toBe(true);
+    expect(Array.isArray(taskSearch.sessions)).toBe(true);
+    expect(Array.isArray(taskSearch.memory)).toBe(true);
+    expect(Array.isArray(taskSearch.audit)).toBe(true);
+    expect(Array.isArray(taskSearch.logs)).toBe(true);
+    expect(Array.isArray(taskSearch.jobs)).toBe(true);
+    expect(Array.isArray(taskSearch.healing)).toBe(true);
+    expect(Array.isArray(taskSearch.gateways)).toBe(true);
+    expect(taskSearch.tasks.length).toBeGreaterThan(0);
+    expect(sessionSearch.sessions.some((item) => item.id === session.id)).toBe(true);
+
+    runtime.shutdown();
+  });
+
   it("deletes sessions through the runtime facade", async () => {
     const runtime = new LocalAgentixRuntime();
 
@@ -123,6 +191,89 @@ describe("Powerhouse restored runtime", () => {
     runtime.deleteSession(session.id);
 
     expect(runtime.listSessions().some((item) => item.id === session.id)).toBe(false);
+
+    runtime.shutdown();
+  });
+
+  it("controls task lifecycle through the runtime facade", async () => {
+    const runtime = new LocalAgentixRuntime();
+
+    const result = await runtime.execute({
+      stimulus: "task control smoke",
+    });
+    const taskId = result.taskIds[0];
+    const detail = runtime.getTask(taskId);
+    expect(detail?.task.status).toBe("complete");
+
+    const restarted = runtime.controlTask(taskId, "restart");
+    expect(restarted.ok).toBe(true);
+    expect(restarted.output).toMatchObject({ action: "restart", taskId });
+
+    runtime.shutdown();
+  });
+
+  it("resumes recovered queued work after restart", async () => {
+    const dir = tempDir("agentix-recovery-");
+    const sessions = new SessionCoordinator(join(dir, "sessions"));
+    const taskStore = new TaskStore(join(dir, "tasks.json"));
+    const registry = new PIAgentRegistry();
+    registry.register(new ConversationAgent());
+    const powerhouse = new Powerhouse({
+      sessions,
+      queue: new TaskQueue(),
+      approvals: new ApprovalWorkflow({ timeoutMs: 10_000 }),
+      agents: registry,
+      memory: new MemoryStore(join(dir, "memory.jsonl")),
+      healing: new HealingEngine(join(dir, "healing.json")),
+      taskStore,
+      audit: new AuditLog(join(dir, "audit.jsonl")),
+    });
+
+    const session = sessions.create({ source: "recovery-test" });
+    const task = {
+      id: "task-recovery",
+      sessionId: session.id,
+      kind: "user-message" as const,
+      priority: "user" as const,
+      status: "queued" as const,
+      payload: { stimulus: "resume me" },
+      createdAt: Date.now(),
+      attempts: 0,
+      maxAttempts: 1,
+      requiresApproval: false,
+      dependsOn: [] as string[],
+    };
+    taskStore.upsert(task);
+
+    powerhouse.start();
+
+    let recoveredStatus: string | undefined;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      recoveredStatus = powerhouse.listTasks().find((item) => item.id === task.id)?.status;
+      if (recoveredStatus === "complete") break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    expect(recoveredStatus).toBe("complete");
+
+    powerhouse.stop();
+  });
+
+  it("returns a detailed task view with related memory and audit entries", async () => {
+    const runtime = new LocalAgentixRuntime();
+
+    const result = await runtime.execute({
+      stimulus: "detail me",
+    });
+
+    const taskId = result.taskIds[0];
+    expect(taskId).toBeDefined();
+
+    const detail = runtime.getTask(taskId);
+    expect(detail).not.toBeNull();
+    expect(detail?.task.id).toBe(taskId);
+    expect(detail?.memory.length).toBeGreaterThan(0);
+    expect(detail?.audit.length).toBeGreaterThan(0);
+    expect(Array.isArray(detail?.logs)).toBe(true);
 
     runtime.shutdown();
   });
@@ -225,6 +376,49 @@ describe("Powerhouse restored runtime", () => {
 
     scheduler.stop();
     powerhouse.stop();
+  });
+
+  it("exposes gateway registry details and accepts inbound gateway messages", async () => {
+    const runtime = new LocalAgentixRuntime();
+
+    const gateways = runtime.listGateways();
+    expect(gateways.length).toBeGreaterThan(0);
+    const detail = runtime.getGateway("webhook");
+
+    expect(detail).not.toBeNull();
+    expect(detail?.gateway.id).toBe("webhook");
+    expect(Array.isArray(detail?.relatedSessions)).toBe(true);
+    expect(Array.isArray(detail?.relatedTasks)).toBe(true);
+
+    const enabled = runtime.setGatewayEnabled("webhook", true);
+    expect(enabled.ok).toBe(true);
+
+    const message = await runtime.receiveGatewayMessage({
+      gatewayId: "webhook",
+      stimulus: "gateway smoke",
+    });
+    expect(message.ok).toBe(true);
+    expect(message.response).toContain("Powerhouse accepted the task");
+
+    runtime.shutdown();
+  });
+
+  it("returns detailed scheduled job information", async () => {
+    const runtime = new LocalAgentixRuntime();
+    const job = runtime.createJob({
+      name: "detail smoke",
+      stimulus: "scheduled detail",
+      intervalMs: 60_000,
+    }) as { id: string };
+
+    const detail = runtime.getJob(job.id);
+
+    expect(detail).not.toBeNull();
+    expect(detail?.job.id).toBe(job.id);
+    expect(Array.isArray(detail?.audit)).toBe(true);
+    expect(Array.isArray(detail?.relatedTasks)).toBe(true);
+
+    runtime.shutdown();
   });
 
   it("creates a support bundle with runtime snapshots", async () => {

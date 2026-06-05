@@ -54,3 +54,8 @@ export interface TaskResult {
   output?: unknown;
   error?: string;
 }
+
+export type TaskAction =
+  | "cancel"
+  | "retry"
+  | "restart";

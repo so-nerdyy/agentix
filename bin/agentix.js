@@ -19,6 +19,7 @@ const BACKEND_COMMANDS = new Set([
   "dashboard",
   "ui",
   "web",
+  "gateway",
   "support",
   "logs",
   "mods",
@@ -37,7 +38,6 @@ const HERMES_COMMANDS = new Set([
   "doctor",
   "usage",
   "cron",
-  "gateway",
   "sessions",
   "skills",
   "tools",
@@ -49,6 +49,119 @@ const HERMES_COMMANDS = new Set([
   "dashboard",
   "web",
 ]);
+
+function buildLauncherHelp() {
+  return [
+    `Agentix v${pkg.version}`,
+    "",
+    "Usage:",
+    "  agentix                 open the Hermes-style interactive shell",
+    "  agentix <command>       run a shell or backend command",
+    "",
+    "Hermes shell commands:",
+    "  setup                   first-run setup wizard",
+    "  model                   configure provider/model",
+    "  update                  check for updates",
+    "  doctor                  validate config/runtime health",
+    "  usage                   inspect usage and limits",
+    "  cron                    manage scheduled jobs",
+    "  sessions                inspect sessions",
+    "  skills                  manage skills/plugins",
+    "  tools                   manage tools",
+    "  memory                  inspect memory",
+    "  auth                    manage auth/session access",
+    "  config                  inspect workspace config",
+    "  plugins                 list installed plugins",
+    "  fortune                 show a status/summary message",
+    "",
+    "Agentix backend commands:",
+    "  server                  start the backend bridge/API and inbox server",
+    "                         flags: --port <n> --bridge-port <n> --host <addr>",
+    "  dashboard, ui, web      start the web control surface only",
+    "                         flags: --port <n> --host <addr>",
+    "  gateway                 inspect or manage gateway integrations",
+    "  support                 create a support bundle",
+    "  logs                    print recent runtime logs",
+    "  mods                    list available tools/modules",
+    "  plugin, extension       plugin compatibility helpers",
+    "  broadcast, eval, shell   backend compatibility entrypoints",
+    "  version                 print the installed version",
+    "",
+    "Tips:",
+    "  agentix help <command>   show command-specific help when available",
+    "  agentix --agentix-cli    bypass the Hermes shell and use the backend CLI directly",
+  ].join("\n");
+}
+
+function buildCommandHelp(command) {
+  switch (command) {
+    case "server":
+      return [
+        "Usage: agentix server",
+        "",
+        "Starts the backend bridge/API and inbox server.",
+        "The server exposes the Agentix runtime, dashboard APIs, scheduler, logs,",
+        "memory, healing, support bundle, and event stream endpoints.",
+      ].join("\n");
+    case "dashboard":
+    case "ui":
+    case "web":
+      return [
+        `Usage: agentix ${command}`,
+        "",
+        "Starts the web control surface only.",
+        "Use this when you want the dashboard without launching the full bridge.",
+      ].join("\n");
+    case "gateway":
+      return [
+        "Usage: agentix gateway [gateway-id] [inspect|enable|disable|message <stimulus>]",
+        "",
+        "Inspects or manages gateway integrations from the Agentix backend runtime.",
+      ].join("\n");
+    case "logs":
+      return [
+        "Usage: agentix logs",
+        "",
+        "Prints recent persisted runtime log entries from the Agentix backend.",
+      ].join("\n");
+    case "support":
+      return [
+        "Usage: agentix support",
+        "",
+        "Creates a timestamped support bundle under data/support/ with runtime snapshots,",
+        "logs, memory, tasks, approvals, jobs, healing state, and config metadata.",
+      ].join("\n");
+    case "mods":
+    case "plugin":
+    case "extension":
+      return [
+        `Usage: agentix ${command}`,
+        "",
+        "Lists available tools/modules from the backend runtime.",
+      ].join("\n");
+    case "eval":
+    case "broadcast":
+      return [
+        `Usage: agentix ${command} <stimulus>`,
+        "",
+        "Runs a stimulus directly through the Agentix backend and prints the result.",
+      ].join("\n");
+    case "shell":
+      return [
+        "Usage: agentix",
+        "",
+        "Open the Hermes-style interactive shell from the current folder.",
+      ].join("\n");
+    case "version":
+      return [
+        "Usage: agentix version",
+        "",
+        "Prints the installed Agentix version.",
+      ].join("\n");
+    default:
+      return buildLauncherHelp();
+  }
+}
 
 function resolveHermesRoot() {
   const candidates = [
@@ -239,12 +352,31 @@ async function main() {
   }
 
   if (cmd === "help" || cmd === "--help" || cmd === "-h") {
-    if (args[0] && HERMES_COMMANDS.has(args[0])) {
+    if (!args[0]) {
+      console.log(buildLauncherHelp());
+      return;
+    }
+    if (HERMES_COMMANDS.has(args[0])) {
       await spawnHermes([args[0], "--help"]);
+      return;
+    }
+    if (BACKEND_COMMANDS.has(args[0])) {
+      await spawnNodeCli([args[0], "--help"]);
       return;
     }
     await spawnHermes(["--help"]);
     return;
+  }
+
+  if (args.includes("--help") || args.includes("-h")) {
+    if (BACKEND_COMMANDS.has(cmd)) {
+      console.log(buildCommandHelp(cmd));
+      return;
+    }
+    if (HERMES_COMMANDS.has(cmd)) {
+      await spawnHermes([cmd, "--help"]);
+      return;
+    }
   }
 
   if (cmd && BACKEND_COMMANDS.has(cmd)) {

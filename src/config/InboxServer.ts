@@ -25,7 +25,7 @@ import { getBackendRuntime } from "../runtime/backend.js";
 
 const VERSION = "2.1.0";
 
-export async function startInboxServer(): Promise<{
+export async function startInboxServer(opts: { port?: number; host?: string } = {}): Promise<{
   close: () => Promise<void>;
   port: number;
 }> {
@@ -33,8 +33,8 @@ export async function startInboxServer(): Promise<{
   startEventStreamBridge();
 
   const cfg = loadConfig();
-  const port = cfg.inboxPort;
-  const host = "127.0.0.1";
+  const port = opts.port ?? cfg.inboxPort;
+  const host = opts.host ?? "127.0.0.1";
 
   const server = Fastify({ logger: false });
   const runtime = getBackendRuntime();
@@ -61,6 +61,15 @@ export async function startInboxServer(): Promise<{
     });
   });
   server.get("/sessions", async () => runtime.listSessions());
+  server.get("/sessions/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const session = runtime.getSession(id);
+    if (!session) {
+      reply.status(404);
+      return { error: `unknown session: ${id}` };
+    }
+    return session;
+  });
   server.post("/sessions", async (request) => {
     const body = request.body as Record<string, unknown>;
     return runtime.createSession({ model: body.model as string | undefined });
@@ -74,9 +83,86 @@ export async function startInboxServer(): Promise<{
     const query = request.query as Record<string, string | undefined>;
     return runtime.listTasks(query.sessionId);
   });
+  server.get("/tasks/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const task = runtime.getTask(id);
+    if (!task) {
+      reply.status(404);
+      return { error: `unknown task: ${id}` };
+    }
+    return task;
+  });
+  server.post("/tasks/:id/action", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as { action?: string };
+    if (!body?.action) {
+      reply.status(400);
+      return { error: "missing task action" };
+    }
+    return runtime.controlTask(id, body.action as never);
+  });
   server.get("/tools", async () => runtime.listTools());
+  server.get("/tools/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const tool = runtime.getTool(id);
+    if (!tool) {
+      reply.status(404);
+      return { error: `unknown tool: ${id}` };
+    }
+    return tool;
+  });
   server.get("/logs", async () => runtime.listLogs());
+  server.get("/logs/:index", async (request, reply) => {
+    const index = Number((request.params as { index: string }).index);
+    const detail = runtime.getLog(index);
+    if (!detail) {
+      reply.status(404);
+      return { error: `unknown log entry: ${index}` };
+    }
+    return detail;
+  });
+  server.get("/search", async (request) => {
+    const q = (request.query as Record<string, string>).q || "";
+    return runtime.search(q);
+  });
+  server.get("/gateway", async () => runtime.listGateways());
+  server.get("/gateway/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const detail = runtime.getGateway(id);
+    if (!detail) {
+      reply.status(404);
+      return { error: `unknown gateway: ${id}` };
+    }
+    return detail;
+  });
+  server.post("/gateway/:id/enable", async (request) => {
+    const { id } = request.params as { id: string };
+    return runtime.setGatewayEnabled(id, true);
+  });
+  server.post("/gateway/:id/disable", async (request) => {
+    const { id } = request.params as { id: string };
+    return runtime.setGatewayEnabled(id, false);
+  });
+  server.post("/gateway/:id/message", async (request) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as Record<string, unknown> | undefined;
+    return runtime.receiveGatewayMessage({
+      gatewayId: id,
+      stimulus: String(body?.stimulus ?? body?.text ?? ""),
+      sessionId: body?.sessionId as string | undefined,
+      metadata: (body?.metadata as Record<string, unknown> | undefined) ?? undefined,
+    });
+  });
   server.get("/approvals", async () => runtime.listApprovals());
+  server.get("/approvals/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const approval = runtime.getApproval(id);
+    if (!approval) {
+      reply.status(404);
+      return { error: `unknown approval: ${id}` };
+    }
+    return approval;
+  });
   server.post("/approvals/:id/approve", async (request) => {
     const { id } = request.params as { id: string };
     return runtime.approve(id);
@@ -95,8 +181,26 @@ export async function startInboxServer(): Promise<{
     return runtime.consolidateMemory(body?.sessionId as string | undefined);
   });
   server.get("/audit", async () => runtime.listAudit());
+  server.get("/audit/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const detail = runtime.getAudit(id);
+    if (!detail) {
+      reply.status(404);
+      return { error: `unknown audit entry: ${id}` };
+    }
+    return detail;
+  });
   server.post("/support/bundle", async () => runtime.createSupportBundle());
   server.get("/healing/stats", async () => runtime.healingStats());
+  server.get("/healing/detail/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const detail = runtime.getHealingDetail(id);
+    if (!detail) {
+      reply.status(404);
+      return { error: `unknown healing entry: ${id}` };
+    }
+    return detail;
+  });
   server.post("/healing/procedures/:id/promote", async (request) => {
     const { id } = request.params as { id: string };
     return runtime.promoteHealingProcedure(id);
@@ -106,6 +210,15 @@ export async function startInboxServer(): Promise<{
     return runtime.deprecateHealingProcedure(id);
   });
   server.get("/scheduler/jobs", async () => runtime.listJobs());
+  server.get("/scheduler/jobs/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const job = runtime.getJob(id);
+    if (!job) {
+      reply.status(404);
+      return { error: `unknown scheduled job: ${id}` };
+    }
+    return job;
+  });
   server.post("/scheduler/jobs", async (request) => {
     const body = request.body as Record<string, unknown>;
     return runtime.createJob({

@@ -1,0 +1,26 @@
+export function buildHelpText(version: string): string {
+  return [
+    `Agentix v${version}`,
+    "",
+    "Usage:",
+    "  agentix <command>",
+    "",
+    "Commands:",
+    "  help, --help, -h     show this help",
+    "  version              print the installed version",
+    "  server               start the backend bridge/API and inbox server",
+    "                       flags: --port <n> --bridge-port <n> --host <addr>",
+    "  dashboard            start the web control surface only",
+    "                       flags: --port <n> --host <addr>",
+    "  ui, web              aliases for dashboard",
+    "  gateway              inspect or manage gateway integrations",
+    "  logs                 print recent runtime logs",
+    "  support              create a support bundle",
+    "  mods                 list available tools/modules",
+    "  plugin, extension    alias for mods",
+    "  eval, broadcast      run a stimulus directly through the backend",
+    "  shell                explain how to open the interactive shell",
+    "",
+    "See README.md for the Hermes shell, setup wizard, update flow, cron, gateway, and dashboard details.",
+  ].join("\n");
+}

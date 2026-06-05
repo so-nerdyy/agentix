@@ -2,10 +2,32 @@ import { createRequire } from "module";
 import { startBridge } from "./bridge/server.js";
 import { PATHS, ensureDataDirs } from "./config/paths.js";
 import { startInboxServer } from "./config/InboxServer.js";
+import { buildHelpText } from "./cli/help.js";
 import { getBackendRuntime } from "./runtime/backend.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json");
+
+function readFlagValue(args: string[], flag: string): string | undefined {
+  const idx = args.indexOf(flag);
+  if (idx < 0) return undefined;
+  const value = args[idx + 1];
+  return value && !value.startsWith("-") ? value : undefined;
+}
+
+function withoutFlags(args: string[], flags: string[]): string[] {
+  const filtered: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (flags.includes(arg)) {
+      const next = args[i + 1];
+      if (next && !next.startsWith("-")) i += 1;
+      continue;
+    }
+    filtered.push(arg);
+  }
+  return filtered;
+}
 
 async function isBridgeHealthy(): Promise<boolean> {
   try {
@@ -17,9 +39,18 @@ async function isBridgeHealthy(): Promise<boolean> {
 }
 
 async function main() {
-  const [cmd] = process.argv.slice(2);
+  const [cmd, ...args] = process.argv.slice(2);
+  const portArg = readFlagValue(args, "--port");
+  const hostArg = readFlagValue(args, "--host");
+  const bridgePortArg = readFlagValue(args, "--bridge-port");
+  const cleanArgs = withoutFlags(args, ["--port", "--host", "--bridge-port"]);
 
   switch (cmd) {
+    case "help":
+    case "--help":
+    case "-h":
+      console.log(buildHelpText(pkg.version));
+      return;
     case "version":
     case "--version":
     case "-V":
@@ -27,9 +58,15 @@ async function main() {
       return;
     case "server":
       ensureDataDirs();
-      await startInboxServer();
+      await startInboxServer({
+        port: portArg ? Number(portArg) : undefined,
+        host: hostArg,
+      });
       try {
-        await startBridge();
+        await startBridge({
+          port: bridgePortArg ? Number(bridgePortArg) : undefined,
+          host: hostArg,
+        });
       } catch (err) {
         if (
           err instanceof Error &&
@@ -47,7 +84,10 @@ async function main() {
     case "web":
       ensureDataDirs();
       {
-        const server = await startInboxServer();
+        const server = await startInboxServer({
+          port: portArg ? Number(portArg) : undefined,
+          host: hostArg,
+        });
         console.log(`Agentix dashboard available at http://127.0.0.1:${server.port}/ui/`);
       }
       return;
@@ -65,10 +105,96 @@ async function main() {
       }
       return;
     case "mods":
+    case "plugin":
+    case "extension":
       ensureDataDirs();
       for (const tool of getBackendRuntime().listTools()) {
         console.log(`${tool.name}: ${tool.description}`);
       }
+      return;
+    case "gateway":
+      ensureDataDirs();
+      if (cleanArgs.includes("--help") || cleanArgs.includes("-h")) {
+        console.log(buildHelpText(pkg.version));
+        return;
+      }
+      if (!cleanArgs.length) {
+        for (const gateway of getBackendRuntime().listGateways()) {
+          console.log(
+            `${gateway.id}: ${gateway.name} [${gateway.platform}] ${gateway.enabled ? "enabled" : "disabled"} / ${gateway.status}`,
+          );
+        }
+        return;
+      }
+      {
+        const [first, second, ...rest] = cleanArgs;
+        if (first === "enable" || first === "disable") {
+          const gatewayId = second;
+          if (!gatewayId) {
+            console.log(`Usage: agentix gateway ${first} <gateway-id>`);
+            return;
+          }
+          console.log(JSON.stringify(getBackendRuntime().setGatewayEnabled(gatewayId, first === "enable"), null, 2));
+          return;
+        }
+        if (first === "message") {
+          const gatewayId = second;
+          const stimulus = rest.join(" ").trim();
+          if (!gatewayId || !stimulus) {
+            console.log("Usage: agentix gateway message <gateway-id> <stimulus>");
+            return;
+          }
+          console.log(
+            JSON.stringify(
+              await getBackendRuntime().receiveGatewayMessage({ gatewayId, stimulus }),
+              null,
+              2,
+            ),
+          );
+          return;
+        }
+        if (second === "enable" || second === "disable") {
+          console.log(JSON.stringify(getBackendRuntime().setGatewayEnabled(first, second === "enable"), null, 2));
+          return;
+        }
+        if (second === "message") {
+          const stimulus = rest.join(" ").trim();
+          if (!stimulus) {
+            console.log(`Usage: agentix gateway ${first} message <stimulus>`);
+            return;
+          }
+          console.log(
+            JSON.stringify(
+              await getBackendRuntime().receiveGatewayMessage({ gatewayId: first, stimulus }),
+              null,
+              2,
+            ),
+          );
+          return;
+        }
+        console.log(JSON.stringify(getBackendRuntime().getGateway(first), null, 2));
+      }
+      return;
+    case "eval":
+    case "broadcast": {
+      ensureDataDirs();
+      const stimulus = cleanArgs.join(" ").trim();
+      if (!stimulus) {
+        console.log(`Usage: agentix ${cmd} <stimulus>`);
+        return;
+      }
+      const result = await getBackendRuntime().execute({ stimulus });
+      console.log(`Status: ${result.status}`);
+      console.log(`Session: ${result.sessionId}`);
+      console.log(`Tasks: ${result.taskIds.join(", ") || "(none)"}`);
+      if (result.response) {
+        console.log("");
+        console.log(result.response);
+      }
+      return;
+    }
+    case "shell":
+      console.log("Use `agentix` with no arguments to open the interactive shell.");
       return;
     case "logs":
       ensureDataDirs();
@@ -85,9 +211,7 @@ async function main() {
       }
       return;
     default:
-      console.log(
-        "Agentix backend ready. Use `agentix` for the Hermes shell or `agentix server` to start backend services.",
-      );
+      console.log(buildHelpText(pkg.version));
     }
 }
 
