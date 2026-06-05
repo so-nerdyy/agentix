@@ -14,6 +14,18 @@ agentix setup
 agentix
 ```
 
+Windows one-line install:
+
+```powershell
+irm https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.ps1 | iex
+```
+
+macOS/Linux one-line install:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
+```
+
 From any project folder, `agentix` opens the interactive shell. Use `agentix dashboard` if you want the web control surface only, or `agentix server` if you want the backend bridge, event stream, and dashboard/API runtime. Open `http://127.0.0.1:3000/ui/` for the live control surface.
 
 ## Commands

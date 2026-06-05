@@ -8,8 +8,20 @@
 
 ## Global Install
 
+Use npm directly:
+
 ```powershell
 npm install -g agentix
+```
+
+Or install with the curl-friendly bootstrap scripts:
+
+```powershell
+irm https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.ps1 | iex
+```
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
 ```
 
 Then from any workspace:
@@ -17,6 +29,17 @@ Then from any workspace:
 ```powershell
 agentix setup
 agentix
+```
+
+The installer scripts require Node.js/npm first, then install the global `agentix` package and verify `agentix version`. To install a specific release or tarball, set `AGENTIX_PACKAGE`, for example:
+
+```powershell
+$env:AGENTIX_PACKAGE = "agentix@2.1.0"
+irm https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.ps1 | iex
+```
+
+```sh
+AGENTIX_PACKAGE=agentix@2.1.0 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
 ```
 
 ## Local Development

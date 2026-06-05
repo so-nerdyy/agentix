@@ -44,6 +44,8 @@
     "hermes-agent/tui_gateway",
     "README.md",
     "LICENSE",
+    "install.ps1",
+    "install.sh",
     "docs"
   ],
   "publishConfig": {
