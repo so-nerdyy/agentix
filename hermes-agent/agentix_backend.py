@@ -206,6 +206,10 @@ class AgentixBackend:
         interval_ms: Optional[int] = None,
         enabled: bool = True,
         schedule: Optional[str] = None,
+        script: Optional[str] = None,
+        no_agent: Optional[bool] = None,
+        workdir: Optional[str] = None,
+        skills: Optional[list[str]] = None,
     ) -> Any:
         body: Dict[str, Any] = {
             "name": name,
@@ -216,6 +220,14 @@ class AgentixBackend:
             body["schedule"] = schedule
         if interval_ms is not None:
             body["intervalMs"] = interval_ms
+        if script is not None:
+            body["script"] = script
+        if no_agent is not None:
+            body["noAgent"] = no_agent
+        if workdir is not None:
+            body["workdir"] = workdir
+        if skills is not None:
+            body["skills"] = skills
         return self._post(
             "/scheduler/jobs",
             body,
@@ -229,6 +241,10 @@ class AgentixBackend:
         schedule: Optional[str] = None,
         interval_ms: Optional[int] = None,
         enabled: Optional[bool] = None,
+        script: Optional[str] = None,
+        no_agent: Optional[bool] = None,
+        workdir: Optional[str] = None,
+        skills: Optional[list[str]] = None,
     ) -> Any:
         body: Dict[str, Any] = {}
         if name is not None:
@@ -241,6 +257,14 @@ class AgentixBackend:
             body["intervalMs"] = interval_ms
         if enabled is not None:
             body["enabled"] = enabled
+        if script is not None:
+            body["script"] = script
+        if no_agent is not None:
+            body["noAgent"] = no_agent
+        if workdir is not None:
+            body["workdir"] = workdir
+        if skills is not None:
+            body["skills"] = skills
         return self._post(f"/scheduler/jobs/{job_id}", body)
 
     def run_scheduled_job(self, job_id: str) -> Any:

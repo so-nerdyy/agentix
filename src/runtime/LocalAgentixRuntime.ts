@@ -30,6 +30,11 @@ export type RuntimeSearchResults = {
     lastRunAt: string | null;
     lastStatus: string | null;
     lastError: string | null;
+    lastOutput: string | null;
+    script: string | null;
+    noAgent: boolean;
+    workdir: string | null;
+    skills: string[];
     runCount: number;
   }>;
   healing: Array<{ fingerprint: string; count: number; firstSeenAt: string; lastSeenAt: string; lastError: string }>;
@@ -403,6 +408,11 @@ export class LocalAgentixRuntime {
         lastRunAt: job.lastRunAt ? new Date(job.lastRunAt).toISOString() : null,
         lastStatus: job.lastStatus ?? null,
         lastError: job.lastError ?? null,
+        lastOutput: job.lastOutput ?? null,
+        script: job.script ?? null,
+        noAgent: Boolean(job.noAgent),
+        workdir: job.workdir ?? null,
+        skills: job.skills ?? [],
         runCount: job.runCount,
       }));
 
@@ -987,6 +997,10 @@ export class LocalAgentixRuntime {
     stimulus: string;
     schedule?: string;
     intervalMs?: number;
+    script?: string;
+    noAgent?: boolean;
+    workdir?: string;
+    skills?: string[];
     enabled?: boolean;
   }): Record<string, unknown> {
     return this.scheduler.create(input) as unknown as Record<string, unknown>;
@@ -997,6 +1011,10 @@ export class LocalAgentixRuntime {
     stimulus?: string;
     schedule?: string;
     intervalMs?: number;
+    script?: string | null;
+    noAgent?: boolean;
+    workdir?: string | null;
+    skills?: string[];
     enabled?: boolean;
   }): Record<string, unknown> {
     const job = this.scheduler.update(id, input);

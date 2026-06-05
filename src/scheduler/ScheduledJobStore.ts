@@ -15,9 +15,14 @@ export interface ScheduledJob {
   intervalMs: number;
   runAt?: number;
   nextRunAt: number | null;
+  script?: string;
+  noAgent?: boolean;
+  workdir?: string;
+  skills?: string[];
   lastRunAt?: number;
   lastStatus?: "success" | "failure";
   lastError?: string;
+  lastOutput?: string;
   lastTaskIds?: string[];
   running?: boolean;
   runCount: number;
@@ -41,6 +46,10 @@ export class ScheduledJobStore {
     stimulus: string;
     schedule?: string;
     intervalMs?: number;
+    script?: string;
+    noAgent?: boolean;
+    workdir?: string;
+    skills?: string[];
     enabled?: boolean;
   }): ScheduledJob {
     const now = Date.now();
@@ -56,6 +65,10 @@ export class ScheduledJobStore {
       intervalMs: schedule.intervalMs,
       runAt: schedule.runAt,
       nextRunAt: schedule.nextRunAt,
+      script: input.script,
+      noAgent: input.noAgent,
+      workdir: input.workdir,
+      skills: input.skills,
       running: false,
       runCount: 0,
       createdAt: now,

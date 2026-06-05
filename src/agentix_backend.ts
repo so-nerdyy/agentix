@@ -194,6 +194,10 @@ export class AgentixBackend {
     stimulus: string;
     schedule?: string;
     intervalMs?: number;
+    script?: string;
+    noAgent?: boolean;
+    workdir?: string;
+    skills?: string[];
     enabled?: boolean;
   }): Promise<Record<string, unknown>> {
     return this.post("/scheduler/jobs", input);
@@ -204,6 +208,10 @@ export class AgentixBackend {
     stimulus?: string;
     schedule?: string;
     intervalMs?: number;
+    script?: string | null;
+    noAgent?: boolean;
+    workdir?: string | null;
+    skills?: string[];
     enabled?: boolean;
   }): Promise<Record<string, unknown>> {
     return this.post(`/scheduler/jobs/${encodeURIComponent(id)}`, input);

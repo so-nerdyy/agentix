@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from hermes_constants import display_hermes_home
+from hermes_constants import display_hermes_home, get_hermes_home
 
 logger = logging.getLogger(__name__)
 
@@ -449,6 +449,10 @@ def _format_agentix_job(job: Dict[str, Any]) -> Dict[str, Any]:
         "enabled": enabled,
         "state": state,
         "run_count": job.get("runCount") or job.get("run_count") or 0,
+        "script": job.get("script"),
+        "no_agent": bool(job.get("noAgent") or job.get("no_agent")),
+        "workdir": job.get("workdir"),
+        "skills": job.get("skills") or [],
     }
 
 
@@ -482,6 +486,17 @@ def _agentix_stimulus(prompt: Optional[str], skills: List[str]) -> str:
     ]).strip()
 
 
+def _agentix_resolve_script(script: Optional[str]) -> Optional[str]:
+    if script is None:
+        return None
+    if not str(script).strip():
+        return ""
+    script_error = _validate_cron_script_path(str(script))
+    if script_error:
+        raise ValueError(script_error)
+    return str((get_hermes_home() / "scripts" / str(script).strip()).resolve())
+
+
 def _agentix_cronjob(
     action: str,
     job_id: Optional[str] = None,
@@ -493,6 +508,7 @@ def _agentix_cronjob(
     skills: Optional[List[str]] = None,
     script: Optional[str] = None,
     no_agent: Optional[bool] = None,
+    workdir: Optional[str] = None,
     **_: Any,
 ) -> Optional[str]:
     if not _agentix_backend_enabled():
@@ -514,10 +530,11 @@ def _agentix_cronjob(
         if normalized == "create":
             if not schedule:
                 return tool_error("schedule is required for create", success=False)
-            if script or no_agent:
-                return tool_error("Agentix backend cron supports agent prompt jobs; script/no-agent jobs are not supported yet.", success=False)
             stimulus = _agentix_stimulus(prompt, canonical_skills)
-            if not stimulus:
+            script_path = _agentix_resolve_script(script)
+            if no_agent and not script_path:
+                return tool_error("create with no_agent=True requires a script", success=False)
+            if not stimulus and not script_path:
                 return tool_error("create requires a prompt or at least one skill", success=False)
             if prompt:
                 scan_error = _scan_cron_prompt(prompt)
@@ -527,6 +544,10 @@ def _agentix_cronjob(
                 name=name or stimulus[:50] or "cron job",
                 stimulus=stimulus,
                 schedule=schedule,
+                script=script_path,
+                no_agent=bool(no_agent) if no_agent is not None else None,
+                workdir=workdir,
+                skills=canonical_skills,
                 enabled=True,
             )
             formatted = _format_agentix_job(job)
@@ -590,6 +611,10 @@ def _agentix_cronjob(
                 updates["name"] = name
             if schedule is not None:
                 updates["schedule"] = schedule
+            if script is not None:
+                updates["script"] = _agentix_resolve_script(script)
+            if no_agent is not None:
+                updates["no_agent"] = bool(no_agent)
             if not updates:
                 return tool_error("No updates provided.", success=False)
             updated = backend.update_scheduled_job(
@@ -597,6 +622,10 @@ def _agentix_cronjob(
                 name=updates.get("name"),
                 stimulus=updates.get("stimulus"),
                 schedule=updates.get("schedule"),
+                script=updates.get("script"),
+                no_agent=updates.get("no_agent"),
+                workdir=workdir,
+                skills=canonical_skills if canonical_skills else None,
             )
             return json.dumps({"success": bool(updated.get("ok", True)), "job": _format_agentix_job(updated.get("job") or job)}, indent=2)
 

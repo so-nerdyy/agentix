@@ -284,6 +284,9 @@ def cron_edit(args):
             prompt=getattr(args, "prompt", None),
             name=getattr(args, "name", None),
             skills=replacement_skills,
+            script=getattr(args, "script", None),
+            workdir=getattr(args, "workdir", None),
+            no_agent=getattr(args, "no_agent", None),
         )
         if not result.get("success"):
             print(color(f"Failed to update job: {result.get('error', 'unknown error')}", Colors.RED))

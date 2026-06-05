@@ -2,6 +2,18 @@ import { AuditLog } from "../audit/AuditLog.js";
 import type { Powerhouse } from "../powerhouse/Powerhouse.js";
 import { computeNextRun, parseScheduleInput } from "./CronSchedule.js";
 import { ScheduledJobStore, type ScheduledJob } from "./ScheduledJobStore.js";
+import { spawn } from "node:child_process";
+import { existsSync, statSync } from "node:fs";
+import { basename, extname, isAbsolute, join, resolve } from "node:path";
+import { PATHS } from "../config/paths.js";
+
+interface ScriptRunResult {
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  error?: string;
+}
 
 export class SchedulerService {
   private timer: NodeJS.Timeout | null = null;
@@ -39,6 +51,10 @@ export class SchedulerService {
     stimulus: string;
     schedule?: string;
     intervalMs?: number;
+    script?: string;
+    noAgent?: boolean;
+    workdir?: string;
+    skills?: string[];
     enabled?: boolean;
   }): ScheduledJob {
     const job = this.jobs.create(input);
@@ -83,6 +99,10 @@ export class SchedulerService {
     stimulus?: string;
     schedule?: string;
     intervalMs?: number;
+    script?: string | null;
+    noAgent?: boolean;
+    workdir?: string | null;
+    skills?: string[];
     enabled?: boolean;
   }): ScheduledJob | undefined {
     const existing = this.jobs.get(id);
@@ -92,6 +112,10 @@ export class SchedulerService {
     if (input.name !== undefined) patch.name = input.name;
     if (input.stimulus !== undefined) patch.stimulus = input.stimulus;
     if (input.enabled !== undefined) patch.enabled = input.enabled;
+    if (input.script !== undefined) patch.script = input.script ?? undefined;
+    if (input.noAgent !== undefined) patch.noAgent = input.noAgent;
+    if (input.workdir !== undefined) patch.workdir = input.workdir ?? undefined;
+    if (input.skills !== undefined) patch.skills = input.skills;
     if (input.schedule !== undefined || input.intervalMs !== undefined) {
       const schedule = parseScheduleInput({
         schedule: input.schedule ?? existing.schedule,
@@ -164,9 +188,20 @@ export class SchedulerService {
     });
 
     try {
-      const result = await this.powerhouse.executeStimulus({
-        stimulus: fresh.stimulus,
-      });
+      const scriptResult = fresh.script ? await this.runScript(fresh) : null;
+      if (scriptResult && !scriptResult.ok) {
+        throw new Error(scriptResult.error ?? scriptResult.stderr ?? "scheduled script failed");
+      }
+      const scriptOutput = scriptResult?.stdout.trim() ?? "";
+      const result = fresh.noAgent
+        ? {
+            status: "complete" as const,
+            response: scriptOutput,
+            taskIds: [] as string[],
+          }
+        : await this.powerhouse.executeStimulus({
+            stimulus: this.assembleStimulus(fresh, scriptOutput),
+          });
       const completedAt = Date.now();
       const nextRunAt = computeNextRun({
         schedule: fresh.schedule,
@@ -184,6 +219,7 @@ export class SchedulerService {
         runCount: fresh.runCount + 1,
         lastStatus: result.status === "failed" ? "failure" : "success",
         lastError: result.status === "failed" ? result.response : undefined,
+        lastOutput: result.response,
         lastTaskIds: result.taskIds,
       });
       this.audit.record({
@@ -194,6 +230,8 @@ export class SchedulerService {
           status: result.status,
           taskIds: result.taskIds,
           nextRunAt: completedJob?.nextRunAt ?? null,
+          noAgent: Boolean(fresh.noAgent),
+          script: fresh.script ? basename(fresh.script) : null,
         },
       });
       return { ok: result.status !== "failed", error: result.status === "failed" ? result.response : undefined };
@@ -216,6 +254,7 @@ export class SchedulerService {
         runCount: fresh.runCount + 1,
         lastStatus: "failure",
         lastError: error,
+        lastOutput: undefined,
       });
       this.audit.record({
         type: "scheduler.job_failed",
@@ -225,5 +264,86 @@ export class SchedulerService {
       });
       return { ok: false, error };
     }
+  }
+
+  private assembleStimulus(job: ScheduledJob, scriptOutput: string): string {
+    const skillHint = job.skills?.length
+      ? `Use these Hermes skills if relevant: ${job.skills.join(", ")}.\n\n`
+      : "";
+    if (!scriptOutput) return `${skillHint}${job.stimulus}`;
+    return [
+      `${skillHint}${job.stimulus}`,
+      "Scheduled script output:",
+      scriptOutput,
+    ].join("\n\n");
+  }
+
+  private runScript(job: ScheduledJob): Promise<ScriptRunResult> {
+    if (!job.script) {
+      return Promise.resolve({ ok: true, stdout: "", stderr: "", exitCode: 0 });
+    }
+    const scriptPath = this.resolveScriptPath(job.script, job.workdir);
+    const ext = extname(scriptPath).toLowerCase();
+    const command = ext === ".js" || ext === ".mjs"
+      ? process.execPath
+      : ext === ".sh" || ext === ".bash"
+        ? "bash"
+        : "python";
+    const args = [scriptPath];
+
+    return new Promise((resolveResult) => {
+      const child = spawn(command, args, {
+        cwd: job.workdir && isAbsolute(job.workdir) ? job.workdir : PATHS.projectRoot,
+        env: {
+          ...process.env,
+          AGENTIX_CRON_JOB_ID: job.id,
+          AGENTIX_CRON_JOB_NAME: job.name,
+        },
+        windowsHide: true,
+      });
+      let stdout = "";
+      let stderr = "";
+      const timeout = setTimeout(() => {
+        child.kill();
+      }, 60_000);
+
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk.toString("utf-8");
+      });
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk.toString("utf-8");
+      });
+      child.on("error", (err) => {
+        clearTimeout(timeout);
+        resolveResult({
+          ok: false,
+          stdout,
+          stderr,
+          exitCode: null,
+          error: err.message,
+        });
+      });
+      child.on("close", (code) => {
+        clearTimeout(timeout);
+        resolveResult({
+          ok: code === 0,
+          stdout,
+          stderr,
+          exitCode: code,
+          error: code === 0 ? undefined : stderr.trim() || `script exited with code ${code}`,
+        });
+      });
+    });
+  }
+
+  private resolveScriptPath(script: string, workdir?: string): string {
+    const baseDir = workdir && isAbsolute(workdir)
+      ? workdir
+      : join(PATHS.dataDir, "scripts");
+    const candidate = isAbsolute(script) ? resolve(script) : resolve(baseDir, script);
+    if (!existsSync(candidate) || !statSync(candidate).isFile()) {
+      throw new Error(`scheduled script not found: ${candidate}`);
+    }
+    return candidate;
   }
 }

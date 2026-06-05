@@ -218,6 +218,10 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
       stimulus: String(body.stimulus ?? ""),
       schedule: body.schedule === undefined ? undefined : String(body.schedule),
       intervalMs: body.intervalMs === undefined ? undefined : Number(body.intervalMs),
+      script: body.script === undefined ? undefined : String(body.script),
+      noAgent: body.noAgent === undefined ? undefined : Boolean(body.noAgent),
+      workdir: body.workdir === undefined ? undefined : String(body.workdir),
+      skills: Array.isArray(body.skills) ? body.skills.map(String) : undefined,
       enabled: body.enabled === undefined ? true : Boolean(body.enabled),
     });
   });
@@ -229,6 +233,10 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
       stimulus: body.stimulus === undefined ? undefined : String(body.stimulus),
       schedule: body.schedule === undefined ? undefined : String(body.schedule),
       intervalMs: body.intervalMs === undefined ? undefined : Number(body.intervalMs),
+      script: body.script === undefined ? undefined : String(body.script),
+      noAgent: body.noAgent === undefined ? undefined : Boolean(body.noAgent),
+      workdir: body.workdir === undefined ? undefined : String(body.workdir),
+      skills: Array.isArray(body.skills) ? body.skills.map(String) : undefined,
       enabled: body.enabled === undefined ? undefined : Boolean(body.enabled),
     });
     if (!result.ok) {
@@ -245,6 +253,10 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
       stimulus: body.stimulus === undefined ? undefined : String(body.stimulus),
       schedule: body.schedule === undefined ? undefined : String(body.schedule),
       intervalMs: body.intervalMs === undefined ? undefined : Number(body.intervalMs),
+      script: body.script === undefined ? undefined : String(body.script),
+      noAgent: body.noAgent === undefined ? undefined : Boolean(body.noAgent),
+      workdir: body.workdir === undefined ? undefined : String(body.workdir),
+      skills: Array.isArray(body.skills) ? body.skills.map(String) : undefined,
       enabled: body.enabled === undefined ? undefined : Boolean(body.enabled),
     });
     if (!result.ok) {

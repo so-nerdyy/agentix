@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -434,6 +434,36 @@ describe("Powerhouse restored runtime", () => {
     expect(persisted?.scheduleKind).toBe("once");
     expect(persisted?.enabled).toBe(false);
     expect(persisted?.nextRunAt).toBeNull();
+
+    scheduler.stop();
+    powerhouse.stop();
+  });
+
+  it("runs no-agent script cron jobs and stores output", async () => {
+    const powerhouse = makePowerhouse();
+    const dir = tempDir("agentix-script-scheduler-");
+    const script = join(dir, "cron-script.js");
+    writeFileSync(script, "console.log('script cron output')\n", "utf-8");
+    const scheduler = new SchedulerService(
+      powerhouse,
+      new ScheduledJobStore(join(dir, "jobs.json")),
+      new AuditLog(join(dir, "audit.jsonl")),
+    );
+    const job = scheduler.create({
+      name: "script smoke",
+      stimulus: "",
+      schedule: "every 1m",
+      script,
+      noAgent: true,
+    });
+
+    const result = await scheduler.runNow(job.id);
+    const persisted = scheduler.jobs.get(job.id);
+
+    expect(result.ok).toBe(true);
+    expect(persisted?.lastStatus).toBe("success");
+    expect(persisted?.lastOutput).toContain("script cron output");
+    expect(persisted?.lastTaskIds).toEqual([]);
 
     scheduler.stop();
     powerhouse.stop();
