@@ -16,7 +16,11 @@ const pkg = require("../package.json");
 
 const BACKEND_COMMANDS = new Set([
   "server",
+  "dashboard",
+  "ui",
+  "web",
   "support",
+  "logs",
   "mods",
   "plugin",
   "extension",
@@ -38,7 +42,6 @@ const HERMES_COMMANDS = new Set([
   "skills",
   "tools",
   "memory",
-  "logs",
   "auth",
   "config",
   "plugins",
