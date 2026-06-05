@@ -30,7 +30,7 @@ npm test
 ## First Run
 
 `agentix setup` writes workspace-local configuration and prepares the shell for the current folder. The default `agentix` command opens the interactive Hermes-style frontend.
-The web dashboard is served by `agentix server` at `http://127.0.0.1:3000/ui/` by default.
+Use `agentix dashboard` to start the web control surface by itself. The full backend + dashboard stack is served by `agentix server` at `http://127.0.0.1:3000/ui/` by default.
 
 ## Update Path
 

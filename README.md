@@ -14,7 +14,7 @@ agentix setup
 agentix
 ```
 
-From any project folder, `agentix` opens the interactive shell. Use `agentix server` if you want the backend bridge, event stream, and dashboard/API runtime. Open `http://127.0.0.1:3000/ui/` for the live control surface.
+From any project folder, `agentix` opens the interactive shell. Use `agentix dashboard` if you want the web control surface only, or `agentix server` if you want the backend bridge, event stream, and dashboard/API runtime. Open `http://127.0.0.1:3000/ui/` for the live control surface.
 
 ## Commands
 
@@ -29,6 +29,7 @@ From any project folder, `agentix` opens the interactive shell. Use `agentix ser
 - `agentix tools` - manage tools
 - `agentix memory` - search memory
 - `agentix logs` - inspect logs
+- `agentix dashboard` - start the web control surface
 - `agentix server` - start the Agentix backend bridge/API
 - `agentix support` - generate a support bundle with runtime snapshots
 

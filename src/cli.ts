@@ -42,6 +42,15 @@ async function main() {
         throw err;
       }
       return;
+    case "dashboard":
+    case "ui":
+    case "web":
+      ensureDataDirs();
+      {
+        const server = await startInboxServer();
+        console.log(`Agentix dashboard available at http://127.0.0.1:${server.port}/ui/`);
+      }
+      return;
     case "support":
       ensureDataDirs();
       {
