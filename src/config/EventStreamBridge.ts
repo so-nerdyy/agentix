@@ -2,8 +2,8 @@
 // Subscribers are added per HTTP request. Each subscriber receives a copy of
 // every event until it unsubscribes (e.g. on connection close).
 //
-// Authentication: ?token=<session-token> must equal AGENTIX_SESSION_TOKEN
-// (or the sessionToken in config.json).
+// Authentication: if AGENTIX_SESSION_TOKEN/sessionToken is configured,
+// ?token=<session-token> or Bearer <token> must match it.
 
 import type { FastifyInstance } from "fastify";
 import { EventBus, type AgentixEventName, type AgentixEventMap } from "./EventBus.js";
@@ -16,6 +16,7 @@ type Subscriber = {
 
 const subscribers = new Set<Subscriber>();
 let nextId = 1;
+let unsubscribers: Array<() => void> = [];
 
 function broadcast(event: AgentixEventName, payload: AgentixEventMap[AgentixEventName]): void {
   if (subscribers.size === 0) return;
@@ -35,6 +36,13 @@ function broadcast(event: AgentixEventName, payload: AgentixEventMap[AgentixEven
 }
 
 let started = false;
+
+export function isEventStreamAuthorized(
+  configuredToken: string | null,
+  providedToken: string | null,
+): boolean {
+  return !configuredToken || providedToken === configuredToken;
+}
 
 export function startEventStreamBridge(): void {
   if (started) return;
@@ -62,33 +70,15 @@ export function startEventStreamBridge(): void {
     "powerhouse:stopped",
   ];
   for (const name of names) {
-    EventBus.on(name, (payload) => broadcast(name, payload));
+    unsubscribers.push(EventBus.on(name, (payload) => broadcast(name, payload)));
   }
 }
 
 export function stopEventStreamBridge(): void {
-  // Remove all event listeners we registered on the bus. The unsubscribes
-  // are attached to a marker we can find via listenerCount, but it's easier
-  // to clear all listeners on the bus — Powerhouse.stop() calls this only
-  // when it's about to tear down its own subscribers anyway.
-  EventBus.removeAllListeners("agent:start");
-  EventBus.removeAllListeners("agent:complete");
-  EventBus.removeAllListeners("agent:error");
-  EventBus.removeAllListeners("task:queued");
-  EventBus.removeAllListeners("task:running");
-  EventBus.removeAllListeners("task:approve");
-  EventBus.removeAllListeners("task:reject");
-  EventBus.removeAllListeners("task:complete");
-  EventBus.removeAllListeners("task:failed");
-  EventBus.removeAllListeners("session:create");
-  EventBus.removeAllListeners("session:close");
-  EventBus.removeAllListeners("gateway:message");
-  EventBus.removeAllListeners("gateway:enabled");
-  EventBus.removeAllListeners("gateway:disabled");
-  EventBus.removeAllListeners("powerhouse:starting");
-  EventBus.removeAllListeners("powerhouse:started");
-  EventBus.removeAllListeners("powerhouse:stopping");
-  EventBus.removeAllListeners("powerhouse:stopped");
+  for (const unsubscribe of unsubscribers) {
+    unsubscribe();
+  }
+  unsubscribers = [];
 
   // Tell every SSE client we're done so they can close cleanly.
   for (const sub of subscribers) {
@@ -114,7 +104,7 @@ export function registerEventStreamRoutes(server: FastifyInstance): void {
       request.headers.authorization?.replace(/^Bearer\s+/i, "") ??
       null;
 
-    if (!cfg.sessionToken || token !== cfg.sessionToken) {
+    if (!isEventStreamAuthorized(cfg.sessionToken, token)) {
       reply.code(401).send({ error: "unauthorized" });
       return;
     }

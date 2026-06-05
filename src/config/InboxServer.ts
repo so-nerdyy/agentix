@@ -1,7 +1,7 @@
 // InboxServer — HTTP server on port 3000 (separate from the bridge on 3456).
 // Exposes:
 //   GET /health
-//   GET /events       (SSE; ?token=<sessionToken> required)
+//   GET /events       (SSE; token required only when configured)
 //   GET /ui/*         (static files from frontend/dist, if it exists)
 //   GET /             (redirect to /ui)
 //
