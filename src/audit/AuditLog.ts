@@ -1,6 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { PATHS } from "../config/paths.js";
+import { RuntimeLogStore } from "../logging/RuntimeLogStore.js";
 
 export interface AuditEntry {
   id: string;
@@ -12,6 +13,8 @@ export interface AuditEntry {
 }
 
 export class AuditLog {
+  private readonly runtimeLogs = new RuntimeLogStore();
+
   constructor(private readonly file = join(PATHS.dataDir, "audit", "audit.jsonl")) {
     const dir = dirname(this.file);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -25,6 +28,14 @@ export class AuditLog {
       createdAt: Date.now(),
     };
     appendFileSync(this.file, `${JSON.stringify(next)}\n`, "utf-8");
+    this.runtimeLogs.record({
+      timestamp: new Date(next.createdAt).toISOString(),
+      level: this.levelFor(entry.type),
+      source: entry.actor,
+      message: `${entry.type}${entry.subjectId ? ` ${entry.subjectId}` : ""}${
+        Object.keys(entry.data || {}).length > 0 ? ` ${JSON.stringify(entry.data)}` : ""
+      }`.trim(),
+    });
     return next;
   }
 
@@ -42,5 +53,15 @@ export class AuditLog {
       })
       .filter((entry): entry is AuditEntry => Boolean(entry));
     return rows.slice(-limit).reverse();
+  }
+
+  private levelFor(type: string): "info" | "warn" | "error" {
+    if (type.includes("failed") || type.includes("error") || type.includes("rejected")) {
+      return "error";
+    }
+    if (type.includes("warning") || type.includes("disabled") || type.includes("deprecated")) {
+      return "warn";
+    }
+    return "info";
   }
 }

@@ -5,10 +5,12 @@ import { join } from "node:path";
 import { PATHS } from "../config/paths.js";
 import { loadConfig } from "../config/index.js";
 import { randomUUID } from "node:crypto";
+import { RuntimeLogStore } from "../logging/RuntimeLogStore.js";
 
 export class LocalAgentixRuntime {
   private readonly powerhouse = new Powerhouse();
   private readonly scheduler = new SchedulerService(this.powerhouse);
+  private readonly runtimeLogs = new RuntimeLogStore();
 
   constructor() {
     this.scheduler.start();
@@ -79,12 +81,7 @@ export class LocalAgentixRuntime {
   }
 
   listLogs(limit = 100): Array<Record<string, unknown>> {
-    return this.powerhouse.audit.list(limit).map((entry) => ({
-      timestamp: new Date(entry.createdAt).toISOString(),
-      level: this.logLevelFor(entry.type),
-      source: entry.actor,
-      message: this.formatLogMessage(entry),
-    }));
+    return this.runtimeLogs.list(limit).map((entry) => ({ ...entry }));
   }
 
   healingStats(): Record<string, unknown> {
@@ -202,7 +199,7 @@ export class LocalAgentixRuntime {
         "jobs.json",
         "audit.json",
         "healing.json",
-      "memory.json",
+        "memory.json",
         "logs/",
       ],
     };
@@ -254,21 +251,5 @@ export class LocalAgentixRuntime {
         copyFileSync(sourcePath, targetPath);
       }
     }
-  }
-
-  private logLevelFor(type: string): "info" | "warn" | "error" {
-    if (type.includes("failed") || type.includes("error") || type.includes("rejected")) {
-      return "error";
-    }
-    if (type.includes("warning") || type.includes("disabled") || type.includes("deprecated")) {
-      return "warn";
-    }
-    return "info";
-  }
-
-  private formatLogMessage(entry: { type: string; subjectId?: string; data: Record<string, unknown> }): string {
-    const subject = entry.subjectId ? ` ${entry.subjectId}` : "";
-    const data = Object.keys(entry.data || {}).length > 0 ? ` ${JSON.stringify(entry.data)}` : "";
-    return `${entry.type}${subject}${data}`.trim();
   }
 }
