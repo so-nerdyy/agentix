@@ -3,7 +3,7 @@
 // every event until it unsubscribes (e.g. on connection close).
 //
 // Authentication: ?token=<session-token> must equal AGENTIX_SESSION_TOKEN
-// (or the sessionToken in config.json). This matches the Phase 4 plan.
+// (or the sessionToken in config.json).
 
 import type { FastifyInstance } from "fastify";
 import { EventBus, type AgentixEventName, type AgentixEventMap } from "./EventBus.js";

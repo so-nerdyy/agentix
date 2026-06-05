@@ -4,6 +4,7 @@ Agentix is a Hermes-class agent platform with an Agentix-owned backend.
 
 - Hermes owns the user-facing shell, setup wizard, update flow, cron UX, gateway UX, and command surface.
 - Agentix owns task orchestration, validation, approvals, memory, healing, Pi agents, and runtime services.
+- The web dashboard lives at `/ui` when `agentix server` is running.
 
 ## Quick Start
 
@@ -13,7 +14,7 @@ agentix setup
 agentix
 ```
 
-From any project folder, `agentix` opens the interactive shell. Use `agentix server` if you want the backend bridge and dashboard/API runtime.
+From any project folder, `agentix` opens the interactive shell. Use `agentix server` if you want the backend bridge, event stream, and dashboard/API runtime. Open `http://127.0.0.1:3000/ui/` for the live control surface.
 
 ## Commands
 
@@ -51,6 +52,7 @@ Secrets are not written to disk. Use `agentix setup` to create workspace-local c
 
 - `bin/` - installed entrypoint
 - `src/` - Agentix backend, shell fallback, and bridge
+- `frontend/` - interactive dashboard served by the inbox server
 - `hermes-agent/` - Hermes frontend runtime used by the launcher
 - `docs/` - install, operations, and security notes
 

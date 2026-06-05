@@ -1,7 +1,6 @@
 // BashAgent — runs an approved shell command in the project environment.
 // Approval must be granted by ApprovalWorkflow before BashAgent.execute()
-// is called. Streams stdout/stderr via EventBus (Phase 3 will wire
-// TerminalBridge to render the stream).
+// is called. Streams stdout/stderr via EventBus for the UI and event log.
 
 import { spawn } from "node:child_process";
 import { BasePIAgent } from "./BasePIAgent.js";

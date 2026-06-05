@@ -35,7 +35,7 @@ export class SessionCoordinator {
   }
 
   list(): Session[] {
-    return Array.from(this.byId.values());
+    return Array.from(this.byId.values()).filter((session) => session.status === "active");
   }
 
   setStatus(id: string, status: Session["status"]): void {

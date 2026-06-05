@@ -98,6 +98,19 @@ describe("Powerhouse restored runtime", () => {
     runtime.shutdown();
   });
 
+  it("deletes sessions through the runtime facade", async () => {
+    const runtime = new LocalAgentixRuntime();
+
+    const session = runtime.createSession({ model: "test-model" });
+    expect(runtime.listSessions().some((item) => item.id === session.id)).toBe(true);
+
+    runtime.deleteSession(session.id);
+
+    expect(runtime.listSessions().some((item) => item.id === session.id)).toBe(false);
+
+    runtime.shutdown();
+  });
+
   it("runs explicit multi-step plans with dependencies", async () => {
     const powerhouse = makePowerhouse();
     const plan = {

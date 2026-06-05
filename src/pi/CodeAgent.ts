@@ -4,9 +4,8 @@
 // itself does not require approval — Powerhouse routes `code-edit` tasks
 // through the workflow first).
 //
-// Phase 2 keeps the actual edit logic intentionally simple: a `find` /
-// `replace` patch with a `replaceAll` flag, and a `validate` step that
-// runs `tsc --noEmit` if `validateTypeScript` is true.
+// The edit logic stays intentionally simple: a `find` / `replace` patch with
+// a `replaceAll` flag, and an optional `tsc --noEmit` validation step.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";

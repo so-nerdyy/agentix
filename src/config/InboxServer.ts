@@ -65,10 +65,16 @@ export async function startInboxServer(): Promise<{
     const body = request.body as Record<string, unknown>;
     return runtime.createSession({ model: body.model as string | undefined });
   });
+  server.delete("/sessions/:id", async (request) => {
+    const { id } = request.params as { id: string };
+    runtime.deleteSession(id);
+    return { ok: true };
+  });
   server.get("/tasks", async (request) => {
     const query = request.query as Record<string, string | undefined>;
     return runtime.listTasks(query.sessionId);
   });
+  server.get("/tools", async () => runtime.listTools());
   server.get("/approvals", async () => runtime.listApprovals());
   server.post("/approvals/:id/approve", async (request) => {
     const { id } = request.params as { id: string };

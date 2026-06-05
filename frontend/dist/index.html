@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agentix Control</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">A</div>
+          <div>
+            <div class="eyebrow">Hermes frontend, Agentix backend</div>
+            <h1>Agentix Control</h1>
+          </div>
+        </div>
+        <div class="status-row">
+          <span class="chip" id="healthChip">Checking health</span>
+          <span class="chip" id="backendChip">Backend</span>
+          <span class="chip" id="sessionChip">Session</span>
+          <label class="token-field">
+            <span>Event token</span>
+            <input id="tokenInput" type="password" placeholder="optional" />
+          </label>
+          <button class="ghost" id="saveTokenButton" type="button">Save</button>
+          <button class="primary" id="refreshButton" type="button">Refresh</button>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <aside class="sidebar">
+          <button class="nav active" data-view="live">Live</button>
+          <button class="nav" data-view="tasks">Tasks</button>
+          <button class="nav" data-view="tools">Tools</button>
+          <button class="nav" data-view="approvals">Approvals</button>
+          <button class="nav" data-view="scheduler">Scheduler</button>
+          <button class="nav" data-view="memory">Memory</button>
+          <button class="nav" data-view="healing">Healing</button>
+          <button class="nav" data-view="audit">Audit</button>
+          <button class="nav" data-view="sessions">Sessions</button>
+          <button class="nav" data-view="compose">Compose</button>
+        </aside>
+
+        <main class="main">
+          <section class="hero">
+            <div>
+              <div class="eyebrow">Command surface</div>
+              <h2 id="viewTitle">Live activity</h2>
+              <div class="muted">Shortcuts: Alt+1 Live · Alt+2 Tasks · Alt+3 Tools · Alt+4 Approvals · Alt+5 Scheduler · Alt+6 Memory · Alt+7 Healing · Alt+8 Audit · Alt+9 Sessions · Alt+0 Compose</div>
+            </div>
+            <div class="hero-actions">
+              <button class="ghost" data-quick="/tasks">/tasks</button>
+              <button class="ghost" data-quick="/tools">/tools</button>
+              <button class="ghost" data-quick="/approvals">/approvals</button>
+              <button class="ghost" data-quick="/scheduler">/scheduler</button>
+              <button class="ghost" data-quick="/memory">/memory</button>
+            </div>
+          </section>
+
+          <section class="stats-grid" id="statsGrid"></section>
+
+          <section class="panel-stack">
+            <article class="panel active" data-panel="live">
+              <div class="panel-head">
+                <h3>Live stream</h3>
+                <div class="panel-tools">
+                  <button class="ghost" id="connectEventsButton" type="button">Connect</button>
+                  <button class="ghost" id="clearEventsButton" type="button">Clear</button>
+                </div>
+              </div>
+              <div class="stream" id="eventStream"></div>
+            </article>
+
+            <article class="panel" data-panel="tasks">
+              <div class="panel-head">
+                <h3>Tasks</h3>
+                <div class="panel-tools">
+                  <button class="ghost" id="reloadTasksButton" type="button">Reload</button>
+                </div>
+              </div>
+              <div class="filter-bar">
+                <input id="taskFilterInput" type="search" placeholder="Filter tasks by id, kind, status, session..." />
+                <select id="taskStatusFilter">
+                  <option value="">All statuses</option>
+                  <option value="queued">Queued</option>
+                  <option value="running">Running</option>
+                  <option value="awaiting-approval">Awaiting approval</option>
+                  <option value="complete">Complete</option>
+                  <option value="failed">Failed</option>
+                  <option value="rejected">Rejected</option>
+                </select>
+              </div>
+              <div id="taskDetail" class="detail"></div>
+              <div class="list" id="tasksList"></div>
+            </article>
+
+            <article class="panel" data-panel="tools">
+              <div class="panel-head">
+                <h3>Tools</h3>
+                <div class="panel-tools">
+                  <button class="ghost" id="reloadToolsButton" type="button">Reload</button>
+                </div>
+              </div>
+              <div class="list" id="toolsList"></div>
+            </article>
+
+            <article class="panel" data-panel="approvals">
+              <div class="panel-head">
+                <h3>Approvals</h3>
+                <div class="panel-tools">
+                  <button class="ghost" id="reloadApprovalsButton" type="button">Reload</button>
+                </div>
+              </div>
+              <div class="filter-bar">
+                <input id="approvalFilterInput" type="search" placeholder="Filter approvals by id, kind, session..." />
+              </div>
+              <div class="list" id="approvalsList"></div>
+            </article>
+
+            <article class="panel" data-panel="scheduler">
+              <div class="panel-head">
+                <h3>Scheduler</h3>
+                <div class="panel-tools">
+                  <button class="ghost" id="reloadJobsButton" type="button">Reload</button>
+                </div>
+              </div>
+              <form class="inline-form" id="jobForm">
+                <input name="name" placeholder="Job name" required />
+                <input name="stimulus" placeholder="Stimulus" required />
+                <input name="intervalMs" type="number" min="1000" step="1000" value="60000" required />
+                <button class="primary" type="submit">Create</button>
+              </form>
+              <div class="list" id="jobsList"></div>
+            </article>
+
+            <article class="panel" data-panel="memory">
+              <div class="panel-head">
+                <h3>Memory</h3>
+                <div class="panel-tools">
+                  <button class="ghost" id="consolidateButton" type="button">Consolidate</button>
+                </div>
+              </div>
+              <form class="inline-form" id="memoryForm">
+                <input name="query" placeholder="Search memory" />
+                <button class="primary" type="submit">Search</button>
+              </form>
+              <div class="list" id="memoryList"></div>
+            </article>
+
+            <article class="panel" data-panel="healing">
+              <div class="panel-head">
+                <h3>Healing</h3>
+                <div class="panel-tools">
+                  <button class="ghost" id="reloadHealingButton" type="button">Reload</button>
+                </div>
+              </div>
+              <div class="list" id="healingList"></div>
+            </article>
+
+            <article class="panel" data-panel="audit">
+              <div class="panel-head">
+                <h3>Audit</h3>
+                <div class="panel-tools">
+                  <button class="ghost" id="reloadAuditButton" type="button">Reload</button>
+                </div>
+              </div>
+              <div class="list" id="auditList"></div>
+            </article>
+
+            <article class="panel" data-panel="sessions">
+              <div class="panel-head">
+                <h3>Sessions</h3>
+                <div class="panel-tools">
+                  <button class="ghost" id="reloadSessionsButton" type="button">Reload</button>
+                </div>
+              </div>
+              <div class="list" id="sessionsList"></div>
+            </article>
+
+            <article class="panel" data-panel="compose">
+              <div class="panel-head">
+                <h3>Compose</h3>
+                <div class="panel-tools">
+                  <button class="ghost" id="newSessionButton" type="button">New Session</button>
+                </div>
+              </div>
+              <form id="composeForm" class="composer">
+                <textarea id="composeInput" rows="7" placeholder="Type a message, /command, or plan: { ... }"></textarea>
+                <div class="composer-actions">
+                  <label class="session-picker">
+                    <span>Session</span>
+                    <select id="sessionSelect"></select>
+                  </label>
+                  <button class="primary" type="submit">Send</button>
+                </div>
+              </form>
+              <div class="history" id="composeHistory"></div>
+            </article>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
