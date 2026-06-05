@@ -17,7 +17,21 @@ export type RuntimeSearchResults = {
   memory: Array<{ id: string; sessionId: string; taskId: string | null; role: string; content: string; createdAt: string; tags: string[] }>;
   audit: Array<{ id: string; type: string; actor: string; subjectId: string | null; createdAt: string; data: Record<string, unknown> }>;
   logs: Array<Record<string, unknown>>;
-  jobs: Array<{ id: string; name: string; stimulus: string; enabled: boolean; intervalMs: number; nextRunAt: string; lastRunAt: string | null; runCount: number }>;
+  jobs: Array<{
+    id: string;
+    name: string;
+    stimulus: string;
+    enabled: boolean;
+    schedule: string;
+    scheduleKind: string;
+    scheduleDisplay: string;
+    intervalMs: number;
+    nextRunAt: string | null;
+    lastRunAt: string | null;
+    lastStatus: string | null;
+    lastError: string | null;
+    runCount: number;
+  }>;
   healing: Array<{ fingerprint: string; count: number; firstSeenAt: string; lastSeenAt: string; lastError: string }>;
   gateways: Array<{ id: string; platform: string; name: string; enabled: boolean; status: string; endpoint: string | null; tokenConfigured: boolean; messageCount: number; lastSeenAt: string | null; lastError: string | null }>;
 };
@@ -381,9 +395,14 @@ export class LocalAgentixRuntime {
         name: job.name,
         stimulus: job.stimulus,
         enabled: job.enabled,
+        schedule: job.schedule,
+        scheduleKind: job.scheduleKind,
+        scheduleDisplay: job.scheduleDisplay,
         intervalMs: job.intervalMs,
-        nextRunAt: new Date(job.nextRunAt).toISOString(),
+        nextRunAt: job.nextRunAt ? new Date(job.nextRunAt).toISOString() : null,
         lastRunAt: job.lastRunAt ? new Date(job.lastRunAt).toISOString() : null,
+        lastStatus: job.lastStatus ?? null,
+        lastError: job.lastError ?? null,
         runCount: job.runCount,
       }));
 
@@ -955,7 +974,7 @@ export class LocalAgentixRuntime {
         ...job,
         createdAt: new Date(job.createdAt).toISOString(),
         updatedAt: new Date(job.updatedAt).toISOString(),
-        nextRunAt: new Date(job.nextRunAt).toISOString(),
+        nextRunAt: job.nextRunAt ? new Date(job.nextRunAt).toISOString() : null,
         lastRunAt: job.lastRunAt ? new Date(job.lastRunAt).toISOString() : null,
       },
       audit,
@@ -966,10 +985,22 @@ export class LocalAgentixRuntime {
   createJob(input: {
     name: string;
     stimulus: string;
-    intervalMs: number;
+    schedule?: string;
+    intervalMs?: number;
     enabled?: boolean;
   }): Record<string, unknown> {
     return this.scheduler.create(input) as unknown as Record<string, unknown>;
+  }
+
+  updateJob(id: string, input: {
+    name?: string;
+    stimulus?: string;
+    schedule?: string;
+    intervalMs?: number;
+    enabled?: boolean;
+  }): Record<string, unknown> {
+    const job = this.scheduler.update(id, input);
+    return { ok: Boolean(job), job };
   }
 
   setJobEnabled(id: string, enabled: boolean): Record<string, unknown> {
@@ -983,6 +1014,15 @@ export class LocalAgentixRuntime {
 
   async runJob(id: string): Promise<Record<string, unknown>> {
     return this.scheduler.runNow(id) as unknown as Record<string, unknown>;
+  }
+
+  async runDueJobs(): Promise<Record<string, unknown>> {
+    const jobs = await this.scheduler.runDue();
+    return {
+      ok: true,
+      count: jobs.length,
+      jobs,
+    };
   }
 
   createSupportBundle(): Record<string, unknown> {

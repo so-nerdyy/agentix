@@ -196,22 +196,67 @@ class AgentixBackend:
     def list_scheduled_jobs(self) -> Any:
         return self._get("/scheduler/jobs")
 
+    def get_scheduled_job(self, job_id: str) -> Any:
+        return self._get(f"/scheduler/jobs/{job_id}")
+
     def create_scheduled_job(
         self,
         name: str,
         stimulus: str,
-        interval_ms: int,
+        interval_ms: Optional[int] = None,
         enabled: bool = True,
+        schedule: Optional[str] = None,
     ) -> Any:
+        body: Dict[str, Any] = {
+            "name": name,
+            "stimulus": stimulus,
+            "enabled": enabled,
+        }
+        if schedule is not None:
+            body["schedule"] = schedule
+        if interval_ms is not None:
+            body["intervalMs"] = interval_ms
         return self._post(
             "/scheduler/jobs",
-            {
-                "name": name,
-                "stimulus": stimulus,
-                "intervalMs": interval_ms,
-                "enabled": enabled,
-            },
+            body,
         )
+
+    def update_scheduled_job(
+        self,
+        job_id: str,
+        name: Optional[str] = None,
+        stimulus: Optional[str] = None,
+        schedule: Optional[str] = None,
+        interval_ms: Optional[int] = None,
+        enabled: Optional[bool] = None,
+    ) -> Any:
+        body: Dict[str, Any] = {}
+        if name is not None:
+            body["name"] = name
+        if stimulus is not None:
+            body["stimulus"] = stimulus
+        if schedule is not None:
+            body["schedule"] = schedule
+        if interval_ms is not None:
+            body["intervalMs"] = interval_ms
+        if enabled is not None:
+            body["enabled"] = enabled
+        return self._post(f"/scheduler/jobs/{job_id}", body)
 
     def run_scheduled_job(self, job_id: str) -> Any:
         return self._post(f"/scheduler/jobs/{job_id}/run", {})
+
+    def run_due_scheduled_jobs(self) -> Any:
+        return self._post("/scheduler/run-due", {})
+
+    def set_scheduled_job_enabled(self, job_id: str, enabled: bool) -> Any:
+        action = "enable" if enabled else "disable"
+        return self._post(f"/scheduler/jobs/{job_id}/{action}", {})
+
+    def delete_scheduled_job(self, job_id: str) -> Any:
+        req = urllib.request.Request(
+            f"{_get_bridge_url()}/scheduler/jobs/{job_id}",
+            method="DELETE",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode("utf-8"))

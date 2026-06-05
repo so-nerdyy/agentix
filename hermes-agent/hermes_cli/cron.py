@@ -6,6 +6,7 @@ pause/resume/run/remove, status, and tick.
 """
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -57,11 +58,18 @@ def _cron_api(**kwargs):
     return json.loads(cronjob_tool(**kwargs))
 
 
+def _using_agentix_backend() -> bool:
+    return os.environ.get("AGENTIX_FRONTEND") == "hermes" and os.environ.get("AGENTIX_DISABLE_BACKEND_CRON") != "1"
+
+
 def cron_list(show_all: bool = False):
     """List all scheduled jobs."""
-    from cron.jobs import list_jobs
-
-    jobs = list_jobs(include_disabled=show_all)
+    if _using_agentix_backend():
+        result = _cron_api(action="list", include_disabled=show_all)
+        jobs = result.get("jobs", []) if result.get("success") else []
+    else:
+        from cron.jobs import list_jobs
+        jobs = list_jobs(include_disabled=show_all)
 
     if not jobs:
         print(color("No scheduled jobs.", Colors.DIM))
@@ -75,16 +83,22 @@ def cron_list(show_all: bool = False):
     print()
 
     for job in jobs:
-        job_id = job.get("id", "?")
+        job_id = job.get("id") or job.get("job_id", "?")
         name = job.get("name", "(unnamed)")
-        schedule = job.get("schedule_display", job.get("schedule", {}).get("value", "?"))
+        schedule_value = job.get("schedule")
+        schedule = job.get("schedule_display")
+        if not schedule:
+            schedule = schedule_value.get("value", "?") if isinstance(schedule_value, dict) else (schedule_value or "?")
         state = job.get("state", "scheduled" if job.get("enabled", True) else "paused")
-        next_run = job.get("next_run_at", "?")
+        next_run = job.get("next_run_at") or job.get("nextRunAt") or "?"
 
         repeat_info = job.get("repeat", {})
-        repeat_times = repeat_info.get("times")
-        repeat_completed = repeat_info.get("completed", 0)
-        repeat_str = f"{repeat_completed}/{repeat_times}" if repeat_times else "∞"
+        if isinstance(repeat_info, dict):
+            repeat_times = repeat_info.get("times")
+            repeat_completed = repeat_info.get("completed", 0)
+            repeat_str = f"{repeat_completed}/{repeat_times}" if repeat_times else "∞"
+        else:
+            repeat_str = str(repeat_info or "∞")
 
         deliver = job.get("deliver", ["local"])
         if isinstance(deliver, str):
@@ -138,7 +152,7 @@ def cron_list(show_all: bool = False):
         print()
 
     from hermes_cli.gateway import find_gateway_pids
-    if not find_gateway_pids():
+    if not _using_agentix_backend() and not find_gateway_pids():
         print(color("  ⚠  Gateway is not running — jobs won't fire automatically.", Colors.YELLOW))
         print(color("     Start it with: hermes gateway install", Colors.DIM))
         print(color("                    sudo hermes gateway install --system  # Linux servers", Colors.DIM))
@@ -147,16 +161,34 @@ def cron_list(show_all: bool = False):
 
 def cron_tick():
     """Run due jobs once and exit."""
+    if _using_agentix_backend():
+        from agentix_backend import AgentixBackend
+
+        result = AgentixBackend().run_due_scheduled_jobs()
+        print(json.dumps(result, indent=2))
+        return
     from cron.scheduler import tick
     tick(verbose=True)
 
 
 def cron_status():
     """Show cron execution status."""
+    print()
+    if _using_agentix_backend():
+        from agentix_backend import AgentixBackend
+
+        jobs = AgentixBackend().list_scheduled_jobs()
+        active_jobs = [job for job in jobs if job.get("enabled", True)]
+        print(color("✓ Agentix backend scheduler is running with the bridge", Colors.GREEN))
+        print(f"  {len(active_jobs)} active job(s)")
+        next_runs = [job.get("nextRunAt") for job in active_jobs if job.get("nextRunAt")]
+        if next_runs:
+            print(f"  Next run: {min(next_runs)}")
+        print()
+        return
+
     from cron.jobs import list_jobs
     from hermes_cli.gateway import find_gateway_pids
-
-    print()
 
     pids = find_gateway_pids()
     if pids:
@@ -243,6 +275,25 @@ def cron_create(args):
 
 
 def cron_edit(args):
+    if _using_agentix_backend():
+        replacement_skills = _normalize_skills(getattr(args, "skill", None), getattr(args, "skills", None))
+        result = _cron_api(
+            action="update",
+            job_id=args.job_id,
+            schedule=getattr(args, "schedule", None),
+            prompt=getattr(args, "prompt", None),
+            name=getattr(args, "name", None),
+            skills=replacement_skills,
+        )
+        if not result.get("success"):
+            print(color(f"Failed to update job: {result.get('error', 'unknown error')}", Colors.RED))
+            return 1
+        updated = result["job"]
+        print(color(f"Updated job: {updated['job_id']}", Colors.GREEN))
+        print(f"  Name: {updated['name']}")
+        print(f"  Schedule: {updated['schedule']}")
+        return 0
+
     from cron.jobs import AmbiguousJobReference, resolve_job_ref
 
     try:

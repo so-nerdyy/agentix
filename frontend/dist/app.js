@@ -723,16 +723,30 @@ function filteredApprovals() {
   });
 }
 
+function jobSchedule(job) {
+  if (job.scheduleDisplay) return job.scheduleDisplay;
+  if (job.schedule) return job.schedule;
+  return `every ${Math.round(Number(job.intervalMs || 60000) / 1000)}s`;
+}
+
+function jobStatus(job) {
+  if (!job.lastStatus) return "";
+  const statusClass = job.lastStatus === "success" || job.lastStatus === "ok" ? "success" : "danger";
+  return `<span class="pill ${statusClass}">${escapeHtml(job.lastStatus)}</span>`;
+}
+
 function jobCard(job) {
   return `
     <div class="card ${state.selectedJobId === job.id ? "selected" : ""}">
       <div class="row">
         <h4>${escapeHtml(job.name)}</h4>
         <span class="pill ${job.enabled ? "success" : "danger"}">${job.enabled ? "enabled" : "disabled"}</span>
+        ${jobStatus(job)}
       </div>
-      <div class="meta">${escapeHtml(job.id)} · every ${Math.round(job.intervalMs / 1000)}s</div>
+      <div class="meta">${escapeHtml(job.id)} · ${escapeHtml(jobSchedule(job))}</div>
       <div class="muted">${escapeHtml(job.stimulus)}</div>
       <div class="meta">next ${fmtTime(job.nextRunAt)} · last ${fmtTime(job.lastRunAt)}</div>
+      ${job.lastError ? `<div class="muted danger-text">${escapeHtml(job.lastError)}</div>` : ""}
       <div class="row">
         <button class="primary" data-action="inspect-job" data-id="${escapeHtml(job.id)}">Inspect</button>
         <button class="primary" data-action="run-job" data-id="${escapeHtml(job.id)}">Run now</button>
@@ -756,10 +770,12 @@ function jobDetailCard() {
       <div class="row">
         <h4>${escapeHtml(job.name)}</h4>
         <span class="pill ${job.enabled ? "success" : "danger"}">${job.enabled ? "enabled" : "disabled"}</span>
+        ${jobStatus(job)}
       </div>
-      <div class="meta">${escapeHtml(job.id)} · every ${Math.round(job.intervalMs / 1000)}s</div>
+      <div class="meta">${escapeHtml(job.id)} · ${escapeHtml(jobSchedule(job))}</div>
       <div class="muted">${escapeHtml(job.stimulus)}</div>
       <div class="meta">next ${fmtTime(job.nextRunAt)} · last ${fmtTime(job.lastRunAt)} · runs ${job.runCount}</div>
+      ${job.lastError ? `<div class="muted danger-text">${escapeHtml(job.lastError)}</div>` : ""}
       <div class="row">
         <button class="primary" data-action="run-job" data-id="${escapeHtml(job.id)}">Run now</button>
         <button class="ghost" data-action="toggle-job" data-id="${escapeHtml(job.id)}">${job.enabled ? "Disable" : "Enable"}</button>
@@ -1332,7 +1348,7 @@ function searchCard(item, kind) {
           <h4>${escapeHtml(item.name)}</h4>
           <span class="pill ${item.enabled ? "success" : "danger"}">${item.enabled ? "enabled" : "disabled"}</span>
         </div>
-        <div class="meta">${escapeHtml(item.id)} · every ${Math.round(item.intervalMs / 1000)}s</div>
+        <div class="meta">${escapeHtml(item.id)} · ${escapeHtml(jobSchedule(item))}</div>
         <div class="muted">${escapeHtml(item.stimulus)}</div>
       </div>
     `;
@@ -1823,11 +1839,12 @@ async function createJob(event) {
     body: JSON.stringify({
       name: form.get("name"),
       stimulus: form.get("stimulus"),
-      intervalMs: Number(form.get("intervalMs")),
+      schedule: form.get("schedule"),
       enabled: true,
     }),
   });
   event.currentTarget.reset();
+  event.currentTarget.elements.schedule.value = "every 1m";
   await refreshAll();
 }
 

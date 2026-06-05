@@ -11,7 +11,7 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
 
   await server.register(cors, {
     origin: false,
-    methods: ["GET", "POST", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   });
 
   server.get("/health", async () => ({ status: "ok", backend: "agentix" }));
@@ -216,14 +216,48 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
     return runtime.createJob({
       name: String(body.name ?? "scheduled task"),
       stimulus: String(body.stimulus ?? ""),
-      intervalMs: Number(body.intervalMs ?? 60_000),
+      schedule: body.schedule === undefined ? undefined : String(body.schedule),
+      intervalMs: body.intervalMs === undefined ? undefined : Number(body.intervalMs),
       enabled: body.enabled === undefined ? true : Boolean(body.enabled),
     });
+  });
+  server.post("/scheduler/jobs/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as Record<string, unknown>;
+    const result = runtime.updateJob(id, {
+      name: body.name === undefined ? undefined : String(body.name),
+      stimulus: body.stimulus === undefined ? undefined : String(body.stimulus),
+      schedule: body.schedule === undefined ? undefined : String(body.schedule),
+      intervalMs: body.intervalMs === undefined ? undefined : Number(body.intervalMs),
+      enabled: body.enabled === undefined ? undefined : Boolean(body.enabled),
+    });
+    if (!result.ok) {
+      reply.status(404);
+      return { error: `unknown scheduled job: ${id}` };
+    }
+    return result;
+  });
+  server.put("/scheduler/jobs/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as Record<string, unknown>;
+    const result = runtime.updateJob(id, {
+      name: body.name === undefined ? undefined : String(body.name),
+      stimulus: body.stimulus === undefined ? undefined : String(body.stimulus),
+      schedule: body.schedule === undefined ? undefined : String(body.schedule),
+      intervalMs: body.intervalMs === undefined ? undefined : Number(body.intervalMs),
+      enabled: body.enabled === undefined ? undefined : Boolean(body.enabled),
+    });
+    if (!result.ok) {
+      reply.status(404);
+      return { error: `unknown scheduled job: ${id}` };
+    }
+    return result;
   });
   server.post("/scheduler/jobs/:id/run", async (request) => {
     const { id } = request.params as { id: string };
     return runtime.runJob(id);
   });
+  server.post("/scheduler/run-due", async () => runtime.runDueJobs());
   server.post("/scheduler/jobs/:id/enable", async (request) => {
     const { id } = request.params as { id: string };
     return runtime.setJobEnabled(id, true);

@@ -379,6 +379,66 @@ describe("Powerhouse restored runtime", () => {
     powerhouse.stop();
   });
 
+  it("supports Hermes-style cron schedules and records run metadata", async () => {
+    const powerhouse = makePowerhouse();
+    const dir = tempDir("agentix-cron-scheduler-");
+    const scheduler = new SchedulerService(
+      powerhouse,
+      new ScheduledJobStore(join(dir, "jobs.json")),
+      new AuditLog(join(dir, "audit.jsonl")),
+    );
+    const job = scheduler.create({
+      name: "cron smoke",
+      stimulus: "scheduled cron hello",
+      schedule: "*/5 * * * *",
+    });
+
+    expect(job.scheduleKind).toBe("cron");
+    expect(job.scheduleDisplay).toBe("*/5 * * * *");
+    expect(job.nextRunAt).toBeGreaterThan(Date.now());
+
+    const updated = scheduler.update(job.id, { schedule: "every 2m" });
+    expect(updated?.scheduleKind).toBe("interval");
+    expect(updated?.scheduleDisplay).toBe("every 2m");
+
+    const result = await scheduler.runNow(job.id);
+    const persisted = scheduler.jobs.get(job.id);
+
+    expect(result.ok).toBe(true);
+    expect(persisted?.lastStatus).toBe("success");
+    expect(persisted?.lastTaskIds?.length).toBeGreaterThan(0);
+    expect(persisted?.runCount).toBe(1);
+
+    scheduler.stop();
+    powerhouse.stop();
+  });
+
+  it("completes one-shot scheduled jobs after a manual run", async () => {
+    const powerhouse = makePowerhouse();
+    const dir = tempDir("agentix-once-scheduler-");
+    const scheduler = new SchedulerService(
+      powerhouse,
+      new ScheduledJobStore(join(dir, "jobs.json")),
+      new AuditLog(join(dir, "audit.jsonl")),
+    );
+    const job = scheduler.create({
+      name: "one shot",
+      stimulus: "scheduled one shot",
+      schedule: "1m",
+    });
+
+    const result = await scheduler.runNow(job.id);
+    const persisted = scheduler.jobs.get(job.id);
+
+    expect(result.ok).toBe(true);
+    expect(persisted?.scheduleKind).toBe("once");
+    expect(persisted?.enabled).toBe(false);
+    expect(persisted?.nextRunAt).toBeNull();
+
+    scheduler.stop();
+    powerhouse.stop();
+  });
+
   it("exposes gateway registry details and accepts inbound gateway messages", async () => {
     const runtime = new LocalAgentixRuntime();
 

@@ -192,14 +192,29 @@ export class AgentixBackend {
   async createScheduledJob(input: {
     name: string;
     stimulus: string;
-    intervalMs: number;
+    schedule?: string;
+    intervalMs?: number;
     enabled?: boolean;
   }): Promise<Record<string, unknown>> {
     return this.post("/scheduler/jobs", input);
   }
 
+  async updateScheduledJob(id: string, input: {
+    name?: string;
+    stimulus?: string;
+    schedule?: string;
+    intervalMs?: number;
+    enabled?: boolean;
+  }): Promise<Record<string, unknown>> {
+    return this.post(`/scheduler/jobs/${encodeURIComponent(id)}`, input);
+  }
+
   async runScheduledJob(id: string): Promise<Record<string, unknown>> {
     return this.post(`/scheduler/jobs/${encodeURIComponent(id)}/run`);
+  }
+
+  async runDueScheduledJobs(): Promise<Record<string, unknown>> {
+    return this.post("/scheduler/run-due");
   }
 
   async setScheduledJobEnabled(id: string, enabled: boolean): Promise<Record<string, unknown>> {

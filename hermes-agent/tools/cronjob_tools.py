@@ -7,8 +7,10 @@ Compatibility wrappers remain for direct Python callers and legacy tests.
 
 import json
 import logging
+import os
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -416,6 +418,193 @@ def _format_job(job: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+def _agentix_backend_enabled() -> bool:
+    return os.environ.get("AGENTIX_FRONTEND") == "hermes" and os.environ.get("AGENTIX_DISABLE_BACKEND_CRON") != "1"
+
+
+def _format_agentix_job(job: Dict[str, Any]) -> Dict[str, Any]:
+    job_id = str(job.get("id") or job.get("job_id") or "unknown")
+    prompt = str(job.get("stimulus") or job.get("prompt") or "")
+    enabled = bool(job.get("enabled", True))
+    next_run = _agentix_timestamp(job.get("nextRunAt") or job.get("next_run_at"))
+    last_run = _agentix_timestamp(job.get("lastRunAt") or job.get("last_run_at"))
+    last_status = job.get("lastStatus") or job.get("last_status")
+    state = "scheduled" if enabled else "paused"
+    if not enabled and not next_run and last_run:
+        state = "completed"
+    return {
+        "job_id": job_id,
+        "id": job_id,
+        "name": str(job.get("name") or prompt[:50] or job_id or "cron job"),
+        "skill": None,
+        "skills": [],
+        "prompt_preview": prompt[:100] + "..." if len(prompt) > 100 else prompt,
+        "schedule": job.get("scheduleDisplay") or job.get("schedule") or "?",
+        "repeat": "once" if job.get("scheduleKind") == "once" else "forever",
+        "deliver": job.get("deliver", "local"),
+        "next_run_at": next_run,
+        "last_run_at": last_run,
+        "last_status": "ok" if last_status == "success" else last_status,
+        "last_error": job.get("lastError") or job.get("last_error"),
+        "enabled": enabled,
+        "state": state,
+        "run_count": job.get("runCount") or job.get("run_count") or 0,
+    }
+
+
+def _agentix_timestamp(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value / 1000, tz=timezone.utc).isoformat()
+    return str(value)
+
+
+def _agentix_job_ref(backend: Any, ref: str) -> Optional[Dict[str, Any]]:
+    jobs = backend.list_scheduled_jobs()
+    ref = str(ref or "").strip()
+    exact = [job for job in jobs if str(job.get("id")) == ref or str(job.get("name")) == ref]
+    if exact:
+        return exact[0]
+    prefix = [job for job in jobs if str(job.get("id", "")).startswith(ref)]
+    if len(prefix) == 1:
+        return prefix[0]
+    return None
+
+
+def _agentix_stimulus(prompt: Optional[str], skills: List[str]) -> str:
+    prompt_text = str(prompt or "").strip()
+    if not skills:
+        return prompt_text
+    return "\n\n".join([
+        f"Use these Hermes skills if relevant: {', '.join(skills)}.",
+        prompt_text,
+    ]).strip()
+
+
+def _agentix_cronjob(
+    action: str,
+    job_id: Optional[str] = None,
+    prompt: Optional[str] = None,
+    schedule: Optional[str] = None,
+    name: Optional[str] = None,
+    include_disabled: bool = False,
+    skill: Optional[str] = None,
+    skills: Optional[List[str]] = None,
+    script: Optional[str] = None,
+    no_agent: Optional[bool] = None,
+    **_: Any,
+) -> Optional[str]:
+    if not _agentix_backend_enabled():
+        return None
+
+    try:
+        from agentix_backend import AgentixBackend
+
+        backend = AgentixBackend()
+        normalized = (action or "").strip().lower()
+        canonical_skills = _canonical_skills(skill, skills)
+
+        if normalized == "list":
+            jobs = [_format_agentix_job(job) for job in backend.list_scheduled_jobs()]
+            if not include_disabled:
+                jobs = [job for job in jobs if job.get("enabled", True)]
+            return json.dumps({"success": True, "count": len(jobs), "jobs": jobs}, indent=2)
+
+        if normalized == "create":
+            if not schedule:
+                return tool_error("schedule is required for create", success=False)
+            if script or no_agent:
+                return tool_error("Agentix backend cron supports agent prompt jobs; script/no-agent jobs are not supported yet.", success=False)
+            stimulus = _agentix_stimulus(prompt, canonical_skills)
+            if not stimulus:
+                return tool_error("create requires a prompt or at least one skill", success=False)
+            if prompt:
+                scan_error = _scan_cron_prompt(prompt)
+                if scan_error:
+                    return tool_error(scan_error, success=False)
+            job = backend.create_scheduled_job(
+                name=name or stimulus[:50] or "cron job",
+                stimulus=stimulus,
+                schedule=schedule,
+                enabled=True,
+            )
+            formatted = _format_agentix_job(job)
+            return json.dumps(
+                {
+                    "success": True,
+                    "job_id": formatted["job_id"],
+                    "name": formatted["name"],
+                    "skills": canonical_skills,
+                    "schedule": formatted["schedule"],
+                    "repeat": formatted["repeat"],
+                    "deliver": formatted["deliver"],
+                    "next_run_at": formatted["next_run_at"],
+                    "job": formatted,
+                    "message": f"Cron job '{formatted['name']}' created.",
+                },
+                indent=2,
+            )
+
+        if not job_id:
+            return tool_error(f"job_id is required for action '{normalized}'", success=False)
+        job = _agentix_job_ref(backend, job_id)
+        if not job:
+            return json.dumps(
+                {"success": False, "error": f"Job with ID or name '{job_id}' not found. Use cronjob(action='list') to inspect jobs."},
+                indent=2,
+            )
+        resolved_id = str(job.get("id"))
+
+        if normalized == "remove":
+            removed = backend.delete_scheduled_job(resolved_id)
+            return json.dumps(
+                {
+                    "success": bool(removed.get("ok", True)),
+                    "message": f"Cron job '{job.get('name', resolved_id)}' removed.",
+                    "removed_job": _format_agentix_job(job),
+                },
+                indent=2,
+            )
+
+        if normalized == "pause":
+            result = backend.set_scheduled_job_enabled(resolved_id, False)
+            return json.dumps({"success": bool(result.get("ok", True)), "job": _format_agentix_job(result.get("job") or job)}, indent=2)
+
+        if normalized == "resume":
+            result = backend.set_scheduled_job_enabled(resolved_id, True)
+            return json.dumps({"success": bool(result.get("ok", True)), "job": _format_agentix_job(result.get("job") or job)}, indent=2)
+
+        if normalized in {"run", "run_now", "trigger"}:
+            result = backend.run_scheduled_job(resolved_id)
+            return json.dumps({"success": bool(result.get("ok", True)), "job": _format_agentix_job(result.get("job") or job)}, indent=2)
+
+        if normalized == "update":
+            updates: Dict[str, Any] = {}
+            if prompt is not None:
+                scan_error = _scan_cron_prompt(prompt)
+                if scan_error:
+                    return tool_error(scan_error, success=False)
+                updates["stimulus"] = _agentix_stimulus(prompt, canonical_skills)
+            if name is not None:
+                updates["name"] = name
+            if schedule is not None:
+                updates["schedule"] = schedule
+            if not updates:
+                return tool_error("No updates provided.", success=False)
+            updated = backend.update_scheduled_job(
+                resolved_id,
+                name=updates.get("name"),
+                stimulus=updates.get("stimulus"),
+                schedule=updates.get("schedule"),
+            )
+            return json.dumps({"success": bool(updated.get("ok", True)), "job": _format_agentix_job(updated.get("job") or job)}, indent=2)
+
+        return tool_error(f"Unknown cron action '{action}'", success=False)
+    except Exception as exc:
+        return tool_error(str(exc), success=False)
+
+
 def cronjob(
     action: str,
     job_id: Optional[str] = None,
@@ -441,6 +630,31 @@ def cronjob(
 ) -> str:
     """Unified cron job management tool."""
     del task_id  # unused but kept for handler signature compatibility
+
+    agentix_result = _agentix_cronjob(
+        action=action,
+        job_id=job_id,
+        prompt=prompt,
+        schedule=schedule,
+        name=name,
+        repeat=repeat,
+        deliver=deliver,
+        include_disabled=include_disabled,
+        skill=skill,
+        skills=skills,
+        model=model,
+        provider=provider,
+        base_url=base_url,
+        reason=reason,
+        script=script,
+        context_from=context_from,
+        enabled_toolsets=enabled_toolsets,
+        workdir=workdir,
+        profile=profile,
+        no_agent=no_agent,
+    )
+    if agentix_result is not None:
+        return agentix_result
 
     try:
         normalized = (action or "").strip().lower()
