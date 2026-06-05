@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -77,6 +77,23 @@ describe("Powerhouse restored runtime", () => {
     expect(result.response).toContain("Approval required");
     expect(powerhouse.listApprovals()).toHaveLength(1);
     expect(powerhouse.listTasks()[0]?.kind).toBe("bash");
+
+    powerhouse.stop();
+  });
+
+  it("executes approved shell commands through the platform shell", async () => {
+    const powerhouse = makePowerhouse();
+
+    const result = await powerhouse.executeStimulus({
+      stimulus: "run: echo agentix-approved-shell",
+    });
+    const taskId = result.taskIds[0];
+
+    const approved = await powerhouse.approve(taskId!);
+
+    expect(approved.ok).toBe(true);
+    expect(JSON.stringify(approved.output)).toContain("agentix-approved-shell");
+    expect(powerhouse.listTasks()[0]?.status).toBe("complete");
 
     powerhouse.stop();
   });
@@ -330,9 +347,24 @@ describe("Powerhouse restored runtime", () => {
 
   it("creates healing procedure candidates after repeated failures", async () => {
     const powerhouse = makePowerhouse();
+    const failingPlan = {
+      steps: [
+        {
+          id: "fail",
+          kind: "sandbox-run",
+          payload: {
+            code: "process.exit(1)",
+            filename: "fail.js",
+            command: ["node", "fail.js"],
+          },
+          requiresApproval: false,
+          maxAttempts: 1,
+        },
+      ],
+    };
 
-    await powerhouse.executeStimulus({ stimulus: "sandbox: process.exit(1)" });
-    await powerhouse.executeStimulus({ stimulus: "sandbox: process.exit(1)" });
+    await powerhouse.executeStimulus({ stimulus: `plan: ${JSON.stringify(failingPlan)}` });
+    await powerhouse.executeStimulus({ stimulus: `plan: ${JSON.stringify(failingPlan)}` });
 
     const procedures = powerhouse.healing.listProcedures();
     expect(procedures.some((procedure) => procedure.status === "candidate")).toBe(true);
@@ -363,6 +395,7 @@ describe("Powerhouse restored runtime", () => {
       powerhouse,
       new ScheduledJobStore(join(dir, "jobs.json")),
       new AuditLog(join(dir, "audit.jsonl")),
+      [dir],
     );
     const job = scheduler.create({
       name: "smoke",
@@ -386,6 +419,7 @@ describe("Powerhouse restored runtime", () => {
       powerhouse,
       new ScheduledJobStore(join(dir, "jobs.json")),
       new AuditLog(join(dir, "audit.jsonl")),
+      [dir],
     );
     const job = scheduler.create({
       name: "cron smoke",
@@ -420,6 +454,7 @@ describe("Powerhouse restored runtime", () => {
       powerhouse,
       new ScheduledJobStore(join(dir, "jobs.json")),
       new AuditLog(join(dir, "audit.jsonl")),
+      [dir],
     );
     const job = scheduler.create({
       name: "one shot",
@@ -448,6 +483,7 @@ describe("Powerhouse restored runtime", () => {
       powerhouse,
       new ScheduledJobStore(join(dir, "jobs.json")),
       new AuditLog(join(dir, "audit.jsonl")),
+      [dir],
     );
     const job = scheduler.create({
       name: "script smoke",
@@ -464,6 +500,39 @@ describe("Powerhouse restored runtime", () => {
     expect(persisted?.lastStatus).toBe("success");
     expect(persisted?.lastOutput).toContain("script cron output");
     expect(persisted?.lastTaskIds).toEqual([]);
+
+    scheduler.stop();
+    powerhouse.stop();
+  });
+
+  it("rejects scheduled scripts outside allowed script directories", async () => {
+    const powerhouse = makePowerhouse();
+    const dir = tempDir("agentix-script-scheduler-");
+    const allowedDir = join(dir, "allowed");
+    const outsideDir = join(dir, "outside");
+    const script = join(outsideDir, "cron-script.js");
+    mkdirSync(outsideDir, { recursive: true });
+    writeFileSync(script, "console.log('should not run')\n", "utf-8");
+    const scheduler = new SchedulerService(
+      powerhouse,
+      new ScheduledJobStore(join(dir, "jobs.json")),
+      new AuditLog(join(dir, "audit.jsonl")),
+      [allowedDir],
+    );
+    const job = scheduler.create({
+      name: "script reject smoke",
+      stimulus: "",
+      schedule: "every 1m",
+      script,
+      noAgent: true,
+    });
+
+    const result = await scheduler.runNow(job.id);
+    const persisted = scheduler.jobs.get(job.id);
+
+    expect(result.ok).toBe(false);
+    expect(persisted?.lastStatus).toBe("failure");
+    expect(persisted?.lastError).toContain("outside allowed script directories");
 
     scheduler.stop();
     powerhouse.stop();

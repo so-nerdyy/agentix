@@ -9,6 +9,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { isAbsolute, relative, resolve } from "node:path";
 import { BasePIAgent } from "./BasePIAgent.js";
 import type { Task, TaskResult } from "../powerhouse/types.js";
 
@@ -18,8 +19,11 @@ export interface CodeAgentOpts {
 }
 
 export class CodeAgent extends BasePIAgent {
+  private readonly projectRoot: string;
+
   constructor(private readonly opts: CodeAgentOpts) {
     super("code-edit");
+    this.projectRoot = resolve(opts.projectRoot);
   }
 
   async execute(task: Task): Promise<TaskResult> {
@@ -39,9 +43,8 @@ export class CodeAgent extends BasePIAgent {
       return { ok: false, error: err };
     }
 
-    const filePath = payload.file;
-
     try {
+      const filePath = this.resolveWorkspacePath(payload.file);
       if (payload.newContent !== undefined) {
         writeFileSync(filePath, payload.newContent, "utf-8");
       } else if (payload.find !== undefined && payload.replace !== undefined) {
@@ -87,7 +90,7 @@ export class CodeAgent extends BasePIAgent {
   private runTsc(): Promise<TaskResult> {
     return new Promise((resolve) => {
       const child = spawn("npx", ["tsc", "--noEmit"], {
-        cwd: this.opts.projectRoot,
+        cwd: this.projectRoot,
         stdio: ["ignore", "pipe", "pipe"],
       });
       let stderr = "";
@@ -100,5 +103,14 @@ export class CodeAgent extends BasePIAgent {
         else resolve({ ok: false, error: `tsc failed: ${stderr.trim()}` });
       });
     });
+  }
+
+  private resolveWorkspacePath(file: string): string {
+    const candidate = isAbsolute(file) ? resolve(file) : resolve(this.projectRoot, file);
+    const rel = relative(this.projectRoot, candidate);
+    if (rel.startsWith("..") || isAbsolute(rel)) {
+      throw new Error(`CodeAgent: file is outside project root: ${file}`);
+    }
+    return candidate;
   }
 }

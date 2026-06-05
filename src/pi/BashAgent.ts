@@ -30,15 +30,15 @@ export class BashAgent extends BasePIAgent {
     const payload = task.payload as {
       command?: string;
       args?: string[];
+      commandLine?: string;
     };
-    if (!payload.command) {
+    if (!payload.command && !payload.commandLine) {
       const err = "BashAgent: task.payload.command is required";
       this.emitError(task, err);
       return { ok: false, error: err };
     }
 
-    const command = payload.command;
-    const args = payload.args ?? [];
+    const { command, args } = this.resolveCommand(payload);
 
     return new Promise<TaskResult>((resolve) => {
       const child = spawn(command, args, {
@@ -89,5 +89,29 @@ export class BashAgent extends BasePIAgent {
 
   override shutdown(): void {
     this.alive = false;
+  }
+
+  private resolveCommand(payload: { command?: string; args?: string[]; commandLine?: string }): {
+    command: string;
+    args: string[];
+  } {
+    if (!payload.commandLine) {
+      return {
+        command: payload.command!,
+        args: payload.args ?? [],
+      };
+    }
+
+    if (process.platform === "win32") {
+      return {
+        command: process.env.ComSpec ?? "cmd.exe",
+        args: ["/d", "/s", "/c", payload.commandLine],
+      };
+    }
+
+    return {
+      command: process.env.SHELL ?? "sh",
+      args: ["-lc", payload.commandLine],
+    };
   }
 }

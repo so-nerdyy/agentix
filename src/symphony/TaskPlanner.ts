@@ -74,7 +74,7 @@ export class TaskPlanner {
           command: ["node", "snippet.js"],
         },
         dependsOn: [],
-        requiresApproval: false,
+        requiresApproval: true,
         maxAttempts: 2,
       };
     }
@@ -103,7 +103,7 @@ export class TaskPlanner {
         priority: step.priority ?? "user",
         payload: step.payload ?? {},
         dependsOn: step.dependsOn ?? [],
-        requiresApproval: step.requiresApproval ?? step.kind === "bash",
+        requiresApproval: step.requiresApproval ?? this.requiresApprovalByDefault(step.kind),
         maxAttempts: step.maxAttempts ?? 1,
       }));
     } catch {
@@ -116,6 +116,10 @@ export class TaskPlanner {
     const [command, ...args] = parts.map((part) =>
       part.replace(/^"(.*)"$/, "$1").replace(/^'(.*)'$/, "$1"),
     );
-    return { command, args };
+    return { command, args, commandLine };
+  }
+
+  private requiresApprovalByDefault(kind?: string): boolean {
+    return kind === "bash" || kind === "code-edit" || kind === "sandbox-run";
   }
 }

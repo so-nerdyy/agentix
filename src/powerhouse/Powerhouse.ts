@@ -472,11 +472,18 @@ export class Powerhouse {
   }
 
   private registerDefaultAgents(): void {
-    if (this.agents.forKind("user-message")) return;
-    this.agents.register(new ConversationAgent());
-    this.agents.register(new BashAgent({ cwd: process.cwd() }));
-    this.agents.register(new CodeAgent({ projectRoot: PATHS.projectRoot }));
-    this.agents.register(new SandboxAgent());
+    if (!this.agents.forKind("user-message")) {
+      this.agents.register(new ConversationAgent());
+    }
+    if (!this.agents.forKind("bash")) {
+      this.agents.register(new BashAgent({ cwd: process.cwd() }));
+    }
+    if (!this.agents.forKind("code-edit")) {
+      this.agents.register(new CodeAgent({ projectRoot: PATHS.projectRoot }));
+    }
+    if (!this.agents.forKind("sandbox-run")) {
+      this.agents.register(new SandboxAgent());
+    }
   }
 
   private approvalResponse(taskIds: string[]): string {

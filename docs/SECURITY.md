@@ -15,6 +15,10 @@ Agentix assumes the local workspace may contain untrusted inputs, scripts, and t
 - Pi workers run backend-approved work
 - Approval-gated actions must remain explicit in the backend
 - Shell/UI layers must not become a second source of truth for task state
+- `bash`, `code-edit`, and `sandbox-run` task kinds are approval-gated by default
+- `code-edit` task paths are restricted to the configured project root
+- `sandbox-run` task files are restricted to the task sandbox directory
+- The sandbox is a local filesystem boundary, not container or kernel-level isolation
 
 ## Validation
 

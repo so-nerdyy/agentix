@@ -4,7 +4,8 @@ import { computeNextRun, parseScheduleInput } from "./CronSchedule.js";
 import { ScheduledJobStore, type ScheduledJob } from "./ScheduledJobStore.js";
 import { spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
-import { basename, extname, isAbsolute, join, resolve } from "node:path";
+import { homedir } from "node:os";
+import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { PATHS } from "../config/paths.js";
 
 interface ScriptRunResult {
@@ -22,6 +23,7 @@ export class SchedulerService {
     private readonly powerhouse: Powerhouse,
     readonly jobs = new ScheduledJobStore(),
     private readonly audit = new AuditLog(),
+    private readonly scriptBaseDirs = defaultScriptBaseDirs(),
   ) {}
 
   start(intervalMs = 30_000): void {
@@ -282,7 +284,7 @@ export class SchedulerService {
     if (!job.script) {
       return Promise.resolve({ ok: true, stdout: "", stderr: "", exitCode: 0 });
     }
-    const scriptPath = this.resolveScriptPath(job.script, job.workdir);
+    const scriptPath = this.resolveScriptPath(job.script);
     const ext = extname(scriptPath).toLowerCase();
     const command = ext === ".js" || ext === ".mjs"
       ? process.execPath
@@ -293,7 +295,7 @@ export class SchedulerService {
 
     return new Promise((resolveResult) => {
       const child = spawn(command, args, {
-        cwd: job.workdir && isAbsolute(job.workdir) ? job.workdir : PATHS.projectRoot,
+        cwd: this.resolveWorkdir(job.workdir),
         env: {
           ...process.env,
           AGENTIX_CRON_JOB_ID: job.id,
@@ -336,14 +338,50 @@ export class SchedulerService {
     });
   }
 
-  private resolveScriptPath(script: string, workdir?: string): string {
-    const baseDir = workdir && isAbsolute(workdir)
-      ? workdir
-      : join(PATHS.dataDir, "scripts");
-    const candidate = isAbsolute(script) ? resolve(script) : resolve(baseDir, script);
-    if (!existsSync(candidate) || !statSync(candidate).isFile()) {
-      throw new Error(`scheduled script not found: ${candidate}`);
+  private resolveScriptPath(script: string): string {
+    const allowedDirs = this.scriptBaseDirs.map((dir) => resolve(dir));
+    const candidates = isAbsolute(script)
+      ? [resolve(script)]
+      : allowedDirs.map((dir) => resolve(dir, script));
+
+    for (const candidate of candidates) {
+      if (!allowedDirs.some((dir) => isWithinDir(dir, candidate))) {
+        continue;
+      }
+      if (existsSync(candidate) && statSync(candidate).isFile()) {
+        return candidate;
+      }
     }
-    return candidate;
+
+    if (isAbsolute(script)) {
+      throw new Error(`scheduled script is outside allowed script directories: ${script}`);
+    }
+    throw new Error(`scheduled script not found in allowed script directories: ${script}`);
   }
+
+  private resolveWorkdir(workdir?: string): string {
+    if (!workdir) return PATHS.projectRoot;
+    if (!isAbsolute(workdir)) {
+      throw new Error(`scheduled workdir must be absolute: ${workdir}`);
+    }
+    const resolved = resolve(workdir);
+    if (!existsSync(resolved) || !statSync(resolved).isDirectory()) {
+      throw new Error(`scheduled workdir is not a directory: ${workdir}`);
+    }
+    return resolved;
+  }
+}
+
+function defaultScriptBaseDirs(): string[] {
+  const dirs = [
+    join(PATHS.dataDir, "scripts"),
+    process.env.HERMES_HOME ? join(process.env.HERMES_HOME, "scripts") : null,
+    join(homedir(), ".hermes", "scripts"),
+  ].filter((dir): dir is string => Boolean(dir));
+  return Array.from(new Set(dirs.map((dir) => resolve(dir))));
+}
+
+function isWithinDir(baseDir: string, candidate: string): boolean {
+  const rel = relative(resolve(baseDir), resolve(candidate));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }

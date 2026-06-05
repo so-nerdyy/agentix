@@ -2,8 +2,8 @@
 // under <dataDir>/sandboxes/<sessionId>/. No network, no escape outside
 // the sandbox. Used for running generated code, tests, etc.
 
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { BasePIAgent } from "./BasePIAgent.js";
 import { PATHS } from "../config/paths.js";
@@ -44,8 +44,16 @@ export class SandboxAgent extends BasePIAgent {
       return { ok: false, error: err };
     }
 
-    const filePath = join(sandbox, filename);
-    writeFileSync(filePath, code, "utf-8");
+    let filePath: string;
+    try {
+      filePath = this.resolveSandboxPath(sandbox, filename);
+      mkdirSync(dirname(filePath), { recursive: true });
+      writeFileSync(filePath, code, "utf-8");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.emitError(task, msg);
+      return { ok: false, error: msg };
+    }
 
     return new Promise<TaskResult>((resolve) => {
       const child = spawn(command[0], command.slice(1), {
@@ -105,7 +113,6 @@ export class SandboxAgent extends BasePIAgent {
 
   list(): string[] {
     if (!existsSync(this.rootDir)) return [];
-    const { readdirSync } = require("node:fs") as typeof import("node:fs");
     return readdirSync(this.rootDir);
   }
 
@@ -117,5 +124,17 @@ export class SandboxAgent extends BasePIAgent {
     const dir = join(this.rootDir, sessionId);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     return dir;
+  }
+
+  private resolveSandboxPath(sandbox: string, filename: string): string {
+    if (isAbsolute(filename)) {
+      throw new Error(`SandboxAgent: filename must be relative to the sandbox: ${filename}`);
+    }
+    const candidate = resolve(sandbox, filename);
+    const rel = relative(sandbox, candidate);
+    if (rel.startsWith("..") || isAbsolute(rel) || rel === "") {
+      throw new Error(`SandboxAgent: filename escapes sandbox: ${filename}`);
+    }
+    return candidate;
   }
 }
