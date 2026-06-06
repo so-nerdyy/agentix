@@ -52,7 +52,8 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node frontend/build.mjs",
+    "build:frontend": "node frontend/build.mjs",
     "test:unit": "vitest run tests/unit",
     "test": "vitest run tests/unit",
     "dev": "tsc --watch"

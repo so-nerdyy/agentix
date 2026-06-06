@@ -50,6 +50,8 @@ npm run build
 npm test
 ```
 
+`npm run build` compiles the backend and rebuilds the static dashboard from `frontend/src` into `frontend/dist`.
+
 ## First Run
 
 `agentix setup` writes workspace-local configuration and prepares the shell for the current folder. The default `agentix` command opens the interactive Hermes-style frontend.

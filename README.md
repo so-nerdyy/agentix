@@ -65,7 +65,8 @@ Secrets are not written to disk. Use `agentix setup` to create workspace-local c
 
 - `bin/` - installed entrypoint
 - `src/` - Agentix backend, shell fallback, and bridge
-- `frontend/` - interactive dashboard served by the inbox server
+- `frontend/src/` - editable interactive dashboard source
+- `frontend/dist/` - generated dashboard served by the inbox server
 - `hermes-agent/` - Hermes frontend runtime used by the launcher
 - `docs/` - install, operations, and security notes
 
