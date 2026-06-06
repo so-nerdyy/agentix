@@ -17,6 +17,18 @@
 - Sessions are stored under the data directory
 - Memory and sandbox artifacts are stored under the data directory
 
+## Hermes Command Delegation
+
+When `agentix` launches Hermes, it sets `AGENTIX_FRONTEND=hermes`. In this mode Hermes command UX delegates backend-owned state to Agentix:
+
+- `agentix sessions list|stats|export|delete`
+- `agentix memory status|search|consolidate`
+- `agentix tools list`
+- `agentix logs`
+- `agentix cron`
+
+Set `AGENTIX_DISABLE_BACKEND_COMMANDS=1` only for debugging upstream Hermes behavior.
+
 ## Health Checks
 
 - `GET /health` on the inbox server

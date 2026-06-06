@@ -256,8 +256,19 @@ export class LocalAgentixRuntime {
     return this.powerhouse.memory.search(query);
   }
 
+  listMemory(sessionId?: string): Array<Record<string, unknown>> {
+    return this.powerhouse.memory.list(sessionId).map((entry) => ({
+      ...entry,
+      createdAt: new Date(entry.createdAt).toISOString(),
+    }));
+  }
+
   consolidateMemory(sessionId?: string): Record<string, unknown> {
-    return { ...this.powerhouse.memory.consolidate(sessionId) };
+    const entry = this.powerhouse.memory.consolidate(sessionId);
+    return {
+      ...entry,
+      createdAt: new Date(entry.createdAt).toISOString(),
+    };
   }
 
   listTools(): Array<{ name: string; description: string }> {

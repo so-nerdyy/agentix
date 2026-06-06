@@ -110,6 +110,7 @@ describe("Powerhouse restored runtime", () => {
     expect(result.status).toBe("complete");
     expect(runtime.listSessions().some((item) => item.id === session.id)).toBe(true);
     expect(runtime.listTasks(session.id)).toHaveLength(1);
+    expect(runtime.listMemory(session.id).some((item) => String(item.content).includes("test runtime facade"))).toBe(true);
     expect(runtime.listTools().some((tool) => tool.name === "user-message")).toBe(true);
     expect(Array.isArray(runtime.listApprovals())).toBe(true);
 

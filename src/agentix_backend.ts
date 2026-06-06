@@ -104,6 +104,11 @@ export class AgentixBackend {
     return this.get(`/memory/search?q=${encodeURIComponent(query)}`);
   }
 
+  async listMemory(sessionId?: string): Promise<Array<Record<string, unknown>>> {
+    const suffix = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
+    return this.get(`/memory${suffix}`);
+  }
+
   async consolidateMemory(sessionId?: string): Promise<Record<string, unknown>> {
     return this.post("/memory/consolidate", { sessionId });
   }

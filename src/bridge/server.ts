@@ -75,6 +75,10 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
     const q = (request.query as Record<string, string>).q || "";
     return runtime.memorySearch(q);
   });
+  server.get("/memory", async (request) => {
+    const query = request.query as Record<string, string | undefined>;
+    return runtime.listMemory(query.sessionId);
+  });
   server.post("/memory/consolidate", async (request) => {
     const body = request.body as Record<string, unknown> | undefined;
     return runtime.consolidateMemory(body?.sessionId as string | undefined);
@@ -90,7 +94,11 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
     }
     return tool;
   });
-  server.get("/logs", async () => runtime.listLogs());
+  server.get("/logs", async (request) => {
+    const query = request.query as Record<string, string | undefined>;
+    const limit = query.limit === undefined ? 100 : Number(query.limit);
+    return runtime.listLogs(Number.isFinite(limit) && limit > 0 ? limit : 100);
+  });
   server.get("/logs/:index", async (request, reply) => {
     const index = Number((request.params as { index: string }).index);
     const detail = runtime.getLog(index);

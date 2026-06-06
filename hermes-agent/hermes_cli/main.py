@@ -11428,6 +11428,11 @@ def cmd_prompt_size(args):
 
 def cmd_logs(args):
     """View and filter Hermes log files."""
+    from hermes_cli.agentix_commands import handle_logs
+
+    if handle_logs(args):
+        return
+
     from hermes_cli.logs import tail_log, list_logs
 
     log_name = getattr(args, "log_name", "agent") or "agent"
@@ -13582,6 +13587,16 @@ Examples:
         help="Provider to configure directly (e.g. honcho), skipping the picker",
     )
     memory_sub.add_parser("status", help="Show current memory provider config")
+    memory_search_parser = memory_sub.add_parser(
+        "search", help="Search Agentix backend memory"
+    )
+    memory_search_parser.add_argument("query", nargs="+", help="Search query")
+    memory_consolidate_parser = memory_sub.add_parser(
+        "consolidate", help="Consolidate Agentix backend memory"
+    )
+    memory_consolidate_parser.add_argument(
+        "--session-id", default=None, help="Consolidate one Agentix session"
+    )
     memory_sub.add_parser("off", help="Disable external provider (built-in only)")
     _reset_parser = memory_sub.add_parser(
         "reset",
@@ -13601,6 +13616,11 @@ Examples:
     )
 
     def cmd_memory(args):
+        from hermes_cli.agentix_commands import handle_memory
+
+        if handle_memory(args):
+            return
+
         sub = getattr(args, "memory_command", None)
         if sub == "off":
             from hermes_cli.config import load_config, save_config
@@ -13730,6 +13750,11 @@ Examples:
     )
 
     def cmd_tools(args):
+        from hermes_cli.agentix_commands import handle_tools
+
+        if handle_tools(args):
+            return
+
         action = getattr(args, "tools_action", None)
         if action in {"list", "disable", "enable"}:
             from hermes_cli.tools_config import tools_disable_enable_command
@@ -13990,6 +14015,11 @@ Examples:
             return False
 
     def cmd_sessions(args):
+        from hermes_cli.agentix_commands import handle_sessions
+
+        if handle_sessions(args, sessions_parser):
+            return
+
         import json as _json
 
         try:

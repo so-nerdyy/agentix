@@ -10,6 +10,7 @@ import time
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
+from urllib.parse import quote
 
 BRIDGE_PORT = int(os.environ.get("AGENTIX_BRIDGE_PORT", "3456"))
 BRIDGE_URL = f"http://127.0.0.1:{BRIDGE_PORT}"
@@ -93,6 +94,12 @@ class AgentixBackend:
         with urllib.request.urlopen(req, timeout=10) as resp:
             return json.loads(resp.read().decode("utf-8"))
 
+    def _delete(self, path: str) -> Any:
+        req = urllib.request.Request(f"{_get_bridge_url()}{path}", method="DELETE")
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode("utf-8")
+            return json.loads(raw) if raw else None
+
     def execute(
         self,
         stimulus: str,
@@ -141,6 +148,12 @@ class AgentixBackend:
     def get_sessions(self) -> Any:
         return self._get("/sessions")
 
+    def list_sessions(self) -> Any:
+        return self.get_sessions()
+
+    def get_session(self, session_id: str) -> Any:
+        return self._get(f"/sessions/{quote(session_id)}")
+
     def create_session(self, model: Optional[str] = None) -> Any:
         body: Dict[str, Any] = {}
         if model:
@@ -148,17 +161,15 @@ class AgentixBackend:
         return self._post("/sessions", body)
 
     def delete_session(self, session_id: str) -> None:
-        req = urllib.request.Request(
-            f"{_get_bridge_url()}/sessions/{session_id}",
-            method="DELETE",
-        )
-        with urllib.request.urlopen(req, timeout=10):
-            return None
+        self._delete(f"/sessions/{quote(session_id)}")
+        return None
 
     def memory_search(self, query: str) -> Any:
-        from urllib.parse import quote
-
         return self._get(f"/memory/search?q={quote(query)}")
+
+    def list_memory(self, session_id: Optional[str] = None) -> Any:
+        suffix = f"?sessionId={quote(session_id)}" if session_id else ""
+        return self._get(f"/memory{suffix}")
 
     def consolidate_memory(self, session_id: Optional[str] = None) -> Any:
         return self._post("/memory/consolidate", {"sessionId": session_id})
@@ -166,38 +177,87 @@ class AgentixBackend:
     def list_tools(self) -> Any:
         return self._get("/tools")
 
-    def list_tasks(self, session_id: Optional[str] = None) -> Any:
-        from urllib.parse import quote
+    def get_tool(self, tool_id: str) -> Any:
+        return self._get(f"/tools/{quote(tool_id)}")
 
+    def search(self, query: str) -> Any:
+        return self._get(f"/search?q={quote(query)}")
+
+    def list_logs(self, limit: int = 100) -> Any:
+        return self._get(f"/logs?limit={int(limit)}")
+
+    def get_log(self, index: int) -> Any:
+        return self._get(f"/logs/{int(index)}")
+
+    def list_tasks(self, session_id: Optional[str] = None) -> Any:
         suffix = f"?sessionId={quote(session_id)}" if session_id else ""
         return self._get(f"/tasks{suffix}")
+
+    def get_task(self, task_id: str) -> Any:
+        return self._get(f"/tasks/{quote(task_id)}")
+
+    def control_task(self, task_id: str, action: str) -> Any:
+        return self._post(f"/tasks/{quote(task_id)}/action", {"action": action})
 
     def list_approvals(self) -> Any:
         return self._get("/approvals")
 
+    def get_approval(self, task_id: str) -> Any:
+        return self._get(f"/approvals/{quote(task_id)}")
+
     def approve(self, task_id: str) -> Any:
-        return self._post(f"/approvals/{task_id}/approve", {})
+        return self._post(f"/approvals/{quote(task_id)}/approve", {})
 
     def reject(self, task_id: str, reason: Optional[str] = None) -> Any:
-        return self._post(f"/approvals/{task_id}/reject", {"reason": reason})
+        return self._post(f"/approvals/{quote(task_id)}/reject", {"reason": reason})
 
     def list_audit(self) -> Any:
         return self._get("/audit")
+
+    def get_audit(self, audit_id: str) -> Any:
+        return self._get(f"/audit/{quote(audit_id)}")
 
     def healing_stats(self) -> Any:
         return self._get("/healing/stats")
 
     def promote_healing_procedure(self, procedure_id: str) -> Any:
-        return self._post(f"/healing/procedures/{procedure_id}/promote", {})
+        return self._post(f"/healing/procedures/{quote(procedure_id)}/promote", {})
 
     def deprecate_healing_procedure(self, procedure_id: str) -> Any:
-        return self._post(f"/healing/procedures/{procedure_id}/deprecate", {})
+        return self._post(f"/healing/procedures/{quote(procedure_id)}/deprecate", {})
+
+    def get_healing_detail(self, detail_id: str) -> Any:
+        return self._get(f"/healing/detail/{quote(detail_id)}")
+
+    def list_gateways(self) -> Any:
+        return self._get("/gateway")
+
+    def get_gateway(self, gateway_id: str) -> Any:
+        return self._get(f"/gateway/{quote(gateway_id)}")
+
+    def set_gateway_enabled(self, gateway_id: str, enabled: bool) -> Any:
+        action = "enable" if enabled else "disable"
+        return self._post(f"/gateway/{quote(gateway_id)}/{action}", {})
+
+    def receive_gateway_message(
+        self,
+        gateway_id: str,
+        stimulus: str,
+        session_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        body: Dict[str, Any] = {"stimulus": stimulus}
+        if session_id:
+            body["sessionId"] = session_id
+        if metadata:
+            body["metadata"] = metadata
+        return self._post(f"/gateway/{quote(gateway_id)}/message", body)
 
     def list_scheduled_jobs(self) -> Any:
         return self._get("/scheduler/jobs")
 
     def get_scheduled_job(self, job_id: str) -> Any:
-        return self._get(f"/scheduler/jobs/{job_id}")
+        return self._get(f"/scheduler/jobs/{quote(job_id)}")
 
     def create_scheduled_job(
         self,
@@ -265,22 +325,17 @@ class AgentixBackend:
             body["workdir"] = workdir
         if skills is not None:
             body["skills"] = skills
-        return self._post(f"/scheduler/jobs/{job_id}", body)
+        return self._post(f"/scheduler/jobs/{quote(job_id)}", body)
 
     def run_scheduled_job(self, job_id: str) -> Any:
-        return self._post(f"/scheduler/jobs/{job_id}/run", {})
+        return self._post(f"/scheduler/jobs/{quote(job_id)}/run", {})
 
     def run_due_scheduled_jobs(self) -> Any:
         return self._post("/scheduler/run-due", {})
 
     def set_scheduled_job_enabled(self, job_id: str, enabled: bool) -> Any:
         action = "enable" if enabled else "disable"
-        return self._post(f"/scheduler/jobs/{job_id}/{action}", {})
+        return self._post(f"/scheduler/jobs/{quote(job_id)}/{action}", {})
 
     def delete_scheduled_job(self, job_id: str) -> Any:
-        req = urllib.request.Request(
-            f"{_get_bridge_url()}/scheduler/jobs/{job_id}",
-            method="DELETE",
-        )
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        return self._delete(f"/scheduler/jobs/{quote(job_id)}")

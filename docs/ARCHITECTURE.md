@@ -7,6 +7,7 @@ Agentix is split into two layers:
 - Owns the user-facing shell
 - Handles setup, model selection, update checks, cron, gateway, skills, tools, and other interactive commands
 - Provides the terminal UX users launch with `agentix`
+- Delegates backend-owned commands to Agentix when launched with `AGENTIX_FRONTEND=hermes`
 
 ## Agentix Backend
 
@@ -14,6 +15,18 @@ Agentix is split into two layers:
 - Manages sessions, approvals, and persistence
 - Exposes the HTTP bridge and inbox/dashboard runtime
 - Runs PI workers and validates results
+
+## Hermes-to-Agentix Command Bridge
+
+The installed `agentix` command launches Hermes for the frontend, but it sets `AGENTIX_FRONTEND=hermes` and points Hermes at the Agentix bridge. In that mode:
+
+- `agentix cron` uses Agentix scheduler jobs.
+- `agentix sessions list|stats|export|delete` uses Agentix sessions.
+- `agentix memory status|search|consolidate` uses Agentix memory.
+- `agentix tools list` lists Agentix Pi agents.
+- `agentix logs` reads Agentix runtime logs.
+
+Standalone upstream Hermes still uses its native local stores when those Agentix environment variables are absent.
 
 ## Core Backend Primitives
 
