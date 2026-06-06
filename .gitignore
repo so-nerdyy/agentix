@@ -13,6 +13,7 @@ temp/
 sandboxes/
 data/
 .agentix/
+.smoke/
 *.pyc
 __pycache__/
 nul

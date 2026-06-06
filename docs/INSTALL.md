@@ -52,6 +52,8 @@ npm test
 
 `npm run build` compiles the backend and rebuilds the static dashboard from `frontend/src` into `frontend/dist`.
 
+For release validation, run `npm run smoke:release` after build and tests. It packs and installs Agentix into an isolated prefix, starts the installed server, checks the dashboard/API, and verifies support-bundle generation.
+
 ## First Run
 
 `agentix setup` writes workspace-local configuration and prepares the shell for the current folder. The default `agentix` command opens the interactive Hermes-style frontend.

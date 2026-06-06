@@ -23,6 +23,18 @@
 - `GET /health` on the bridge server
 - `agentix doctor` for configuration and runtime validation
 
+## Release Smoke
+
+Before publishing a release, run:
+
+```powershell
+npm run build
+npm test
+npm run smoke:release
+```
+
+The release smoke packs the npm artifact, installs it into an isolated temporary prefix, runs `agentix version`, `agentix help`, and `agentix support`, starts the installed server, verifies both health endpoints, loads `/ui/`, executes a task, runs a scheduler job, and creates a support bundle.
+
 ## Support Bundle
 
 Use `agentix support` to create a timestamped bundle under `data/support/` with:
