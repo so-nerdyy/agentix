@@ -75,7 +75,7 @@ class AgentixBackend:
         **_: Any,
     ):
         self.model = model or os.environ.get("AGENTIX_MODEL")
-        self.session_id = session_id or f"session-{os.getpid()}"
+        self.session_id = session_id
         ensure_bridge_running()
 
     def _post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -123,7 +123,7 @@ class AgentixBackend:
         response = ""
         with urllib.request.urlopen(req, timeout=120) as resp:
             for raw_line in resp:
-                line = raw_line.decode("utf-8").strip()
+                line = raw_line.decode("utf-8").rstrip("\r\n")
                 if not line.startswith("data: "):
                     continue
                 payload = line[6:].replace("\\n", "\n")
@@ -247,8 +247,9 @@ class AgentixBackend:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Any:
         body: Dict[str, Any] = {"stimulus": stimulus}
-        if session_id:
-            body["sessionId"] = session_id
+        effective_session_id = session_id or self.session_id
+        if effective_session_id:
+            body["sessionId"] = effective_session_id
         if metadata:
             body["metadata"] = metadata
         return self._post(f"/gateway/{quote(gateway_id)}/message", body)

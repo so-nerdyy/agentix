@@ -1733,6 +1733,11 @@ def _sync_bundled_skills_quietly() -> None:
 def cmd_chat(args):
     """Run interactive chat CLI."""
     use_tui = getattr(args, "tui", False) or os.environ.get("HERMES_TUI") == "1"
+    from hermes_cli.agentix_commands import handle_chat, using_agentix_backend
+
+    agentix_backend_mode = using_agentix_backend()
+    if agentix_backend_mode and not use_tui and handle_chat(args):
+        return
 
     # Resolve --continue into --resume with the latest session or by name
     continue_val = getattr(args, "continue_last", None)
@@ -1792,7 +1797,7 @@ def cmd_chat(args):
         pass
 
     # First-run guard: check if any provider is configured before launching
-    if not _has_any_provider_configured():
+    if not agentix_backend_mode and not _has_any_provider_configured():
         print()
         print(
             "It looks like Hermes isn't configured yet -- no API keys or providers found."

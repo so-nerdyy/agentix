@@ -21,13 +21,15 @@
 
 When `agentix` launches Hermes, it sets `AGENTIX_FRONTEND=hermes`. In this mode Hermes command UX delegates backend-owned state to Agentix:
 
+- `agentix`, `agentix chat`, and `agentix -z/--oneshot` execute prompts through the Agentix bridge
+- `agentix --tui` uses the Hermes TUI transport but submits prompts through an Agentix backend proxy
 - `agentix sessions list|stats|export|delete`
 - `agentix memory status|search|consolidate`
 - `agentix tools list`
 - `agentix logs`
 - `agentix cron`
 
-Set `AGENTIX_DISABLE_BACKEND_COMMANDS=1` only for debugging upstream Hermes behavior.
+Set `AGENTIX_DISABLE_BACKEND_COMMANDS=1` only for debugging upstream Hermes command behavior. Set `AGENTIX_DISABLE_BACKEND_CHAT=1` only for debugging upstream Hermes prompt execution.
 
 ## Health Checks
 

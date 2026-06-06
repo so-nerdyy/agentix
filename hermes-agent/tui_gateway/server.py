@@ -182,6 +182,63 @@ sys.stdout = sys.stderr
 _stdio_transport = StdioTransport(lambda: _real_stdout, _stdout_lock)
 
 
+def _using_agentix_backend() -> bool:
+    return (
+        os.environ.get("AGENTIX_FRONTEND") == "hermes"
+        and os.environ.get("AGENTIX_DISABLE_BACKEND_CHAT") != "1"
+    )
+
+
+class _AgentixTuiProxy:
+    """Small agent-shaped proxy that drives the Agentix backend from Hermes TUI."""
+
+    provider = "agentix"
+    api_mode = "agentix-bridge"
+    base_url = ""
+    api_key = "no-key-required"
+    tools: list = []
+    reasoning_config: dict = {}
+    service_tier = ""
+
+    def __init__(self, session_key: str, model: str | None = None):
+        from agentix_backend import AgentixBackend
+
+        self.model = model or os.environ.get("AGENTIX_MODEL") or "agentix-powerhouse"
+        self.session_id = session_key
+        self._backend = AgentixBackend(model=self.model)
+        created = self._backend.create_session(model=self.model)
+        self.session_id = created.get("id") or session_key
+        self.session_input_tokens = 0
+        self.session_output_tokens = 0
+        self.session_total_tokens = 0
+        self.session_api_calls = 0
+
+    def run_conversation(
+        self,
+        user_message: Any,
+        conversation_history: list | None = None,
+        stream_callback=None,
+        task_id: str | None = None,
+        **_: Any,
+    ) -> dict:
+        prompt = _content_display_text(user_message).strip()
+        response = self._backend.execute(
+            prompt,
+            session_id=self.session_id,
+            stream_callback=stream_callback,
+        )
+        history = list(conversation_history or [])
+        history.append({"role": "user", "content": prompt})
+        history.append({"role": "assistant", "content": response})
+        self.session_api_calls += 1
+        return {
+            "error": None,
+            "final_response": response,
+            "interrupted": False,
+            "messages": history,
+        }
+
+
 class _SlashWorker:
     """Persistent HermesCLI subprocess for slash commands."""
 
@@ -2248,6 +2305,9 @@ def _reset_session_agent(sid: str, session: dict) -> dict:
 
 
 def _make_agent(sid: str, key: str, session_id: str | None = None):
+    if _using_agentix_backend():
+        return _AgentixTuiProxy(session_id or key, model=_resolve_model())
+
     from run_agent import AIAgent
     from hermes_cli.runtime_provider import resolve_runtime_provider
 

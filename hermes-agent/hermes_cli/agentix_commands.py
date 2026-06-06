@@ -43,6 +43,107 @@ def _iter_entries(value: Any) -> Iterable[dict[str, Any]]:
                 yield item
 
 
+def handle_oneshot(
+    prompt: str,
+    model: str | None = None,
+    provider: str | None = None,
+    toolsets: object = None,
+) -> int | None:
+    if not using_agentix_backend():
+        return None
+
+    backend = _backend()
+    session = backend.create_session(model=model)
+    response = backend.execute(str(prompt), session_id=session.get("id"))
+    if response:
+        print(response)
+    return 0
+
+
+def handle_chat(args: Any) -> bool:
+    if not using_agentix_backend():
+        return False
+    if getattr(args, "tui", False) or os.environ.get("HERMES_TUI") == "1":
+        return False
+
+    backend = _backend()
+    session_id = getattr(args, "resume", None)
+    if not session_id:
+        session = backend.create_session(model=getattr(args, "model", None))
+        session_id = session.get("id")
+
+    query = getattr(args, "query", None)
+    if query:
+        _stream_agentix_response(backend, str(query), session_id)
+        return True
+
+    print("Agentix Hermes frontend - backend: Powerhouse/Symphony/Pi")
+    print("Type a message, /help, or /exit.\n")
+    while True:
+        try:
+            line = input("agentix> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return True
+        if not line:
+            continue
+        lowered = line.lower()
+        if lowered in {"/exit", "/quit", "exit", "quit"}:
+            return True
+        if lowered == "/help":
+            print("Commands: /help, /sessions, /tools, /memory <query>, /exit")
+            continue
+        if lowered == "/sessions":
+            _print_sessions(list(_iter_entries(backend.list_sessions())), 20)
+            continue
+        if lowered == "/tools":
+            _print_tools(backend.list_tools())
+            continue
+        if lowered.startswith("/memory"):
+            query_text = line[len("/memory"):].strip()
+            if not query_text:
+                print("Usage: /memory <query>")
+                continue
+            _print_memory_results(query_text, backend.memory_search(query_text))
+            continue
+        _stream_agentix_response(backend, line, session_id)
+    return True
+
+
+def _stream_agentix_response(backend: Any, prompt: str, session_id: str | None) -> None:
+    def write_delta(delta: str) -> None:
+        sys.stdout.write(delta)
+        sys.stdout.flush()
+
+    response = backend.execute(prompt, session_id=session_id, stream_callback=write_delta)
+    if not response.endswith("\n"):
+        print()
+
+
+def _print_tools(value: Any) -> None:
+    tools = list(_iter_entries(value))
+    if not tools:
+        print("No Agentix Pi tools registered.")
+        return
+    print("Agentix backend tools")
+    print(f"{'Name':<22} Description")
+    print("-" * 80)
+    for tool in tools:
+        name = tool.get("name") or tool.get("id") or "unknown"
+        print(f"{_clip(name, 22):<22} {_clip(tool.get('description'), 120)}")
+
+
+def _print_memory_results(query: str, value: Any) -> None:
+    results = list(_iter_entries(value))
+    if not results:
+        print("No Agentix memory results.")
+        return
+    print(f"Agentix memory search: {query}")
+    for item in results:
+        score = item.get("score", 0)
+        print(f"  [{score}] {_clip(item.get('content'), 160)}")
+
+
 def _print_sessions(sessions: list[dict[str, Any]], limit: int) -> None:
     visible = sessions[:limit]
     if not visible:

@@ -16,6 +16,7 @@ const serverDataDir = join(smokeRoot, "data-server");
 const keepArtifacts = process.env.AGENTIX_SMOKE_KEEP === "1";
 
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+const python = process.platform === "win32" ? "python" : "python3";
 const agentixCommand = process.platform === "win32"
   ? join(prefixDir, "agentix.cmd")
   : join(prefixDir, "bin", "agentix");
@@ -285,6 +286,38 @@ async function smokeServer() {
     assert(ui.includes("Agentix Control"), "dashboard HTML missing Agentix Control");
     assert(ui.includes("Command palette"), "dashboard HTML missing command palette");
 
+    log("checking installed Hermes Python entrypoints");
+    const hermesEnv = {
+      ...serverEnv,
+      AGENTIX_FRONTEND: "hermes",
+      PYTHONPATH: [
+        join(installedPackageRoot, "hermes-agent"),
+        process.env.PYTHONPATH,
+      ].filter(Boolean).join(process.platform === "win32" ? ";" : ":"),
+    };
+    const oneshot = await run(python, [
+      "-c",
+      "from hermes_cli.oneshot import run_oneshot; raise SystemExit(run_oneshot('release smoke oneshot delegation'))",
+    ], {
+      cwd: smokeRoot,
+      env: hermesEnv,
+      timeoutMs: 120_000,
+    });
+    assert(oneshot.stdout.includes("Agentix is running with the Hermes frontend and Agentix backend."), "oneshot did not route through Agentix backend");
+    assert(oneshot.stdout.includes("Input: release smoke oneshot delegation"), "oneshot output did not preserve streamed content");
+
+    const tuiProxy = await run(python, [
+      "-c",
+      "from tui_gateway.server import _AgentixTuiProxy; p=_AgentixTuiProxy('release-smoke-session'); r=p.run_conversation('release smoke tui proxy delegation'); print(r['final_response'])",
+    ], {
+      cwd: smokeRoot,
+      env: hermesEnv,
+      timeoutMs: 120_000,
+    });
+    const tuiProxyOutput = `${tuiProxy.stdout}\n${tuiProxy.stderr}`;
+    assert(tuiProxyOutput.includes("Agentix is running with the Hermes frontend and Agentix backend."), "TUI proxy did not route through Agentix backend");
+    assert(tuiProxyOutput.includes("Input: release smoke tui proxy delegation"), "TUI proxy output did not preserve streamed content");
+
     const execution = await fetchJson(`${inboxUrl}/execute`, {
       method: "POST",
       body: JSON.stringify({ stimulus: "release smoke task" }),
@@ -308,12 +341,12 @@ async function smokeServer() {
     });
     assert(job.id, "scheduler job create did not return an id");
 
-    const run = await fetchJson(`${inboxUrl}/scheduler/jobs/${encodeURIComponent(job.id)}/run`, {
+    const jobRun = await fetchJson(`${inboxUrl}/scheduler/jobs/${encodeURIComponent(job.id)}/run`, {
       method: "POST",
       body: "{}",
       timeoutMs: 60_000,
     });
-    assert(run.ok === true, "scheduler manual run did not succeed");
+    assert(jobRun.ok === true, "scheduler manual run did not succeed");
 
     const support = await fetchJson(`${inboxUrl}/support/bundle`, {
       method: "POST",

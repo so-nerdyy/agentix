@@ -140,6 +140,17 @@ def run_oneshot(
 
     Returns the exit code.  Caller should sys.exit() with the return.
     """
+    from hermes_cli.agentix_commands import handle_oneshot
+
+    agentix_result = handle_oneshot(
+        prompt,
+        model=model,
+        provider=provider,
+        toolsets=toolsets,
+    )
+    if agentix_result is not None:
+        return agentix_result
+
     # Silence every stdlib logger for the duration.  AIAgent, tools, and
     # provider adapters all log to stderr through the root logger; file
     # handlers added by setup_logging() keep working (they're attached to

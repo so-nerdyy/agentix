@@ -20,6 +20,8 @@ Agentix is split into two layers:
 
 The installed `agentix` command launches Hermes for the frontend, but it sets `AGENTIX_FRONTEND=hermes` and points Hermes at the Agentix bridge. In that mode:
 
+- `agentix`, `agentix chat`, and `agentix -z/--oneshot` execute prompts through Agentix Powerhouse/Symphony/Pi workers.
+- `agentix --tui` keeps the Hermes TUI transport and streams prompt submissions through an Agentix bridge proxy.
 - `agentix cron` uses Agentix scheduler jobs.
 - `agentix sessions list|stats|export|delete` uses Agentix sessions.
 - `agentix memory status|search|consolidate` uses Agentix memory.

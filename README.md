@@ -31,6 +31,9 @@ From any project folder, `agentix` opens the interactive shell. Use `agentix das
 ## Commands
 
 - `agentix` - open the interactive Hermes-style shell
+- `agentix chat` - open the Hermes chat shell backed by Agentix execution
+- `agentix --tui` - open the Hermes TUI while routing prompts through Agentix
+- `agentix -z "<prompt>"` - run a one-shot prompt through Agentix
 - `agentix setup` - first-run setup wizard
 - `agentix model` - configure provider and model
 - `agentix update` - check update/install options
