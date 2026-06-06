@@ -1,6 +1,14 @@
+import { readFileSync } from "fs";
 import { spawnSync } from "child_process";
 import { join } from "path";
 import { describe, expect, it } from "vitest";
+
+function commandSet(name: string) {
+  const launcher = readFileSync(join(process.cwd(), "bin", "agentix.js"), "utf8");
+  const match = launcher.match(new RegExp(`const ${name} = new Set\\(\\[([\\s\\S]*?)\\]\\);`));
+  expect(match).not.toBeNull();
+  return new Set(Array.from(match![1].matchAll(/"([^"]+)"/g), (item) => item[1]));
+}
 
 describe("launcher help", () => {
   it("advertises the merged shell and backend command surface", () => {
@@ -38,5 +46,15 @@ describe("launcher help", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("flags: --port <n> --bridge-port <n> --host <addr>");
     expect(result.stdout).toContain("flags: --port <n> --host <addr>");
+  });
+
+  it("routes Hermes-owned UX commands through Hermes before backend CLI", () => {
+    const backendCommands = commandSet("BACKEND_COMMANDS");
+    const hermesCommands = commandSet("HERMES_COMMANDS");
+
+    expect(hermesCommands).toContain("gateway");
+    expect(hermesCommands).toContain("logs");
+    expect(backendCommands).not.toContain("gateway");
+    expect(backendCommands).not.toContain("logs");
   });
 });
