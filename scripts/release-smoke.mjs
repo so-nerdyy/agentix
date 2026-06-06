@@ -225,6 +225,19 @@ async function smokeCli() {
   assert(help.stdout.includes("open the Hermes-style interactive shell"), "agentix help missing shell launch help");
   assert(help.stdout.includes("server"), "agentix help missing server command");
 
+  const workspaceDir = join(smokeRoot, "workspace-cli");
+  await mkdir(workspaceDir, { recursive: true });
+  const workspaceEnv = { ...process.env };
+  delete workspaceEnv.AGENTIX_DATA_DIR;
+  delete workspaceEnv.AGENTIX_WORKSPACE_DIR;
+  const workspaceSupport = await run(agentixCommand, ["--agentix-cli", "support"], {
+    cwd: workspaceDir,
+    env: workspaceEnv,
+    timeoutMs: 60_000,
+  });
+  assert(workspaceSupport.stdout.includes("Support bundle:"), "workspace-local support bundle was not created");
+  assert(existsSync(join(workspaceDir, "data", "support")), "workspace-local data/support directory missing");
+
   const support = await run(agentixCommand, ["--agentix-cli", "support"], {
     env: {
       ...process.env,

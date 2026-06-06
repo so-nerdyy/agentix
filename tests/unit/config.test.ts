@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 function tempDir() {
   return mkdtempSync(join(tmpdir(), "agentix-config-"));
@@ -12,6 +12,7 @@ describe("config", () => {
     AGENTIX_DATA_DIR: process.env.AGENTIX_DATA_DIR,
     AGENTIX_MODEL: process.env.AGENTIX_MODEL,
     AGENTIX_LLM_API_KEY: process.env.AGENTIX_LLM_API_KEY,
+    AGENTIX_WORKSPACE_DIR: process.env.AGENTIX_WORKSPACE_DIR,
   };
   const dirs: string[] = [];
 
@@ -19,6 +20,7 @@ describe("config", () => {
     process.env.AGENTIX_DATA_DIR = envBackup.AGENTIX_DATA_DIR;
     process.env.AGENTIX_MODEL = envBackup.AGENTIX_MODEL;
     process.env.AGENTIX_LLM_API_KEY = envBackup.AGENTIX_LLM_API_KEY;
+    process.env.AGENTIX_WORKSPACE_DIR = envBackup.AGENTIX_WORKSPACE_DIR;
     vi.resetModules();
     while (dirs.length > 0) {
       rmSync(dirs.pop()!, { recursive: true, force: true });
@@ -44,5 +46,20 @@ describe("config", () => {
 
     expect(raw.model).toBe("saved-model");
     expect(raw.llmApiKey).toBeUndefined();
+  });
+
+  it("defaults runtime state to the launch workspace instead of install root", async () => {
+    const dir = tempDir();
+    dirs.push(dir);
+    delete process.env.AGENTIX_DATA_DIR;
+    process.env.AGENTIX_WORKSPACE_DIR = dir;
+
+    const pathsMod = await import("../../src/config/paths.js");
+
+    expect(pathsMod.PATHS.projectRoot).toBe(resolve(dir));
+    expect(pathsMod.PATHS.workspaceRoot).toBe(resolve(dir));
+    expect(pathsMod.PATHS.dataDir).toBe(resolve(dir, "data"));
+    expect(pathsMod.PATHS.installRoot).not.toBe(resolve(dir));
+    expect(pathsMod.PATHS.bridgeEntry).toContain("dist");
   });
 });

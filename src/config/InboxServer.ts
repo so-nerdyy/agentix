@@ -294,7 +294,7 @@ export async function startInboxServer(opts: { port?: number; host?: string } = 
   registerEventStreamRoutes(server);
 
   // Static UI — only registered if frontend/dist exists.
-  const uiDir = resolve(PATHS.projectRoot, "frontend", "dist");
+  const uiDir = resolve(PATHS.installRoot, "frontend", "dist");
   if (existsSync(uiDir)) {
     await server.register(staticPlugin, { root: uiDir, prefix: "/ui/" });
   } else {

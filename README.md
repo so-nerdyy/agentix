@@ -54,6 +54,7 @@ From any project folder, `agentix` opens the interactive shell. Use `agentix das
 Agentix uses workspace-scoped configuration and environment variables:
 
 - `AGENTIX_DATA_DIR` - persistent data location
+- `AGENTIX_WORKSPACE_DIR` - workspace root used for tasks and default `data/`
 - `AGENTIX_BRIDGE_URL` - backend bridge URL
 - `AGENTIX_BRIDGE_PORT` - bridge port
 - `AGENTIX_INBOX_PORT` - inbox/dashboard port
@@ -62,6 +63,7 @@ Agentix uses workspace-scoped configuration and environment variables:
 - `AGENTIX_SESSION_TOKEN` - session token for event streaming
 - `AGENTIX_SESSION_TTL` - session retention
 - `AGENTIX_APPROVAL_TIMEOUT` - approval timeout
+- `AGENTIX_HERMES_VENV` - optional Python venv location for the bundled Hermes frontend
 
 Secrets are not written to disk. Use `agentix setup` to create workspace-local configuration and export keys in your shell environment or secret manager.
 

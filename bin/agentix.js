@@ -11,6 +11,7 @@ import http from "http";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PROJECT_ROOT = resolve(__dirname, "..");
+const WORKSPACE_ROOT = process.cwd();
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json");
 
@@ -180,7 +181,9 @@ function resolveHermesRoot() {
 }
 
 const HERMES_ROOT = resolveHermesRoot();
-const VENV_ROOT = resolve(os.homedir(), ".agentix", "hermes-python");
+const VENV_ROOT = resolve(
+  process.env.AGENTIX_HERMES_VENV || join(os.homedir(), ".agentix", "hermes-python"),
+);
 
 function bridgeUrl() {
   return (
@@ -254,9 +257,14 @@ async function ensureBridgeRunning() {
   }
 
   const child = spawn("node", [resolve(PROJECT_ROOT, "dist", "bridge", "entry.js")], {
+    cwd: WORKSPACE_ROOT,
     detached: true,
     stdio: "ignore",
-    env: { ...process.env },
+    env: {
+      ...process.env,
+      AGENTIX_INSTALL_ROOT: PROJECT_ROOT,
+      AGENTIX_WORKSPACE_DIR: WORKSPACE_ROOT,
+    },
   });
   child.unref();
 
@@ -271,7 +279,7 @@ async function spawnHermes(args) {
   ensureHermesInstalled(pythonExe);
 
   const child = spawn(pythonExe, ["-m", "hermes_cli.main", ...args], {
-    cwd: HERMES_ROOT,
+    cwd: WORKSPACE_ROOT,
     stdio: "inherit",
     env: {
       ...process.env,
@@ -280,6 +288,7 @@ async function spawnHermes(args) {
       AGENTIX_BRIDGE_URL: bridgeUrl(),
       AGENTIX_FRONTEND: "hermes",
       AGENTIX_INSTALL_ROOT: PROJECT_ROOT,
+      AGENTIX_WORKSPACE_DIR: WORKSPACE_ROOT,
     },
   });
 
@@ -296,10 +305,12 @@ async function spawnHermes(args) {
 
 async function spawnNodeCli(args) {
   const child = spawn(process.execPath, [resolve(PROJECT_ROOT, "dist", "cli.js"), ...args], {
-    cwd: PROJECT_ROOT,
+    cwd: WORKSPACE_ROOT,
     stdio: "inherit",
     env: {
       ...process.env,
+      AGENTIX_INSTALL_ROOT: PROJECT_ROOT,
+      AGENTIX_WORKSPACE_DIR: WORKSPACE_ROOT,
       AGENTIX_BRIDGE_URL: bridgeUrl(),
       HERMES_BRIDGE_URL: bridgeUrl(),
     },
@@ -328,10 +339,12 @@ async function main() {
   if (argv.includes("--node-shell")) {
     await ensureBridgeRunning();
     const child = spawn(process.execPath, [resolve(PROJECT_ROOT, "dist", "shell", "entry.js")], {
-      cwd: PROJECT_ROOT,
+      cwd: WORKSPACE_ROOT,
       stdio: "inherit",
       env: {
         ...process.env,
+        AGENTIX_INSTALL_ROOT: PROJECT_ROOT,
+        AGENTIX_WORKSPACE_DIR: WORKSPACE_ROOT,
         AGENTIX_BRIDGE_URL: bridgeUrl(),
         HERMES_BRIDGE_URL: bridgeUrl(),
       },

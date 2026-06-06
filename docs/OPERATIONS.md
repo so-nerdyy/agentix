@@ -16,6 +16,8 @@
 - Logs are stored under the data directory
 - Sessions are stored under the data directory
 - Memory and sandbox artifacts are stored under the data directory
+- By default, `agentix` treats the current working directory as the workspace and stores state in `./data`
+- Set `AGENTIX_DATA_DIR` to move persistent state, or `AGENTIX_HERMES_VENV` to move the bundled Hermes Python environment
 
 ## Hermes Command Delegation
 

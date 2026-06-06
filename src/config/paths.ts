@@ -6,13 +6,16 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 export const INSTALL_ROOT = resolve(__dirname, "../..");
-export const PROJECT_ROOT = INSTALL_ROOT;
+export const WORKSPACE_ROOT = process.env.AGENTIX_WORKSPACE_DIR
+  ? resolve(process.env.AGENTIX_WORKSPACE_DIR)
+  : process.cwd();
+export const PROJECT_ROOT = WORKSPACE_ROOT;
 
 function resolveHermesRoot(): string {
   const candidates = [
-    resolve(PROJECT_ROOT, "hermes-agent", "hermes-agent-upstream"),
-    resolve(PROJECT_ROOT, "hermes-agent-upstream"),
-    resolve(PROJECT_ROOT, "hermes-agent"),
+    resolve(INSTALL_ROOT, "hermes-agent", "hermes-agent-upstream"),
+    resolve(INSTALL_ROOT, "hermes-agent-upstream"),
+    resolve(INSTALL_ROOT, "hermes-agent"),
   ];
 
   for (const candidate of candidates) {
@@ -28,19 +31,20 @@ export const HERMES_ROOT = resolveHermesRoot();
 
 export const DATA_DIR = process.env.AGENTIX_DATA_DIR
   ? resolve(process.env.AGENTIX_DATA_DIR)
-  : resolve(PROJECT_ROOT, "data");
+  : resolve(WORKSPACE_ROOT, "data");
 
 export const PATHS = {
   installRoot: INSTALL_ROOT,
   projectRoot: PROJECT_ROOT,
+  workspaceRoot: WORKSPACE_ROOT,
   dataDir: DATA_DIR,
   hermesRoot: HERMES_ROOT,
   hermesAgent: HERMES_ROOT,
   hermesCLI: resolve(HERMES_ROOT, "cli.py"),
   hermesCliMain: resolve(HERMES_ROOT, "hermes_cli", "main.py"),
-  distShell: resolve(PROJECT_ROOT, "dist", "shell"),
-  bridgeEntry: resolve(PROJECT_ROOT, "dist", "bridge", "entry.js"),
-  inboxEntry: resolve(PROJECT_ROOT, "dist", "config", "InboxServer.js"),
+  distShell: resolve(INSTALL_ROOT, "dist", "shell"),
+  bridgeEntry: resolve(INSTALL_ROOT, "dist", "bridge", "entry.js"),
+  inboxEntry: resolve(INSTALL_ROOT, "dist", "config", "InboxServer.js"),
   configFile: join(DATA_DIR, "config.json"),
   sessionsDir: join(DATA_DIR, "sessions"),
   memoryDir: join(DATA_DIR, "memory"),

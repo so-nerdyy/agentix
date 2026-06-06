@@ -10,12 +10,13 @@ export async function runHermesSubcommand(
   const timeoutMs = opts.timeoutMs ?? 30_000;
 
   const child = spawn(PYTHON_CMD, ["-m", "hermes_cli.main", ...args], {
-    cwd: PATHS.hermesRoot,
+    cwd: PATHS.workspaceRoot,
     env: {
       ...process.env,
       PYTHONPATH: PATHS.hermesRoot,
       AGENTIX_FRONTEND: "hermes",
-      AGENTIX_INSTALL_ROOT: PATHS.projectRoot,
+      AGENTIX_INSTALL_ROOT: PATHS.installRoot,
+      AGENTIX_WORKSPACE_DIR: PATHS.workspaceRoot,
       AGENTIX_BRIDGE_URL:
         process.env.AGENTIX_BRIDGE_URL || "http://127.0.0.1:3456",
       HERMES_BRIDGE_URL:

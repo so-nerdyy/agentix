@@ -50,5 +50,6 @@ Standalone upstream Hermes still uses its native local stores when those Agentix
 
 - Workspace-local config lives under the current project directory
 - Persistent runtime state lives under `data/` by default
-- The launcher can override paths with `AGENTIX_DATA_DIR`
+- The launcher passes `AGENTIX_WORKSPACE_DIR` to backend processes so tasks run from the caller's folder
+- The launcher can override state paths with `AGENTIX_DATA_DIR`
 
