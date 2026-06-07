@@ -22,6 +22,7 @@ The installed `agentix` command launches Hermes for the frontend, but it sets `A
 
 - `agentix`, `agentix chat`, and `agentix -z/--oneshot` execute prompts through Agentix Powerhouse/Symphony/Pi workers.
 - `agentix --tui` keeps the Hermes TUI transport and streams prompt submissions through an Agentix bridge proxy.
+- `agentix setup` and `agentix model` keep the Hermes provider/model UX, then sync non-secret model/provider/base URL defaults into Agentix backend config.
 - `agentix cron` uses Agentix scheduler jobs.
 - `agentix sessions list|stats|export|delete` uses Agentix sessions.
 - `agentix memory status|search|consolidate` uses Agentix memory.
@@ -37,6 +38,7 @@ Standalone upstream Hermes still uses its native local stores when those Agentix
 - `SessionCoordinator` persists session state
 - `ApprovalWorkflow` gates approval-required work
 - `PIAgentRegistry` binds task kinds to worker implementations
+- `ConversationAgent` calls the configured LLM provider when credentials are available and falls back to deterministic diagnostics when running offline
 
 ## Data Flow
 
@@ -48,7 +50,7 @@ Standalone upstream Hermes still uses its native local stores when those Agentix
 
 ## Workspace Layout
 
-- Workspace-local config lives under the current project directory
+- Workspace-local Hermes config lives under `.agentix/hermes/`
 - Persistent runtime state lives under `data/` by default
 - The launcher passes `AGENTIX_WORKSPACE_DIR` to backend processes so tasks run from the caller's folder
 - The launcher can override state paths with `AGENTIX_DATA_DIR`

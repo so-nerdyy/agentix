@@ -2164,6 +2164,10 @@ def cmd_whatsapp(args):
 
 def cmd_setup(args):
     """Interactive setup wizard."""
+    from hermes_cli.agentix_commands import handle_setup
+    if handle_setup(args):
+        return
+
     from hermes_cli.setup import run_setup_wizard
 
     run_setup_wizard(args)
@@ -2192,6 +2196,10 @@ def cmd_postinstall(args):
 
 def cmd_model(args):
     """Select default model — starts with provider selection, then model picker."""
+    from hermes_cli.agentix_commands import handle_model
+    if handle_model(args):
+        return
+
     _require_tty("model")
     if getattr(args, "refresh", False):
         try:
@@ -6257,6 +6265,10 @@ def cmd_status(args):
 
 def cmd_cron(args):
     """Cron job management."""
+    from hermes_cli.agentix_commands import handle_cron
+    if handle_cron(args):
+        return
+
     from hermes_cli.cron import cron_command
 
     cron_command(args)

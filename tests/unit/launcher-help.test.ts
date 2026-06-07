@@ -57,4 +57,15 @@ describe("launcher help", () => {
     expect(backendCommands).not.toContain("gateway");
     expect(backendCommands).not.toContain("logs");
   });
+
+  it("does not start the bridge for setup/model before configuration exists", () => {
+    const launcher = readFileSync(join(process.cwd(), "bin", "agentix.js"), "utf8");
+    const bridgelessCommands = commandSet("BRIDGELESS_HERMES_COMMANDS");
+
+    expect(bridgelessCommands).toContain("setup");
+    expect(bridgelessCommands).toContain("model");
+    expect(launcher).toContain("AGENTIX_HERMES_HOME");
+    expect(launcher).toContain("parseHermesModelConfig");
+    expect(launcher).toContain("AGENTIX_LLM_API_KEY");
+  });
 });

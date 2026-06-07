@@ -17,6 +17,7 @@
 - Sessions are stored under the data directory
 - Memory and sandbox artifacts are stored under the data directory
 - By default, `agentix` treats the current working directory as the workspace and stores state in `./data`
+- By default, Hermes frontend config for that workspace is stored in `.agentix/hermes/`
 - Set `AGENTIX_DATA_DIR` to move persistent state, or `AGENTIX_HERMES_VENV` to move the bundled Hermes Python environment
 
 ## Hermes Command Delegation
@@ -25,6 +26,7 @@ When `agentix` launches Hermes, it sets `AGENTIX_FRONTEND=hermes`. In this mode 
 
 - `agentix`, `agentix chat`, and `agentix -z/--oneshot` execute prompts through the Agentix bridge
 - `agentix --tui` uses the Hermes TUI transport but submits prompts through an Agentix backend proxy
+- `agentix setup` and `agentix model` use Hermes provider/model UX, then sync non-secret backend defaults into Agentix
 - `agentix sessions list|stats|export|delete`
 - `agentix memory status|search|consolidate`
 - `agentix tools list`
@@ -50,7 +52,7 @@ npm test
 npm run smoke:release
 ```
 
-The release smoke packs the npm artifact, installs it into an isolated temporary prefix, runs `agentix version`, `agentix help`, and `agentix support`, starts the installed server, verifies both health endpoints, loads `/ui/`, executes a task, runs a scheduler job, and creates a support bundle.
+The release smoke packs the npm artifact, installs it into an isolated temporary prefix, runs `agentix version`, `agentix help`, and `agentix support`, starts the installed server, verifies both health endpoints, loads `/ui/`, executes a task through the Hermes frontend adapter, runs a scheduler job, and creates a support bundle.
 
 ## Support Bundle
 

@@ -6,8 +6,9 @@ Agentix assumes the local workspace may contain untrusted inputs, scripts, and t
 
 ## Secrets
 
-- API keys should come from environment variables or secret managers
-- Secrets are not persisted to the workspace config file
+- API keys should come from environment variables, secret managers, or the Hermes workspace `.env`
+- Secrets are not persisted to Agentix `data/config.json`
+- `agentix setup` and `agentix model` sync only non-secret provider/model defaults into Agentix backend config
 - Session tokens should be scoped to the current workspace or deployment
 - When `AGENTIX_SESSION_TOKEN` is set, inbox/dashboard control APIs, bridge control APIs, and event streams require `Authorization: Bearer <token>` or `?token=<token>` for SSE
 

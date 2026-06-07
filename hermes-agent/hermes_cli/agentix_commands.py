@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 from typing import Any, Iterable
 
 
@@ -41,6 +42,128 @@ def _iter_entries(value: Any) -> Iterable[dict[str, Any]]:
         for item in value:
             if isinstance(item, dict):
                 yield item
+
+
+def _workspace_dir() -> Path:
+    return Path(os.environ.get("AGENTIX_WORKSPACE_DIR") or os.getcwd()).resolve()
+
+
+def _data_dir() -> Path:
+    return Path(os.environ.get("AGENTIX_DATA_DIR") or (_workspace_dir() / "data")).resolve()
+
+
+def _provider_key_candidates(provider: str) -> list[str]:
+    normalized = (provider or "").lower()
+    if "anthropic" in normalized or "claude" in normalized:
+        return ["ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN"]
+    if "openrouter" in normalized:
+        return ["OPENROUTER_API_KEY", "OPENAI_API_KEY"]
+    if "gemini" in normalized or "google" in normalized:
+        return ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
+    if "deepseek" in normalized:
+        return ["DEEPSEEK_API_KEY", "OPENAI_API_KEY"]
+    if "groq" in normalized:
+        return ["GROQ_API_KEY", "OPENAI_API_KEY"]
+    if "mistral" in normalized:
+        return ["MISTRAL_API_KEY", "OPENAI_API_KEY"]
+    if "xai" in normalized or "grok" in normalized:
+        return ["XAI_API_KEY", "OPENAI_API_KEY"]
+    return ["OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"]
+
+
+def sync_agentix_runtime_config() -> dict[str, Any]:
+    """Mirror Hermes provider/model selection into Agentix runtime config.
+
+    Secrets stay in Hermes' .env; Agentix stores only non-secret defaults in
+    workspace data/config.json and reads the API key from the process env when
+    the backend starts.
+    """
+    from hermes_cli.config import get_env_value, load_config
+
+    cfg = load_config()
+    model_cfg = cfg.get("model") if isinstance(cfg, dict) else {}
+    if not isinstance(model_cfg, dict):
+        model_cfg = {"default": model_cfg} if model_cfg else {}
+
+    model = str(model_cfg.get("default") or "").strip()
+    provider = str(model_cfg.get("provider") or "auto").strip() or "auto"
+    base_url = str(model_cfg.get("base_url") or "").strip()
+
+    key = ""
+    for key_name in _provider_key_candidates(provider):
+        key = get_env_value(key_name) or os.environ.get(key_name, "")
+        if key:
+            break
+
+    if model:
+        os.environ["AGENTIX_MODEL"] = model
+    if provider:
+        os.environ["AGENTIX_PROVIDER"] = provider
+    if base_url:
+        os.environ["AGENTIX_BASE_URL"] = base_url
+    if key:
+        os.environ["AGENTIX_LLM_API_KEY"] = key
+
+    data_dir = _data_dir()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    config_path = data_dir / "config.json"
+    existing: dict[str, Any] = {}
+    if config_path.exists():
+        try:
+            loaded = json.loads(config_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                existing = loaded
+        except Exception:
+            existing = {}
+
+    updated = dict(existing)
+    if model:
+        updated["model"] = model
+    if provider:
+        updated["provider"] = provider
+    if base_url:
+        updated["baseUrl"] = base_url
+    config_path.write_text(json.dumps(updated, indent=2) + "\n", encoding="utf-8")
+
+    return {
+        "model": model or None,
+        "provider": provider or None,
+        "baseUrl": base_url or None,
+        "apiKeyConfigured": bool(key),
+        "configPath": str(config_path),
+    }
+
+
+def handle_setup(args: Any) -> bool:
+    if not using_agentix_backend():
+        return False
+
+    from hermes_cli.setup import run_setup_wizard
+
+    run_setup_wizard(args)
+    synced = sync_agentix_runtime_config()
+    print(f"Agentix backend config synced: {synced['configPath']}")
+    return True
+
+
+def handle_model(args: Any) -> bool:
+    if not using_agentix_backend():
+        return False
+
+    from hermes_cli.main import _require_tty, select_provider_and_model
+
+    _require_tty("model")
+    if getattr(args, "refresh", False):
+        try:
+            from hermes_cli.models import clear_provider_models_cache
+            clear_provider_models_cache()
+            print("  Cleared model picker cache.")
+        except Exception:
+            pass
+    select_provider_and_model(args=args)
+    synced = sync_agentix_runtime_config()
+    print(f"Agentix backend config synced: {synced['configPath']}")
+    return True
 
 
 def handle_oneshot(
@@ -357,6 +480,166 @@ def handle_memory(args: Any) -> bool:
     if sub == "consolidate":
         session_id = getattr(args, "session_id", None)
         _dump(backend.consolidate_memory(session_id))
+        return True
+
+    return False
+
+
+def _format_job_time(value: Any) -> str:
+    if not value:
+        return "-"
+    try:
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(float(value) / 1000))
+    except Exception:
+        return str(value)
+
+
+def _print_jobs(jobs: list[dict[str, Any]], include_disabled: bool = False) -> None:
+    visible = [job for job in jobs if include_disabled or job.get("enabled", True)]
+    if not visible:
+        print("No Agentix scheduled jobs.")
+        return
+    print(f"{'ID':<14} {'Enabled':<7} {'Schedule':<18} {'Next run':<19} Name")
+    print("-" * 88)
+    for job in visible:
+        print(
+            f"{_clip(job.get('id'), 14):<14} "
+            f"{str(bool(job.get('enabled', True))).lower():<7} "
+            f"{_clip(job.get('scheduleDisplay') or job.get('schedule'), 18):<18} "
+            f"{_format_job_time(job.get('nextRunAt')):<19} "
+            f"{_clip(job.get('name'), 80)}"
+        )
+
+
+def _cron_create_body(args: Any) -> dict[str, Any]:
+    stimulus = getattr(args, "prompt", None) or ""
+    script = getattr(args, "script", None)
+    no_agent = bool(getattr(args, "no_agent", False))
+    if not stimulus and script:
+        stimulus = f"Run scheduled script {script}"
+    name = getattr(args, "name", None) or (stimulus[:48] if stimulus else script) or "scheduled task"
+    body: dict[str, Any] = {
+        "name": name,
+        "stimulus": stimulus,
+        "schedule": getattr(args, "schedule", None),
+        "enabled": True,
+    }
+    if script:
+        body["script"] = script
+    if no_agent:
+        body["noAgent"] = True
+    if getattr(args, "workdir", None):
+        body["workdir"] = getattr(args, "workdir")
+    if getattr(args, "skills", None):
+        body["skills"] = getattr(args, "skills")
+    return body
+
+
+def handle_cron(args: Any) -> bool:
+    if not using_agentix_backend():
+        return False
+
+    backend = _backend()
+    command = getattr(args, "cron_command", None) or "list"
+
+    if command == "list":
+        jobs = list(_iter_entries(backend.list_scheduled_jobs()))
+        _print_jobs(jobs, include_disabled=bool(getattr(args, "all", False)))
+        return True
+
+    if command in {"create", "add"}:
+        body = _cron_create_body(args)
+        job = backend.create_scheduled_job(
+            name=str(body["name"]),
+            stimulus=str(body["stimulus"]),
+            schedule=body.get("schedule"),
+            script=body.get("script"),
+            no_agent=body.get("noAgent"),
+            workdir=body.get("workdir"),
+            skills=body.get("skills"),
+            enabled=True,
+        )
+        print(f"Created Agentix scheduled job: {job.get('id')} ({job.get('scheduleDisplay')})")
+        return True
+
+    if command == "edit":
+        job_id = getattr(args, "job_id", "")
+        patch: dict[str, Any] = {}
+        if getattr(args, "name", None) is not None:
+            patch["name"] = getattr(args, "name")
+        if getattr(args, "prompt", None) is not None:
+            patch["stimulus"] = getattr(args, "prompt")
+        if getattr(args, "schedule", None) is not None:
+            patch["schedule"] = getattr(args, "schedule")
+        if getattr(args, "script", None) is not None:
+            script = getattr(args, "script")
+            patch["script"] = script or None
+        if getattr(args, "no_agent", None) is not None:
+            patch["no_agent"] = getattr(args, "no_agent")
+        if getattr(args, "workdir", None) is not None:
+            workdir = getattr(args, "workdir")
+            patch["workdir"] = workdir or None
+        skills = getattr(args, "skills", None)
+        add_skills = getattr(args, "add_skills", None)
+        remove_skills = getattr(args, "remove_skills", None)
+        if getattr(args, "clear_skills", False):
+            patch["skills"] = []
+        elif skills is not None:
+            patch["skills"] = skills
+        elif add_skills or remove_skills:
+            current = backend.get_scheduled_job(job_id)
+            current_skills = list(current.get("skills") or [])
+            for skill in add_skills or []:
+                if skill not in current_skills:
+                    current_skills.append(skill)
+            for skill in remove_skills or []:
+                current_skills = [item for item in current_skills if item != skill]
+            patch["skills"] = current_skills
+        updated = backend.update_scheduled_job(job_id, **patch)
+        if updated.get("ok") is False or not updated.get("job"):
+            print(f"Agentix scheduled job not found: {job_id}")
+        else:
+            job = updated.get("job", {})
+            print(f"Updated Agentix scheduled job: {job.get('id')}")
+        return True
+
+    if command == "pause":
+        job_id = getattr(args, "job_id", "")
+        job = backend.set_scheduled_job_enabled(job_id, False)
+        print(f"Paused Agentix scheduled job: {job.get('id', job_id)}")
+        return True
+
+    if command == "resume":
+        job_id = getattr(args, "job_id", "")
+        job = backend.set_scheduled_job_enabled(job_id, True)
+        print(f"Resumed Agentix scheduled job: {job.get('id', job_id)}")
+        return True
+
+    if command == "run":
+        result = backend.run_scheduled_job(getattr(args, "job_id", ""))
+        if result.get("ok"):
+            print("Agentix scheduled job ran successfully.")
+        else:
+            print(f"Agentix scheduled job failed: {result.get('error')}")
+        return True
+
+    if command in {"remove", "rm", "delete"}:
+        result = backend.delete_scheduled_job(getattr(args, "job_id", ""))
+        print("Removed Agentix scheduled job." if result.get("ok") else "Agentix scheduled job was not found.")
+        return True
+
+    if command == "status":
+        jobs = list(_iter_entries(backend.list_scheduled_jobs()))
+        enabled = len([job for job in jobs if job.get("enabled", True)])
+        print("Agentix scheduler")
+        print(f"  Jobs:    {len(jobs)}")
+        print(f"  Enabled: {enabled}")
+        print("  Runtime: backend scheduler runs inside `agentix server` or the bridge process")
+        return True
+
+    if command == "tick":
+        result = backend.run_due_scheduled_jobs()
+        print(f"Ran {result.get('count', 0)} due Agentix scheduled job(s).")
         return True
 
     return False

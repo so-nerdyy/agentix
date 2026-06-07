@@ -51,11 +51,15 @@ def ensure_bridge_running() -> None:
                 f"Bridge entry not found at {bridge_entry}. Run `npm run build` first."
             )
 
+        workspace_root = Path(os.environ.get("AGENTIX_WORKSPACE_DIR") or os.getcwd()).resolve()
+
         subprocess.Popen(
             ["node", str(bridge_entry)],
-            cwd=str(project_root),
+            cwd=str(workspace_root),
             env={
                 **os.environ,
+                "AGENTIX_INSTALL_ROOT": str(project_root),
+                "AGENTIX_WORKSPACE_DIR": str(workspace_root),
                 "AGENTIX_BRIDGE_PORT": str(BRIDGE_PORT),
                 "AGENTIX_BRIDGE_URL": _get_bridge_url(),
             },

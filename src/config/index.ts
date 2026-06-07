@@ -7,6 +7,8 @@ import { PATHS } from "./paths.js";
 
 export interface AgentixConfig {
   model: string;
+  provider: string;
+  baseUrl: string | null;
   llmApiKey: string | null;
   sessionTtlMs: number;
   approvalTimeoutMs: number;
@@ -18,6 +20,8 @@ export interface AgentixConfig {
 
 const DEFAULTS: AgentixConfig = {
   model: process.env.AGENTIX_MODEL ?? "claude-3-5-sonnet",
+  provider: process.env.AGENTIX_PROVIDER ?? "auto",
+  baseUrl: process.env.AGENTIX_BASE_URL ?? null,
   llmApiKey: process.env.AGENTIX_LLM_API_KEY ?? null,
   sessionTtlMs: parseInt(process.env.AGENTIX_SESSION_TTL ?? "86400000", 10),
   approvalTimeoutMs: parseInt(

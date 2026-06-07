@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdirSync } from "fs";
+import { existsSync, mkdirSync, readFileSync } from "fs";
 import { spawn, spawnSync } from "child_process";
 import { createRequire } from "module";
 import { fileURLToPath } from "url";
@@ -50,6 +50,22 @@ const HERMES_COMMANDS = new Set([
   "dashboard",
   "web",
 ]);
+
+const BRIDGELESS_HERMES_COMMANDS = new Set([
+  "setup",
+  "model",
+  "update",
+  "usage",
+  "auth",
+  "config",
+  "plugins",
+  "skills",
+  "fortune",
+]);
+
+const AGENTIX_HERMES_HOME = process.env.HERMES_HOME
+  ? resolve(process.env.HERMES_HOME)
+  : join(WORKSPACE_ROOT, ".agentix", "hermes");
 
 function buildLauncherHelp() {
   return [
@@ -193,6 +209,158 @@ function bridgeUrl() {
   );
 }
 
+function parseEnvFile(file) {
+  if (!existsSync(file)) {
+    return {};
+  }
+
+  const env = {};
+  const content = readFileSync(file, "utf8");
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#") || !line.includes("=")) {
+      continue;
+    }
+    const [rawKey, ...rawValue] = line.split("=");
+    const key = rawKey.trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      continue;
+    }
+    let value = rawValue.join("=").trim();
+    if (
+      (value.startsWith("\"") && value.endsWith("\"")) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    env[key] = value;
+  }
+  return env;
+}
+
+function parseScalar(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  if (
+    (trimmed.startsWith("\"") && trimmed.endsWith("\"")) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed.replace(/\s+#.*$/, "").trim();
+}
+
+function parseHermesModelConfig(file) {
+  if (!existsSync(file)) {
+    return {};
+  }
+
+  const model = {};
+  const lines = readFileSync(file, "utf8").split(/\r?\n/);
+  let inModel = false;
+  let modelIndent = 0;
+
+  for (const rawLine of lines) {
+    if (!rawLine.trim() || rawLine.trim().startsWith("#")) {
+      continue;
+    }
+    const indent = rawLine.match(/^\s*/)?.[0].length ?? 0;
+    const line = rawLine.trim();
+
+    if (!inModel) {
+      if (line.startsWith("model:")) {
+        const inline = parseScalar(line.slice("model:".length));
+        if (inline) {
+          model.default = inline;
+        }
+        inModel = true;
+        modelIndent = indent;
+      }
+      continue;
+    }
+
+    if (indent <= modelIndent && !line.startsWith("-")) {
+      break;
+    }
+
+    const match = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+    if (!match) {
+      continue;
+    }
+    const key = match[1];
+    const value = parseScalar(match[2]);
+    if (key === "default") model.default = value;
+    if (key === "provider") model.provider = value;
+    if (key === "base_url" || key === "baseUrl") model.baseUrl = value;
+  }
+
+  return model;
+}
+
+function providerKeyCandidates(provider) {
+  const normalized = String(provider || "").toLowerCase();
+  if (normalized.includes("anthropic") || normalized.includes("claude")) {
+    return ["ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN"];
+  }
+  if (normalized.includes("openrouter")) {
+    return ["OPENROUTER_API_KEY", "OPENAI_API_KEY"];
+  }
+  if (normalized.includes("gemini") || normalized.includes("google")) {
+    return ["GEMINI_API_KEY", "GOOGLE_API_KEY"];
+  }
+  if (normalized.includes("deepseek")) {
+    return ["DEEPSEEK_API_KEY", "OPENAI_API_KEY"];
+  }
+  if (normalized.includes("groq")) {
+    return ["GROQ_API_KEY", "OPENAI_API_KEY"];
+  }
+  if (normalized.includes("mistral")) {
+    return ["MISTRAL_API_KEY", "OPENAI_API_KEY"];
+  }
+  if (normalized.includes("xai") || normalized.includes("grok")) {
+    return ["XAI_API_KEY", "OPENAI_API_KEY"];
+  }
+  return ["OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"];
+}
+
+function buildRuntimeEnv(extra = {}) {
+  const hermesEnv = parseEnvFile(join(AGENTIX_HERMES_HOME, ".env"));
+  const workspaceEnv = parseEnvFile(join(WORKSPACE_ROOT, ".env.local"));
+  const modelConfig = parseHermesModelConfig(join(AGENTIX_HERMES_HOME, "config.yaml"));
+  const env = {
+    ...hermesEnv,
+    ...workspaceEnv,
+    ...process.env,
+    ...extra,
+    HERMES_HOME: process.env.HERMES_HOME || AGENTIX_HERMES_HOME,
+    AGENTIX_INSTALL_ROOT: PROJECT_ROOT,
+    AGENTIX_WORKSPACE_DIR: WORKSPACE_ROOT,
+  };
+
+  if (!env.AGENTIX_MODEL && modelConfig.default) {
+    env.AGENTIX_MODEL = modelConfig.default;
+  }
+  if (!env.AGENTIX_PROVIDER && modelConfig.provider) {
+    env.AGENTIX_PROVIDER = modelConfig.provider;
+  }
+  if (!env.AGENTIX_BASE_URL && modelConfig.baseUrl) {
+    env.AGENTIX_BASE_URL = modelConfig.baseUrl;
+  }
+  if (!env.AGENTIX_BASE_URL && env.OPENAI_BASE_URL) {
+    env.AGENTIX_BASE_URL = env.OPENAI_BASE_URL;
+  }
+  if (!env.AGENTIX_LLM_API_KEY) {
+    for (const keyName of providerKeyCandidates(env.AGENTIX_PROVIDER || modelConfig.provider)) {
+      if (env[keyName]) {
+        env.AGENTIX_LLM_API_KEY = env[keyName];
+        break;
+      }
+    }
+  }
+
+  return env;
+}
+
 function healthCheck(timeoutMs = 2000) {
   return new Promise((resolveHealth) => {
     const req = http.get(`${bridgeUrl()}/health`, { timeout: timeoutMs }, (res) => {
@@ -260,11 +428,7 @@ async function ensureBridgeRunning() {
     cwd: WORKSPACE_ROOT,
     detached: true,
     stdio: "ignore",
-    env: {
-      ...process.env,
-      AGENTIX_INSTALL_ROOT: PROJECT_ROOT,
-      AGENTIX_WORKSPACE_DIR: WORKSPACE_ROOT,
-    },
+    env: buildRuntimeEnv(),
   });
   child.unref();
 
@@ -281,15 +445,12 @@ async function spawnHermes(args) {
   const child = spawn(pythonExe, ["-m", "hermes_cli.main", ...args], {
     cwd: WORKSPACE_ROOT,
     stdio: "inherit",
-    env: {
-      ...process.env,
+    env: buildRuntimeEnv({
       PYTHONPATH: HERMES_ROOT,
       HERMES_BRIDGE_URL: bridgeUrl(),
       AGENTIX_BRIDGE_URL: bridgeUrl(),
       AGENTIX_FRONTEND: "hermes",
-      AGENTIX_INSTALL_ROOT: PROJECT_ROOT,
-      AGENTIX_WORKSPACE_DIR: WORKSPACE_ROOT,
-    },
+    }),
   });
 
   await new Promise((resolveExit) => {
@@ -307,13 +468,10 @@ async function spawnNodeCli(args) {
   const child = spawn(process.execPath, [resolve(PROJECT_ROOT, "dist", "cli.js"), ...args], {
     cwd: WORKSPACE_ROOT,
     stdio: "inherit",
-    env: {
-      ...process.env,
-      AGENTIX_INSTALL_ROOT: PROJECT_ROOT,
-      AGENTIX_WORKSPACE_DIR: WORKSPACE_ROOT,
+    env: buildRuntimeEnv({
       AGENTIX_BRIDGE_URL: bridgeUrl(),
       HERMES_BRIDGE_URL: bridgeUrl(),
-    },
+    }),
   });
 
   await new Promise((resolveExit) => {
@@ -341,13 +499,10 @@ async function main() {
     const child = spawn(process.execPath, [resolve(PROJECT_ROOT, "dist", "shell", "entry.js")], {
       cwd: WORKSPACE_ROOT,
       stdio: "inherit",
-      env: {
-        ...process.env,
-        AGENTIX_INSTALL_ROOT: PROJECT_ROOT,
-        AGENTIX_WORKSPACE_DIR: WORKSPACE_ROOT,
+      env: buildRuntimeEnv({
         AGENTIX_BRIDGE_URL: bridgeUrl(),
         HERMES_BRIDGE_URL: bridgeUrl(),
-      },
+      }),
     });
     await new Promise((resolveExit) => child.on("close", resolveExit));
     return;
@@ -394,6 +549,11 @@ async function main() {
 
   if (cmd && BACKEND_COMMANDS.has(cmd)) {
     await spawnNodeCli([cmd, ...args]);
+    return;
+  }
+
+  if (cmd && HERMES_COMMANDS.has(cmd) && BRIDGELESS_HERMES_COMMANDS.has(cmd)) {
+    await spawnHermes([cmd, ...args]);
     return;
   }
 

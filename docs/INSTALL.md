@@ -56,7 +56,7 @@ For release validation, run `npm run smoke:release` after build and tests. It pa
 
 ## First Run
 
-`agentix setup` writes workspace-local configuration and prepares the shell for the current folder. The default `agentix` command opens the interactive Hermes-style frontend.
+`agentix setup` writes workspace-local Hermes frontend configuration under `.agentix/hermes/`, syncs non-secret backend defaults into `data/config.json`, and prepares the shell for the current folder. The default `agentix` command opens the interactive Hermes-style frontend.
 Use `agentix dashboard` to start the web control surface by itself. The full backend + dashboard stack is served by `agentix server` at `http://127.0.0.1:3000/ui/` by default.
 
 ## Update Path

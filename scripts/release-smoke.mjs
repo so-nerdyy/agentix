@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const root = resolve(dirname(__filename), "..");
 const smokeRoot = resolve(root, ".smoke", `release-${Date.now()}`);
-const cacheDir = resolve(root, ".smoke", "npm-cache");
+const cacheDir = join(smokeRoot, "npm-cache");
 const packDir = join(smokeRoot, "pack");
 const prefixDir = join(smokeRoot, "prefix");
 const supportDataDir = join(smokeRoot, "data-support");
@@ -210,7 +210,7 @@ async function packAndInstall() {
   log("installing packed artifact into isolated prefix");
   await run(npm, ["install", "-g", "--prefix", prefixDir, tarball, "--no-audit", "--no-fund"], {
     env: npmEnv,
-    timeoutMs: 240_000,
+    timeoutMs: 480_000,
   });
   assert(existsSync(agentixCommand), `installed agentix command missing: ${agentixCommand}`);
   assert(existsSync(agentixEntrypoint), `installed agentix entrypoint missing: ${agentixEntrypoint}`);
@@ -331,6 +331,24 @@ async function smokeServer() {
     const tuiProxyOutput = `${tuiProxy.stdout}\n${tuiProxy.stderr}`;
     assert(tuiProxyOutput.includes("Agentix is running with the Hermes frontend and Agentix backend."), "TUI proxy did not route through Agentix backend");
     assert(tuiProxyOutput.includes("Input: release smoke tui proxy delegation"), "TUI proxy output did not preserve streamed content");
+
+    const cronAdapter = await run(python, [
+      "-c",
+      [
+        "from types import SimpleNamespace",
+        "from hermes_cli.agentix_commands import handle_cron",
+        "create = SimpleNamespace(cron_command='create', schedule='every 1m', prompt='release smoke cron delegation', name='release smoke cli cron', script=None, no_agent=False, workdir=None, skills=None)",
+        "listing = SimpleNamespace(cron_command='list', all=True)",
+        "assert handle_cron(create)",
+        "assert handle_cron(listing)",
+      ].join("; "),
+    ], {
+      cwd: smokeRoot,
+      env: hermesEnv,
+      timeoutMs: 120_000,
+    });
+    assert(cronAdapter.stdout.includes("Created Agentix scheduled job"), "Hermes cron adapter did not create an Agentix scheduler job");
+    assert(cronAdapter.stdout.includes("release smoke cli cron"), "Hermes cron adapter list did not include created job");
 
     const execution = await fetchJson(`${inboxUrl}/execute`, {
       method: "POST",

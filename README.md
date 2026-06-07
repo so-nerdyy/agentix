@@ -58,14 +58,16 @@ Agentix uses workspace-scoped configuration and environment variables:
 - `AGENTIX_BRIDGE_URL` - backend bridge URL
 - `AGENTIX_BRIDGE_PORT` - bridge port
 - `AGENTIX_INBOX_PORT` - inbox/dashboard port
+- `AGENTIX_PROVIDER` - provider selected by `agentix setup` or `agentix model`
 - `AGENTIX_MODEL` - default model
+- `AGENTIX_BASE_URL` - optional OpenAI-compatible or provider-specific base URL
 - `AGENTIX_LLM_API_KEY` - runtime API key
 - `AGENTIX_SESSION_TOKEN` - optional Bearer token for dashboard/API/event access
 - `AGENTIX_SESSION_TTL` - session retention
 - `AGENTIX_APPROVAL_TIMEOUT` - approval timeout
 - `AGENTIX_HERMES_VENV` - optional Python venv location for the bundled Hermes frontend
 
-Secrets are not written to disk. Use `agentix setup` to create workspace-local configuration and export keys in your shell environment or secret manager.
+By default, Agentix stores Hermes frontend state under `.agentix/hermes/` in the current workspace and backend runtime state under `data/`. `agentix setup` and `agentix model` use the Hermes provider/model picker, then sync non-secret defaults into `data/config.json`. Provider API keys stay in Hermes' `.env` or your process environment and are injected into the backend at launch.
 
 ## Project Layout
 
