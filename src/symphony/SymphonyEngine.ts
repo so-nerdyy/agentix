@@ -4,7 +4,7 @@ import type { TaskResult } from "../powerhouse/types.js";
 import type { PlanStep, SymphonyResult } from "./types.js";
 
 export interface SymphonyExecutor {
-  executeStep(step: PlanStep): Promise<{
+  executeStep(step: PlanStep, planId: string): Promise<{
     taskId: string;
     result: TaskResult;
   }>;
@@ -20,7 +20,7 @@ export class SymphonyEngine {
   }
 
   async run(stimulus: string, executor: SymphonyExecutor): Promise<SymphonyResult> {
-    const plan = this.planner.plan(stimulus);
+    const plan = await this.planner.plan(stimulus);
     const outputs: SymphonyResult["outputs"] = [];
     const validations: SymphonyResult["validations"] = [];
     const completed = new Set<string>();
@@ -46,7 +46,7 @@ export class SymphonyEngine {
       }
 
       for (const step of runnable) {
-        const outcome = await this.executeWithRetries(step, executor);
+        const outcome = await this.executeWithRetries(step, plan.id, executor);
         outputs.push(outcome.output);
         validations.push(...outcome.validations);
         pending.delete(step.id);
@@ -92,6 +92,7 @@ export class SymphonyEngine {
 
   private async executeWithRetries(
     step: PlanStep,
+    planId: string,
     executor: SymphonyExecutor,
   ): Promise<{
     output: SymphonyResult["outputs"][number];
@@ -103,7 +104,7 @@ export class SymphonyEngine {
     const maxAttempts = Math.max(1, step.maxAttempts);
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const { taskId, result } = await executor.executeStep(step);
+      const { taskId, result } = await executor.executeStep(step, planId);
       const validation = this.validator.validate(step.id, result);
       validations.push(validation);
       lastOutput = {

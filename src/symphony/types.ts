@@ -15,6 +15,9 @@ export interface SymphonyPlan {
   stimulus: string;
   steps: PlanStep[];
   createdAt: number;
+  planner: "static" | "llm";
+  reasoning?: string;
+  fallbackReason?: string;
 }
 
 export interface StepValidation {

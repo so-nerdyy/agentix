@@ -255,8 +255,8 @@ export class Powerhouse {
     });
 
     const result = await this.symphony.run(opts.stimulus, {
-      executeStep: async (step) => {
-        const { task, result } = await this.executeStep(session.id, step);
+      executeStep: async (step, planId) => {
+        const { task, result } = await this.executeStep(session.id, step, planId);
         taskIds.push(task.id);
         return { taskId: task.id, result };
       },
@@ -284,14 +284,21 @@ export class Powerhouse {
       type: "stimulus.executed",
       actor: "user",
       subjectId: session.id,
-      data: { status, taskIds, planId: result.plan.id },
+      data: {
+        status,
+        taskIds,
+        planId: result.plan.id,
+        planner: result.plan.planner,
+        reasoning: result.plan.reasoning ?? null,
+        fallbackReason: result.plan.fallbackReason ?? null,
+      },
     });
 
     return { response, sessionId: session.id, taskIds, status };
   }
 
-  private async executeStep(sessionId: string, step: PlanStep): Promise<{ task: Task; result: TaskResult }> {
-    const task = this.createTask(sessionId, step);
+  private async executeStep(sessionId: string, step: PlanStep, planId: string): Promise<{ task: Task; result: TaskResult }> {
+    const task = this.createTask(sessionId, step, planId);
     this.queue.enqueue(task);
     this.taskStore.upsert(task);
     this.sessions.addPendingTask(sessionId, task.id);
@@ -453,11 +460,11 @@ export class Powerhouse {
     return this.createSession({ source: "hermes-frontend" });
   }
 
-  private createTask(sessionId: string, step: PlanStep): Task {
+  private createTask(sessionId: string, step: PlanStep, planId: string): Task {
     return {
       id: `task-${randomUUID().slice(0, 8)}`,
       sessionId,
-      planId: undefined,
+      planId,
       stepId: step.id,
       dependsOn: step.dependsOn,
       kind: step.kind,

@@ -19,20 +19,26 @@ export interface AgentixConfig {
 }
 
 const DEFAULTS: AgentixConfig = {
-  model: process.env.AGENTIX_MODEL ?? "claude-3-5-sonnet",
-  provider: process.env.AGENTIX_PROVIDER ?? "auto",
-  baseUrl: process.env.AGENTIX_BASE_URL ?? null,
-  llmApiKey: process.env.AGENTIX_LLM_API_KEY ?? null,
-  sessionTtlMs: parseInt(process.env.AGENTIX_SESSION_TTL ?? "86400000", 10),
+  model: envString("AGENTIX_MODEL") ?? "claude-3-5-sonnet",
+  provider: envString("AGENTIX_PROVIDER") ?? "auto",
+  baseUrl: envString("AGENTIX_BASE_URL"),
+  llmApiKey: envString("AGENTIX_LLM_API_KEY"),
+  sessionTtlMs: parseInt(envString("AGENTIX_SESSION_TTL") ?? "86400000", 10),
   approvalTimeoutMs: parseInt(
-    process.env.AGENTIX_APPROVAL_TIMEOUT ?? "300000",
+    envString("AGENTIX_APPROVAL_TIMEOUT") ?? "300000",
     10,
   ),
   dataDir: PATHS.dataDir,
-  inboxPort: parseInt(process.env.AGENTIX_INBOX_PORT ?? "3000", 10),
-  bridgePort: parseInt(process.env.AGENTIX_BRIDGE_PORT ?? "3456", 10),
-  sessionToken: process.env.AGENTIX_SESSION_TOKEN ?? null,
+  inboxPort: parseInt(envString("AGENTIX_INBOX_PORT") ?? "3000", 10),
+  bridgePort: parseInt(envString("AGENTIX_BRIDGE_PORT") ?? "3456", 10),
+  sessionToken: envString("AGENTIX_SESSION_TOKEN"),
 };
+
+function envString(key: string): string | null {
+  const value = process.env[key]?.trim();
+  if (!value || value === "undefined" || value === "null") return null;
+  return value;
+}
 
 function mergeFromDisk(): AgentixConfig {
   if (!existsSync(PATHS.configFile)) return { ...DEFAULTS };

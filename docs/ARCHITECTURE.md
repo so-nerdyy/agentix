@@ -34,6 +34,7 @@ Standalone upstream Hermes still uses its native local stores when those Agentix
 ## Core Backend Primitives
 
 - `Powerhouse`-style orchestration is represented by the queue/session/approval/agent registry modules
+- `SymphonyEngine` uses an LLM-backed planner when provider credentials are configured, with deterministic static fallback for offline or invalid planner output
 - `TaskQueue` stores and prioritizes work
 - `SessionCoordinator` persists session state
 - `ApprovalWorkflow` gates approval-required work
@@ -45,8 +46,9 @@ Standalone upstream Hermes still uses its native local stores when those Agentix
 1. The user types into the Hermes shell.
 2. The shell emits a stimulus or command.
 3. The Agentix backend receives the request through the bridge.
-4. The backend schedules a task, validates it, and routes it to a PI worker.
-5. Results stream back to the shell and are persisted under the workspace data directory.
+4. Symphony builds a safe plan, either from the LLM planner or static fallback.
+5. The backend schedules each step, validates it, and routes it to a PI worker.
+6. Results stream back to the shell and are persisted under the workspace data directory.
 
 ## Workspace Layout
 
