@@ -8,6 +8,12 @@ export interface SymphonyExecutor {
     taskId: string;
     result: TaskResult;
   }>;
+  recoverStep?(step: PlanStep, failure: {
+    taskId: string;
+    error: string;
+    attempt: number;
+    result: TaskResult;
+  }): Promise<PlanStep | null> | PlanStep | null;
 }
 
 export class SymphonyEngine {
@@ -102,13 +108,14 @@ export class SymphonyEngine {
     const validations: SymphonyResult["validations"] = [];
     let lastOutput: SymphonyResult["outputs"][number] | null = null;
     const maxAttempts = Math.max(1, step.maxAttempts);
+    let currentStep = step;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const { taskId, result } = await executor.executeStep(step, planId);
-      const validation = this.validator.validate(step.id, result);
+      const { taskId, result } = await executor.executeStep(currentStep, planId);
+      const validation = this.validator.validate(currentStep.id, result);
       validations.push(validation);
       lastOutput = {
-        stepId: step.id,
+        stepId: currentStep.id,
         taskId,
         ok: result.ok,
         output: result.output,
@@ -122,6 +129,19 @@ export class SymphonyEngine {
 
       if (validation.ok) {
         return { output: lastOutput, validations, awaitingApproval: false };
+      }
+
+      if (attempt < maxAttempts && executor.recoverStep) {
+        const error = validation.error ?? result.error ?? "validation failed";
+        const recovered = await executor.recoverStep(currentStep, {
+          taskId,
+          error,
+          attempt,
+          result,
+        });
+        if (recovered) {
+          currentStep = recovered;
+        }
       }
     }
 

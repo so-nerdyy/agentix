@@ -260,6 +260,7 @@ export class Powerhouse {
         taskIds.push(task.id);
         return { taskId: task.id, result };
       },
+      recoverStep: (step, failure) => this.recoverStep(step, failure),
     });
 
     const status = result.status;
@@ -333,6 +334,47 @@ export class Powerhouse {
     }
 
     return { task: running, result: await this.runTask(running) };
+  }
+
+  private recoverStep(
+    step: PlanStep,
+    failure: { taskId: string; error: string; attempt: number; result: TaskResult },
+  ): PlanStep | null {
+    const procedure = this.healing.useProcedureFor(failure.error);
+    if (!procedure) return null;
+
+    const guidance = [
+      `Promoted healing procedure ${procedure.id}: ${procedure.summary}`,
+      `Previous attempt ${failure.attempt} failed with: ${failure.error}`,
+    ].join("\n");
+    const payload: Record<string, unknown> = {
+      ...step.payload,
+      healingProcedureId: procedure.id,
+      healingAdvice: guidance,
+    };
+
+    if (step.kind === "user-message") {
+      const existingContext = typeof payload.context === "string" ? payload.context.trim() : "";
+      payload.context = [existingContext, guidance].filter(Boolean).join("\n\n");
+    }
+
+    this.audit.record({
+      type: "healing.procedure_applied",
+      actor: "system",
+      subjectId: procedure.id,
+      data: {
+        taskId: failure.taskId,
+        stepId: step.id,
+        kind: step.kind,
+        fingerprint: procedure.fingerprint,
+        attempt: failure.attempt,
+      },
+    });
+
+    return {
+      ...step,
+      payload,
+    };
   }
 
   private async dispatchQueuedTask(task: Task): Promise<TaskResult> {

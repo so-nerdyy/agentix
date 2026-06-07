@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { BasePIAgent } from "../../src/pi/BasePIAgent.js";
 import { ConversationAgent } from "../../src/pi/ConversationAgent.js";
 import { AuditLog } from "../../src/audit/AuditLog.js";
 import { HealingEngine } from "../../src/healing/HealingEngine.js";
@@ -16,6 +17,7 @@ import { LocalAgentixRuntime } from "../../src/runtime/LocalAgentixRuntime.js";
 import { TaskStore } from "../../src/powerhouse/TaskStore.js";
 import { SchedulerService } from "../../src/scheduler/SchedulerService.js";
 import { ScheduledJobStore } from "../../src/scheduler/ScheduledJobStore.js";
+import type { Task, TaskResult } from "../../src/powerhouse/types.js";
 
 const tempDirs: string[] = [];
 
@@ -40,6 +42,25 @@ function makePowerhouse(): Powerhouse {
     taskStore: new TaskStore(join(dir, "tasks.json")),
     audit: new AuditLog(join(dir, "audit.jsonl")),
   });
+}
+
+class HealingAwareAgent extends BasePIAgent {
+  constructor() {
+    super("user-message", "pi-healing-aware");
+  }
+
+  async execute(task: Task): Promise<TaskResult> {
+    this.emitStart(task);
+    const advice = String(task.payload.healingAdvice ?? "");
+    if (advice.includes("Promoted healing procedure")) {
+      const result = { ok: true, output: `recovered with ${task.payload.healingProcedureId}` };
+      this.emitComplete(task, result);
+      return result;
+    }
+    const error = "known healing failure 4242";
+    this.emitError(task, error);
+    return { ok: false, error };
+  }
 }
 
 afterEach(() => {
@@ -372,6 +393,56 @@ describe("Powerhouse restored runtime", () => {
 
     const promoted = powerhouse.healing.promoteProcedure(procedures[0]!.id);
     expect(promoted?.status).toBe("promoted");
+
+    powerhouse.stop();
+  });
+
+  it("applies promoted healing procedures to retry attempts", async () => {
+    const dir = tempDir("agentix-healing-apply-");
+    const healing = new HealingEngine(join(dir, "healing.json"));
+    healing.observeFailure("seed-1", "seed-session", "known healing failure 4242");
+    healing.observeFailure("seed-2", "seed-session", "known healing failure 4242");
+    const candidate = healing.listProcedures()[0];
+    expect(candidate).toBeDefined();
+    const promoted = healing.promoteProcedure(candidate!.id);
+    expect(promoted?.status).toBe("promoted");
+
+    const registry = new PIAgentRegistry();
+    registry.register(new HealingAwareAgent());
+    const audit = new AuditLog(join(dir, "audit.jsonl"));
+    const powerhouse = new Powerhouse({
+      sessions: new SessionCoordinator(join(dir, "sessions")),
+      queue: new TaskQueue(),
+      approvals: new ApprovalWorkflow({ timeoutMs: 10_000 }),
+      agents: registry,
+      memory: new MemoryStore(join(dir, "memory.jsonl")),
+      healing,
+      taskStore: new TaskStore(join(dir, "tasks.json")),
+      audit,
+    });
+    const plan = {
+      steps: [
+        {
+          id: "heal",
+          kind: "user-message",
+          payload: { stimulus: "recover through promoted procedure" },
+          maxAttempts: 2,
+        },
+      ],
+    };
+
+    const result = await powerhouse.executeStimulus({ stimulus: `plan: ${JSON.stringify(plan)}` });
+    const tasks = powerhouse.listTasks();
+    const procedure = healing.getProcedure(promoted!.id);
+
+    expect(result.status).toBe("complete");
+    expect(result.response).toContain(`recovered with ${promoted!.id}`);
+    expect(result.taskIds).toHaveLength(2);
+    expect(tasks[0]?.status).toBe("failed");
+    expect(tasks[1]?.status).toBe("complete");
+    expect(tasks[1]?.payload.healingProcedureId).toBe(promoted!.id);
+    expect(procedure?.uses).toBe(1);
+    expect(audit.list().some((entry) => entry.type === "healing.procedure_applied")).toBe(true);
 
     powerhouse.stop();
   });

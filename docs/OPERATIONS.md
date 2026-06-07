@@ -39,6 +39,10 @@ Set `AGENTIX_DISABLE_BACKEND_COMMANDS=1` only for debugging upstream Hermes comm
 
 Symphony attempts LLM-backed planning when `AGENTIX_LLM_API_KEY` and provider/model settings are available. Planner output is accepted only if it sanitizes into known Pi-agent step kinds. Shell, code-edit, and sandbox steps are approval-gated regardless of what the planner returns. If the LLM planner is unavailable or returns invalid JSON, Agentix falls back to deterministic static planning and records the fallback reason in audit metadata.
 
+## Healing
+
+Repeated task failures create candidate healing procedures. Promoted procedures are applied during retryable Symphony steps by injecting procedure guidance into the next Pi-agent attempt and recording `healing.procedure_applied` in the audit log. This does not bypass approval gates; shell, code-edit, and sandbox steps still require approval before execution.
+
 ## Health Checks
 
 - `GET /health` on the inbox server
