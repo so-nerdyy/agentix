@@ -9,6 +9,7 @@ Agentix assumes the local workspace may contain untrusted inputs, scripts, and t
 - API keys should come from environment variables or secret managers
 - Secrets are not persisted to the workspace config file
 - Session tokens should be scoped to the current workspace or deployment
+- When `AGENTIX_SESSION_TOKEN` is set, inbox/dashboard control APIs, bridge control APIs, and event streams require `Authorization: Bearer <token>` or `?token=<token>` for SSE
 
 ## Execution Boundaries
 
@@ -30,5 +31,5 @@ Agentix assumes the local workspace may contain untrusted inputs, scripts, and t
 
 - Keep Node and Python dependencies current
 - Review gateway credentials before enabling integrations
-- Rotate session tokens if event stream access is suspected to be exposed
+- Rotate session tokens if dashboard, bridge, or event stream access is suspected to be exposed
 

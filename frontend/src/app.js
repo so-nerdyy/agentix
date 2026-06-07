@@ -199,9 +199,13 @@ function saveFilterState() {
 }
 
 async function api(path, opts = {}) {
+  const headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
+  if (state.sessionToken) {
+    headers.Authorization = `Bearer ${state.sessionToken}`;
+  }
   const init = {
-    headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
     ...opts,
+    headers,
   };
   const res = await fetch(path, init);
   if (!res.ok) {
@@ -1715,7 +1719,10 @@ async function streamExecute(stimulus) {
   const body = JSON.stringify({ stimulus, sessionId: state.sessionId || undefined });
   const res = await fetch("/execute/stream", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(state.sessionToken ? { Authorization: `Bearer ${state.sessionToken}` } : {}),
+    },
     body,
   });
   if (!res.ok) {

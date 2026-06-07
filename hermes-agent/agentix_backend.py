@@ -25,6 +25,11 @@ def _get_bridge_url() -> str:
     )
 
 
+def _auth_headers() -> Dict[str, str]:
+    token = os.environ.get("AGENTIX_SESSION_TOKEN")
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
 def _bridge_healthcheck() -> bool:
     try:
         req = urllib.request.Request(f"{_get_bridge_url()}/health")
@@ -83,19 +88,19 @@ class AgentixBackend:
         req = urllib.request.Request(
             f"{_get_bridge_url()}{path}",
             data=data,
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", **_auth_headers()},
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=60) as resp:
             return json.loads(resp.read().decode("utf-8"))
 
     def _get(self, path: str) -> Any:
-        req = urllib.request.Request(f"{_get_bridge_url()}{path}")
+        req = urllib.request.Request(f"{_get_bridge_url()}{path}", headers=_auth_headers())
         with urllib.request.urlopen(req, timeout=10) as resp:
             return json.loads(resp.read().decode("utf-8"))
 
     def _delete(self, path: str) -> Any:
-        req = urllib.request.Request(f"{_get_bridge_url()}{path}", method="DELETE")
+        req = urllib.request.Request(f"{_get_bridge_url()}{path}", method="DELETE", headers=_auth_headers())
         with urllib.request.urlopen(req, timeout=30) as resp:
             raw = resp.read().decode("utf-8")
             return json.loads(raw) if raw else None
@@ -116,7 +121,7 @@ class AgentixBackend:
         req = urllib.request.Request(
             f"{_get_bridge_url()}/execute/stream",
             data=json.dumps(body).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", **_auth_headers()},
             method="POST",
         )
 

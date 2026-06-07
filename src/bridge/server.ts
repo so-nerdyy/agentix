@@ -1,6 +1,8 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { getBackendRuntime } from "../runtime/backend.js";
+import { requireSessionToken } from "../config/HttpAuth.js";
+import { loadConfig } from "../config/index.js";
 
 export async function startBridge(opts: { port?: number; host?: string } = {}) {
   const runtime = getBackendRuntime();
@@ -12,6 +14,11 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
   await server.register(cors, {
     origin: false,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  });
+
+  server.addHook("preHandler", async (request, reply) => {
+    if (request.method === "OPTIONS" || request.url.split("?")[0] === "/health") return;
+    if (!requireSessionToken(request, reply, loadConfig().sessionToken)) return reply;
   });
 
   server.get("/health", async () => ({ status: "ok", backend: "agentix" }));
@@ -292,11 +299,14 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
   });
 
   await server.listen({ port, host });
-  console.error(`Bridge listening on ${host}:${port}`);
+  const address = server.server.address();
+  const actualPort = typeof address === "object" && address ? address.port : port;
+  console.error(`Bridge listening on ${host}:${actualPort}`);
   return {
     close: async () => {
       runtime.shutdown();
       await server.close();
     },
+    port: actualPort,
   };
 }

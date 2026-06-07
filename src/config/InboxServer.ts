@@ -22,6 +22,7 @@ import {
 import { EventBus } from "./EventBus.js";
 import { ensureDataDirs, PATHS } from "./paths.js";
 import { getBackendRuntime } from "../runtime/backend.js";
+import { requireSessionToken } from "./HttpAuth.js";
 
 const VERSION = "2.1.0";
 
@@ -45,6 +46,19 @@ export async function startInboxServer(opts: { port?: number; host?: string } = 
   });
 
   const startedAt = Date.now();
+
+  server.addHook("preHandler", async (request, reply) => {
+    if (request.method === "OPTIONS") return;
+    const pathname = request.url.split("?")[0] ?? "/";
+    const isPublic =
+      pathname === "/" ||
+      pathname === "/health" ||
+      pathname === "/ui" ||
+      pathname === "/ui/" ||
+      pathname.startsWith("/ui/");
+    if (isPublic) return;
+    if (!requireSessionToken(request, reply, loadConfig().sessionToken)) return reply;
+  });
 
   server.get("/health", async () => ({
     status: "ok",
@@ -311,8 +325,10 @@ export async function startInboxServer(opts: { port?: number; host?: string } = 
   });
 
   await server.listen({ port, host });
+  const address = server.server.address();
+  const actualPort = typeof address === "object" && address ? address.port : port;
 
-  console.error(`InboxServer listening on http://${host}:${port}`);
+  console.error(`InboxServer listening on http://${host}:${actualPort}`);
 
   const close = async (): Promise<void> => {
     stopEventStreamBridge();
@@ -333,7 +349,7 @@ export async function startInboxServer(opts: { port?: number; host?: string } = 
   process.once("SIGINT", onSignal);
   process.once("SIGTERM", onSignal);
 
-  return { close, port };
+  return { close, port: actualPort };
 }
 
 // Allow `node dist/config/InboxServer.js` to start the server.

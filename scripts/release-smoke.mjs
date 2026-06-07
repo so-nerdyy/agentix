@@ -255,6 +255,7 @@ async function smokeServer() {
   const inboxUrl = `http://127.0.0.1:${inboxPort}`;
   const serverEnv = {
     ...process.env,
+    AGENTIX_SESSION_TOKEN: "",
     AGENTIX_DATA_DIR: serverDataDir,
     AGENTIX_BRIDGE_PORT: String(bridgePort),
     AGENTIX_INBOX_PORT: String(inboxPort),

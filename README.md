@@ -60,7 +60,7 @@ Agentix uses workspace-scoped configuration and environment variables:
 - `AGENTIX_INBOX_PORT` - inbox/dashboard port
 - `AGENTIX_MODEL` - default model
 - `AGENTIX_LLM_API_KEY` - runtime API key
-- `AGENTIX_SESSION_TOKEN` - session token for event streaming
+- `AGENTIX_SESSION_TOKEN` - optional Bearer token for dashboard/API/event access
 - `AGENTIX_SESSION_TTL` - session retention
 - `AGENTIX_APPROVAL_TIMEOUT` - approval timeout
 - `AGENTIX_HERMES_VENV` - optional Python venv location for the bundled Hermes frontend

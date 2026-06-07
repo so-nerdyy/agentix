@@ -26,6 +26,7 @@ describe("frontend dashboard build surface", () => {
     expect(html).toContain('data-view="approvals"');
     expect(html).toContain('id="composeForm"');
     expect(app).toContain("new EventSource");
+    expect(app).toContain("Authorization: `Bearer ${state.sessionToken}`");
     expect(app).toContain("/execute/stream");
     expect(app).toContain("/scheduler/jobs");
     expect(app).toContain("/gateway");

@@ -38,6 +38,7 @@ Set `AGENTIX_DISABLE_BACKEND_COMMANDS=1` only for debugging upstream Hermes comm
 - `GET /health` on the inbox server
 - `GET /health` on the bridge server
 - `agentix doctor` for configuration and runtime validation
+- If `AGENTIX_SESSION_TOKEN` is configured, all non-health control endpoints require `Authorization: Bearer <token>`
 
 ## Release Smoke
 

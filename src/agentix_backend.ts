@@ -10,8 +10,16 @@ export class AgentixBackend {
     this.baseUrl = baseUrl || BRIDGE_URL;
   }
 
+  private headers(): Record<string, string> {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (process.env.AGENTIX_SESSION_TOKEN) {
+      headers.Authorization = `Bearer ${process.env.AGENTIX_SESSION_TOKEN}`;
+    }
+    return headers;
+  }
+
   private async get<T>(path: string): Promise<T> {
-    const res = await fetch(`${this.baseUrl}${path}`);
+    const res = await fetch(`${this.baseUrl}${path}`, { headers: this.headers() });
     if (!res.ok) throw new Error(`Bridge ${res.status}: ${await res.text()}`);
     return res.json() as Promise<T>;
   }
@@ -19,7 +27,7 @@ export class AgentixBackend {
   private async post<T>(path: string, body?: Record<string, unknown>): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: this.headers(),
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) throw new Error(`Bridge ${res.status}: ${await res.text()}`);
@@ -35,7 +43,7 @@ export class AgentixBackend {
 
     const res = await fetch(`${this.baseUrl}/execute/stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: this.headers(),
       body: JSON.stringify({ stimulus, sessionId }),
     });
 
@@ -94,7 +102,10 @@ export class AgentixBackend {
   }
 
   async deleteSession(id: string): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/sessions/${id}`, { method: "DELETE" });
+    const res = await fetch(`${this.baseUrl}/sessions/${id}`, {
+      method: "DELETE",
+      headers: this.headers(),
+    });
     if (!res.ok && res.status !== 204) {
       throw new Error(`Bridge ${res.status}: ${await res.text()}`);
     }
@@ -235,7 +246,10 @@ export class AgentixBackend {
   }
 
   async deleteScheduledJob(id: string): Promise<Record<string, unknown>> {
-    const res = await fetch(`${this.baseUrl}/scheduler/jobs/${encodeURIComponent(id)}`, { method: "DELETE" });
+    const res = await fetch(`${this.baseUrl}/scheduler/jobs/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: this.headers(),
+    });
     if (!res.ok) throw new Error(`Bridge ${res.status}: ${await res.text()}`);
     return res.json() as Promise<Record<string, unknown>>;
   }

@@ -8,6 +8,7 @@
 import type { FastifyInstance } from "fastify";
 import { EventBus, type AgentixEventName, type AgentixEventMap } from "./EventBus.js";
 import { loadConfig } from "./index.js";
+import { extractSessionToken, isSessionTokenAuthorized } from "./HttpAuth.js";
 
 type Subscriber = {
   id: number;
@@ -41,7 +42,7 @@ export function isEventStreamAuthorized(
   configuredToken: string | null,
   providedToken: string | null,
 ): boolean {
-  return !configuredToken || providedToken === configuredToken;
+  return isSessionTokenAuthorized(configuredToken, providedToken);
 }
 
 export function startEventStreamBridge(): void {
@@ -99,10 +100,7 @@ export function subscriberCount(): number {
 export function registerEventStreamRoutes(server: FastifyInstance): void {
   server.get("/events", (request, reply) => {
     const cfg = loadConfig();
-    const token =
-      (request.query as Record<string, string>).token ??
-      request.headers.authorization?.replace(/^Bearer\s+/i, "") ??
-      null;
+    const token = extractSessionToken(request);
 
     if (!isEventStreamAuthorized(cfg.sessionToken, token)) {
       reply.code(401).send({ error: "unauthorized" });
