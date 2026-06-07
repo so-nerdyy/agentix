@@ -35,6 +35,7 @@ Standalone upstream Hermes still uses its native local stores when those Agentix
 
 - `Powerhouse`-style orchestration is represented by the queue/session/approval/agent registry modules
 - `SymphonyEngine` uses an LLM-backed planner when provider credentials are configured, with deterministic static fallback for offline or invalid planner output
+- `PlanStore` persists Symphony plan execution state so approval-gated plans can resume after approval
 - `TaskQueue` stores and prioritizes work
 - `SessionCoordinator` persists session state
 - `ApprovalWorkflow` gates approval-required work
@@ -49,8 +50,9 @@ Standalone upstream Hermes still uses its native local stores when those Agentix
 3. The Agentix backend receives the request through the bridge.
 4. Symphony builds a safe plan, either from the LLM planner or static fallback.
 5. The backend schedules each step, validates it, and routes it to a PI worker.
-6. Failed retryable steps can receive promoted healing guidance before the next attempt.
-7. Results stream back to the shell and are persisted under the workspace data directory.
+6. Approval-gated plans pause safely and resume remaining dependent steps after approval.
+7. Failed retryable steps can receive promoted healing guidance before the next attempt.
+8. Results stream back to the shell and are persisted under the workspace data directory.
 
 ## Workspace Layout
 

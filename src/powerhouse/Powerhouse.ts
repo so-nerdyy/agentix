@@ -8,8 +8,9 @@ import { ConversationAgent } from "../pi/ConversationAgent.js";
 import { SandboxAgent } from "../pi/SandboxAgent.js";
 import { HealingEngine } from "../healing/HealingEngine.js";
 import { MemoryStore } from "../memory/MemoryStore.js";
+import { PlanStore } from "../symphony/PlanStore.js";
 import { SymphonyEngine } from "../symphony/SymphonyEngine.js";
-import type { PlanStep } from "../symphony/types.js";
+import type { PlanStep, SymphonyResult } from "../symphony/types.js";
 import { ApprovalWorkflow } from "./ApprovalWorkflow.js";
 import { PIAgentRegistry } from "./PIAgentRegistry.js";
 import { SessionCoordinator } from "./SessionCoordinator.js";
@@ -38,6 +39,7 @@ export class Powerhouse {
   readonly memory: MemoryStore;
   readonly healing: HealingEngine;
   readonly symphony: SymphonyEngine;
+  readonly planStore: PlanStore;
   readonly taskStore: TaskStore;
   readonly audit: AuditLog;
   private started = false;
@@ -51,6 +53,7 @@ export class Powerhouse {
     memory?: MemoryStore;
     healing?: HealingEngine;
     symphony?: SymphonyEngine;
+    planStore?: PlanStore;
     taskStore?: TaskStore;
     audit?: AuditLog;
   } = {}) {
@@ -61,6 +64,7 @@ export class Powerhouse {
     this.memory = opts.memory ?? new MemoryStore();
     this.healing = opts.healing ?? new HealingEngine();
     this.symphony = opts.symphony ?? new SymphonyEngine();
+    this.planStore = opts.planStore ?? new PlanStore();
     this.taskStore = opts.taskStore ?? new TaskStore();
     this.audit = opts.audit ?? new AuditLog();
   }
@@ -147,7 +151,21 @@ export class Powerhouse {
       data: { sessionId: task.sessionId, kind: task.kind },
     });
     EventBus.emit("task:running", { taskId: task.id, sessionId: task.sessionId });
-    return this.runTask(task);
+    const approvedResult = await this.runTask(task);
+    if (!approvedResult.ok) return approvedResult;
+
+    const continuation = await this.resumePlanAfterApproval(task);
+    if (!continuation) return approvedResult;
+
+    return {
+      ok: continuation.status !== "failed",
+      output: {
+        approvedTaskId: task.id,
+        approvedOutput: approvedResult.output,
+        continuation,
+      },
+      error: continuation.status === "failed" ? continuation.response : undefined,
+    };
   }
 
   reject(taskId: string, reason?: string): boolean {
@@ -264,6 +282,7 @@ export class Powerhouse {
     });
 
     const status = result.status;
+    this.recordPlanExecution(result.plan, session.id, taskIds, status);
 
     const response = status === "awaiting-approval"
       ? this.approvalResponse(taskIds)
@@ -375,6 +394,73 @@ export class Powerhouse {
       ...step,
       payload,
     };
+  }
+
+  private async resumePlanAfterApproval(task: Task): Promise<SymphonyResult | null> {
+    if (!task.planId || !task.stepId) return null;
+    const execution = this.planStore.get(task.planId);
+    if (!execution || execution.status !== "awaiting-approval") return null;
+
+    const completedStepIds = new Set(
+      this.taskStore
+        .list(task.sessionId)
+        .filter((item) => item.planId === task.planId && item.stepId && item.status === "complete")
+        .map((item) => item.stepId!),
+    );
+
+    if (!completedStepIds.has(task.stepId)) return null;
+    const hasRemainingSteps = execution.plan.steps.some((step) => !completedStepIds.has(step.id));
+    if (!hasRemainingSteps) {
+      this.recordPlanExecution(execution.plan, task.sessionId, execution.taskIds, "complete");
+      return null;
+    }
+
+    const continuationTaskIds: string[] = [];
+    const result = await this.symphony.runPlan(execution.plan, {
+      executeStep: async (step, planId) => {
+        const { task: nextTask, result: nextResult } = await this.executeStep(task.sessionId, step, planId);
+        continuationTaskIds.push(nextTask.id);
+        return { taskId: nextTask.id, result: nextResult };
+      },
+      recoverStep: (step, failure) => this.recoverStep(step, failure),
+    }, {
+      completedStepIds,
+    });
+
+    const taskIds = [...execution.taskIds, ...continuationTaskIds];
+    this.recordPlanExecution(result.plan, task.sessionId, taskIds, result.status);
+    this.audit.record({
+      type: "plan.resumed_after_approval",
+      actor: "system",
+      subjectId: result.plan.id,
+      data: {
+        approvedTaskId: task.id,
+        sessionId: task.sessionId,
+        status: result.status,
+        continuationTaskIds,
+      },
+    });
+
+    if (result.response) {
+      this.memory.add({
+        sessionId: task.sessionId,
+        role: "assistant",
+        content: result.response,
+        tags: ["approval-continuation", result.status],
+        taskId: continuationTaskIds[continuationTaskIds.length - 1] ?? task.id,
+      });
+    }
+
+    return result;
+  }
+
+  private recordPlanExecution(
+    plan: SymphonyResult["plan"],
+    sessionId: string,
+    taskIds: string[],
+    status: SymphonyResult["status"],
+  ): void {
+    this.planStore.upsert({ plan, sessionId, taskIds, status });
   }
 
   private async dispatchQueuedTask(task: Task): Promise<TaskResult> {

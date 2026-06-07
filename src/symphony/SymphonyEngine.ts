@@ -16,6 +16,12 @@ export interface SymphonyExecutor {
   }): Promise<PlanStep | null> | PlanStep | null;
 }
 
+export interface SymphonyRunOptions {
+  completedStepIds?: Iterable<string>;
+  outputs?: SymphonyResult["outputs"];
+  validations?: SymphonyResult["validations"];
+}
+
 export class SymphonyEngine {
   private readonly planner: TaskPlanner;
   private readonly validator: ResultValidator;
@@ -27,11 +33,23 @@ export class SymphonyEngine {
 
   async run(stimulus: string, executor: SymphonyExecutor): Promise<SymphonyResult> {
     const plan = await this.planner.plan(stimulus);
-    const outputs: SymphonyResult["outputs"] = [];
-    const validations: SymphonyResult["validations"] = [];
-    const completed = new Set<string>();
+    return this.runPlan(plan, executor);
+  }
+
+  async runPlan(
+    plan: SymphonyResult["plan"],
+    executor: SymphonyExecutor,
+    opts: SymphonyRunOptions = {},
+  ): Promise<SymphonyResult> {
+    const outputs: SymphonyResult["outputs"] = [...(opts.outputs ?? [])];
+    const validations: SymphonyResult["validations"] = [...(opts.validations ?? [])];
+    const completed = new Set<string>(opts.completedStepIds ?? []);
     const failed = new Set<string>();
-    const pending = new Map(plan.steps.map((step) => [step.id, step]));
+    const pending = new Map(
+      plan.steps
+        .filter((step) => !completed.has(step.id))
+        .map((step) => [step.id, step]),
+    );
 
     while (pending.size > 0) {
       const runnable = Array.from(pending.values()).filter((step) =>

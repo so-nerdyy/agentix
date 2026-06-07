@@ -12,6 +12,7 @@ import { Powerhouse } from "../../src/powerhouse/Powerhouse.js";
 import { SessionCoordinator } from "../../src/powerhouse/SessionCoordinator.js";
 import { TaskQueue } from "../../src/powerhouse/TaskQueue.js";
 import { TaskStore } from "../../src/powerhouse/TaskStore.js";
+import { PlanStore } from "../../src/symphony/PlanStore.js";
 import type { Task } from "../../src/powerhouse/types.js";
 
 const tempDirs: string[] = [];
@@ -46,6 +47,7 @@ function makePowerhouse(): Powerhouse {
     approvals: new ApprovalWorkflow({ timeoutMs: 10_000 }),
     memory: new MemoryStore(join(dir, "memory.jsonl")),
     healing: new HealingEngine(join(dir, "healing.json")),
+    planStore: new PlanStore(join(dir, "plans.json")),
     taskStore: new TaskStore(join(dir, "tasks.json")),
     audit: new AuditLog(join(dir, "audit.jsonl")),
   });

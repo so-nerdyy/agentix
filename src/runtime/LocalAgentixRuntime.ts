@@ -1077,6 +1077,7 @@ export class LocalAgentixRuntime {
     const approvals = this.listApprovals();
     const jobs = this.listJobs();
     const gateways = this.listGateways();
+    const plans = this.powerhouse.planStore.list();
     const audit = this.listAudit();
     const healing = this.healingStats();
     const memory = this.powerhouse.memory.list().slice(-250);
@@ -1093,6 +1094,7 @@ export class LocalAgentixRuntime {
       counts: {
         sessions: sessions.length,
         tasks: tasks.length,
+        plans: plans.length,
         approvals: approvals.length,
         jobs: jobs.length,
         gateways: gateways.length,
@@ -1109,6 +1111,7 @@ export class LocalAgentixRuntime {
     writeJson("config.json", safeConfig);
     writeJson("sessions.json", sessions);
     writeJson("tasks.json", tasks);
+    writeJson("plans.json", plans);
     writeJson("approvals.json", approvals);
     writeJson("jobs.json", jobs);
     writeJson("gateways.json", gateways);
@@ -1125,6 +1128,7 @@ export class LocalAgentixRuntime {
         "config.json",
         "sessions.json",
         "tasks.json",
+        "plans.json",
         "approvals.json",
         "jobs.json",
         "gateways.json",

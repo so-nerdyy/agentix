@@ -17,6 +17,7 @@ import { LocalAgentixRuntime } from "../../src/runtime/LocalAgentixRuntime.js";
 import { TaskStore } from "../../src/powerhouse/TaskStore.js";
 import { SchedulerService } from "../../src/scheduler/SchedulerService.js";
 import { ScheduledJobStore } from "../../src/scheduler/ScheduledJobStore.js";
+import { PlanStore } from "../../src/symphony/PlanStore.js";
 import type { Task, TaskResult } from "../../src/powerhouse/types.js";
 
 const tempDirs: string[] = [];
@@ -39,6 +40,7 @@ function makePowerhouse(): Powerhouse {
     agents: registry,
     memory: new MemoryStore(join(dir, "memory.jsonl")),
     healing: new HealingEngine(join(dir, "healing.json")),
+    planStore: new PlanStore(join(dir, "plans.json")),
     taskStore: new TaskStore(join(dir, "tasks.json")),
     audit: new AuditLog(join(dir, "audit.jsonl")),
   });
@@ -265,6 +267,7 @@ describe("Powerhouse restored runtime", () => {
       agents: registry,
       memory: new MemoryStore(join(dir, "memory.jsonl")),
       healing: new HealingEngine(join(dir, "healing.json")),
+      planStore: new PlanStore(join(dir, "plans.json")),
       taskStore,
       audit: new AuditLog(join(dir, "audit.jsonl")),
     });
@@ -347,6 +350,49 @@ describe("Powerhouse restored runtime", () => {
     powerhouse.stop();
   });
 
+  it("continues dependent plan steps after approval", async () => {
+    const powerhouse = makePowerhouse();
+    const plan = {
+      steps: [
+        {
+          id: "approved-shell",
+          kind: "bash",
+          payload: { commandLine: "echo approval-continuation" },
+          requiresApproval: true,
+        },
+        {
+          id: "follow-up",
+          kind: "user-message",
+          dependsOn: ["approved-shell"],
+          payload: { stimulus: "after approval continuation" },
+        },
+      ],
+    };
+
+    const paused = await powerhouse.executeStimulus({
+      stimulus: `plan: ${JSON.stringify(plan)}`,
+    });
+    const approvalTaskId = paused.taskIds[0];
+
+    expect(paused.status).toBe("awaiting-approval");
+    expect(powerhouse.listTasks().map((task) => task.stepId)).toEqual(["approved-shell"]);
+
+    const approved = await powerhouse.approve(approvalTaskId!);
+    const tasks = powerhouse.listTasks();
+    const execution = powerhouse.planStore.list()[0];
+
+    expect(approved.ok).toBe(true);
+    expect(JSON.stringify(approved.output)).toContain("approval-continuation");
+    expect(JSON.stringify(approved.output)).toContain("after approval continuation");
+    expect(tasks.map((task) => task.stepId)).toEqual(["approved-shell", "follow-up"]);
+    expect(tasks.every((task) => task.status === "complete")).toBe(true);
+    expect(execution?.status).toBe("complete");
+    expect(execution?.taskIds).toHaveLength(2);
+    expect(powerhouse.audit.list().some((entry) => entry.type === "plan.resumed_after_approval")).toBe(true);
+
+    powerhouse.stop();
+  });
+
   it("persists tasks for recovery and API listing", async () => {
     const dir = tempDir("agentix-persist-");
     const taskStore = new TaskStore(join(dir, "tasks.json"));
@@ -356,6 +402,7 @@ describe("Powerhouse restored runtime", () => {
       approvals: new ApprovalWorkflow({ timeoutMs: 10_000 }),
       memory: new MemoryStore(join(dir, "memory.jsonl")),
       healing: new HealingEngine(join(dir, "healing.json")),
+      planStore: new PlanStore(join(dir, "plans.json")),
       taskStore,
       audit: new AuditLog(join(dir, "audit.jsonl")),
     });
@@ -417,6 +464,7 @@ describe("Powerhouse restored runtime", () => {
       agents: registry,
       memory: new MemoryStore(join(dir, "memory.jsonl")),
       healing,
+      planStore: new PlanStore(join(dir, "plans.json")),
       taskStore: new TaskStore(join(dir, "tasks.json")),
       audit,
     });
@@ -661,10 +709,13 @@ describe("Powerhouse restored runtime", () => {
 
     expect(existsSync(join(bundle.bundleDir, "manifest.json"))).toBe(true);
     expect(existsSync(join(bundle.bundleDir, "tasks.json"))).toBe(true);
+    expect(existsSync(join(bundle.bundleDir, "plans.json"))).toBe(true);
     expect(bundle.files).toContain("manifest.json");
+    expect(bundle.files).toContain("plans.json");
 
     const manifest = JSON.parse(readFileSync(join(bundle.bundleDir, "manifest.json"), "utf-8"));
     expect(manifest.counts.tasks).toBeGreaterThanOrEqual(1);
+    expect(manifest.counts.plans).toBeGreaterThanOrEqual(1);
     expect(manifest.counts.sessions).toBeGreaterThanOrEqual(1);
 
     runtime.shutdown();
