@@ -34,6 +34,7 @@ const state = {
   audit: [],
   logs: [],
   supportBundle: null,
+  diagnostics: null,
   events: [],
   health: null,
   taskDetail: null,
@@ -86,6 +87,9 @@ const refs = {
   reloadLogsButton: el("reloadLogsButton"),
   logDetail: el("logDetail"),
   createSupportButton: el("createSupportButton"),
+  reloadDiagnosticsButton: el("reloadDiagnosticsButton"),
+  diagnosticsSummary: el("diagnosticsSummary"),
+  diagnosticsList: el("diagnosticsList"),
   reloadSessionsButton: el("reloadSessionsButton"),
   sessionDetail: el("sessionDetail"),
   consolidateButton: el("consolidateButton"),
@@ -149,6 +153,7 @@ const viewTitles = {
   healing: "Healing and procedures",
   audit: "Audit trail",
   logs: "Logs",
+  diagnostics: "Doctor diagnostics",
   support: "Support bundle",
   sessions: "Sessions",
   compose: "Compose a task",
@@ -258,6 +263,7 @@ function paletteItems() {
     { title: "Healing", hint: "Review failure fingerprints", action: () => setView("healing"), keywords: ["heal", "healing", "failure"] },
     { title: "Audit", hint: "Inspect the audit trail", action: () => setView("audit"), keywords: ["audit", "log"] },
     { title: "Logs", hint: "Inspect runtime logs", action: () => setView("logs"), keywords: ["logs", "log"] },
+    { title: "Doctor", hint: "Run backend readiness diagnostics", action: async () => { setView("diagnostics"); await loadDiagnostics(); }, keywords: ["doctor", "diagnostics", "health", "readiness"] },
     { title: "Support bundle", hint: "Generate runtime bundle", action: async () => { setView("support"); state.supportBundle = await api("/support/bundle", { method: "POST" }); appendEvent("support bundle", `Created bundle at ${state.supportBundle.bundleDir}`, "success"); render(); }, keywords: ["support", "bundle"] },
     { title: "Sessions", hint: "Open session management", action: () => setView("sessions"), keywords: ["session", "sessions"] },
     { title: "Compose", hint: "Write a new stimulus", action: () => setView("compose"), keywords: ["compose", "message", "prompt"] },
@@ -1135,6 +1141,42 @@ function supportCard(bundle) {
   `;
 }
 
+function diagnosticsCards() {
+  if (!state.diagnostics) {
+    return '<div class="card muted">No diagnostics loaded yet.</div>';
+  }
+  const checks = state.diagnostics.checks || [];
+  return checks.map((check) => {
+    const tone = check.status === "pass" ? "success" : check.status === "fail" ? "danger" : "warn";
+    return `
+      <div class="card">
+        <div class="row">
+          <h4>${escapeHtml(check.label || check.id)}</h4>
+          <span class="pill ${tone}">${escapeHtml(check.status)}</span>
+        </div>
+        <div class="muted">${escapeHtml(check.detail || "")}</div>
+        ${check.action ? `<div class="meta">Action: ${escapeHtml(check.action)}</div>` : ""}
+      </div>
+    `;
+  }).join("") || '<div class="card muted">Diagnostics returned no checks.</div>';
+}
+
+function diagnosticsSummaryText() {
+  if (!state.diagnostics) {
+    return "Run backend diagnostics to verify setup, runtime state, integrations, and recovery readiness.";
+  }
+  const counts = state.diagnostics.counts || {};
+  const config = state.diagnostics.config || {};
+  return [
+    `Status: ${String(state.diagnostics.status || "unknown").toUpperCase()}`,
+    `Workspace: ${state.diagnostics.workspace || "n/a"}`,
+    `Provider/model: ${config.provider || "n/a"} / ${config.model || "n/a"}`,
+    `LLM key: ${config.llmApiKeyConfigured ? "configured" : "missing"}`,
+    `Sessions ${counts.sessions || 0} · Tasks ${counts.tasks || 0} · Plans ${counts.plans || 0} · Approvals ${counts.approvals || 0}`,
+    `Jobs ${counts.jobs || 0} · Gateways ${counts.gateways || 0} · Memory ${counts.memory || 0} · Healing ${counts.healingProcedures || 0}`,
+  ].join("\n");
+}
+
 function sessionCard(session) {
   return `
     <div class="card ${state.selectedSessionId === session.id ? "selected" : ""}">
@@ -1289,6 +1331,8 @@ function renderLists() {
   refs.auditList.innerHTML = state.audit.map(auditCard).join("") || '<div class="card muted">No audit entries yet.</div>';
   refs.logDetail.innerHTML = logDetailCard();
   refs.logsList.innerHTML = state.logs.map((entry, index) => logCard(entry, index)).join("") || '<div class="card muted">No logs available yet.</div>';
+  refs.diagnosticsSummary.textContent = diagnosticsSummaryText();
+  refs.diagnosticsList.innerHTML = diagnosticsCards();
   refs.supportSummary.textContent = state.supportBundle
     ? `Support bundle written to ${state.supportBundle.bundleDir}`
     : "Generate a support bundle with runtime snapshots, logs, and diagnostics.";
@@ -1521,8 +1565,9 @@ function renderSearch() {
 
 async function refreshAll() {
   try {
-    const [health, sessions, tasks, plans, tools, logs, approvals, jobs, audit, healing, gateways] = await Promise.all([
+    const [health, diagnostics, sessions, tasks, plans, tools, logs, approvals, jobs, audit, healing, gateways] = await Promise.all([
       api("/health"),
+      api("/doctor").catch(() => null),
       api("/sessions"),
       api(`/tasks${state.sessionId ? `?sessionId=${encodeURIComponent(state.sessionId)}` : ""}`),
       api("/plans").catch(() => []),
@@ -1535,6 +1580,7 @@ async function refreshAll() {
       api("/gateway"),
     ]);
     state.health = health;
+    state.diagnostics = diagnostics;
     state.sessions = sessions || [];
     state.tasks = tasks || [];
     state.plans = plans || [];
@@ -1597,6 +1643,17 @@ async function runSearch(query) {
   state.searchResults = await api(`/search?q=${encodeURIComponent(text)}`);
   setView("search");
   renderSearch();
+}
+
+async function loadDiagnostics() {
+  try {
+    state.diagnostics = await api("/doctor");
+    appendEvent("doctor", `Backend diagnostics: ${state.diagnostics.status || "unknown"}`, state.diagnostics.status === "fail" ? "danger" : state.diagnostics.status === "warn" ? "warn" : "success");
+  } catch (err) {
+    state.diagnostics = null;
+    appendEvent("doctor failed", err instanceof Error ? err.message : String(err), "danger");
+  }
+  render();
 }
 
 async function loadTaskDetail(taskId) {
@@ -1972,6 +2029,11 @@ async function handleSlash(text) {
       setView("logs");
       await refreshAll();
       break;
+    case "doctor":
+    case "diagnostics":
+      setView("diagnostics");
+      await loadDiagnostics();
+      break;
     case "support":
       setView("support");
       await refreshAll();
@@ -2208,7 +2270,7 @@ function boot() {
     button.addEventListener("click", () => {
       refs.composeInput.value = button.dataset.quick;
       const quick = button.dataset.quick?.replace(/^\//, "") || "compose";
-      setView(quick === "scheduler" ? "scheduler" : quick === "support" ? "support" : quick === "logs" ? "logs" : quick === "memory" ? "memory" : quick === "plans" ? "plans" : quick === "tasks" ? "tasks" : quick === "tools" ? "tools" : quick === "approvals" ? "approvals" : quick === "gateway" ? "gateway" : quick);
+      setView(quick === "doctor" ? "diagnostics" : quick === "diagnostics" ? "diagnostics" : quick === "scheduler" ? "scheduler" : quick === "support" ? "support" : quick === "logs" ? "logs" : quick === "memory" ? "memory" : quick === "plans" ? "plans" : quick === "tasks" ? "tasks" : quick === "tools" ? "tools" : quick === "approvals" ? "approvals" : quick === "gateway" ? "gateway" : quick);
     });
   });
   refs.saveTokenButton.addEventListener("click", async () => {
@@ -2235,6 +2297,7 @@ function boot() {
   refs.reloadHealingButton.addEventListener("click", refreshAll);
   refs.reloadAuditButton.addEventListener("click", refreshAll);
   refs.reloadLogsButton.addEventListener("click", refreshAll);
+  refs.reloadDiagnosticsButton.addEventListener("click", loadDiagnostics);
   refs.searchForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     await runSearch(refs.searchInput.value);

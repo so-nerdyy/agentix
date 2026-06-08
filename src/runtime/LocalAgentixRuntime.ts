@@ -1219,6 +1219,146 @@ export class LocalAgentixRuntime {
     };
   }
 
+  doctor(): Record<string, unknown> {
+    this.powerhouse.start();
+    const config = loadConfig();
+    const tasks = this.powerhouse.listTasks();
+    const agents = this.powerhouse.agents.list();
+    const gateways = this.gateways.list();
+    const jobs = this.scheduler.list();
+    const healing = this.powerhouse.healing.listProcedures();
+    const checks: Array<{
+      id: string;
+      label: string;
+      status: "pass" | "warn" | "fail";
+      detail: string;
+      action?: string;
+    }> = [];
+    const add = (
+      id: string,
+      label: string,
+      status: "pass" | "warn" | "fail",
+      detail: string,
+      action?: string,
+    ) => checks.push({ id, label, status, detail, ...(action ? { action } : {}) });
+
+    add(
+      "paths.data",
+      "Data directory",
+      existsSync(PATHS.dataDir) ? "pass" : "fail",
+      PATHS.dataDir,
+      existsSync(PATHS.dataDir) ? undefined : "Run agentix setup or agentix server to initialize runtime directories.",
+    );
+    add(
+      "paths.hermes",
+      "Hermes frontend",
+      existsSync(PATHS.hermesRoot) ? "pass" : "fail",
+      PATHS.hermesRoot,
+      existsSync(PATHS.hermesRoot) ? undefined : "Reinstall Agentix or restore the bundled hermes-agent directory.",
+    );
+    add(
+      "config.model",
+      "Model configuration",
+      config.model ? "pass" : "fail",
+      `${config.provider || "auto"} / ${config.model || "missing"}`,
+      config.model ? undefined : "Run agentix setup or agentix model.",
+    );
+    add(
+      "config.llm",
+      "LLM API key",
+      config.llmApiKey ? "pass" : "warn",
+      config.llmApiKey ? "Configured" : "Missing; planner and conversation agents will use deterministic fallbacks.",
+      config.llmApiKey ? undefined : "Run agentix setup or export AGENTIX_LLM_API_KEY.",
+    );
+    const expectedKinds = ["user-message", "bash", "code-edit", "sandbox-run"];
+    const missingKinds = expectedKinds.filter((kind) => !agents.some((agent) => agent.kind === kind));
+    const unhealthyAgents = agents.filter((agent) => !agent.healthy());
+    add(
+      "agents.pi",
+      "Pi agents",
+      missingKinds.length || unhealthyAgents.length ? "fail" : "pass",
+      `${agents.length} registered; missing ${missingKinds.join(", ") || "none"}; unhealthy ${unhealthyAgents.map((agent) => agent.id).join(", ") || "none"}`,
+      missingKinds.length || unhealthyAgents.length ? "Restart the backend and inspect tool details." : undefined,
+    );
+    const pendingApprovals = tasks.filter((task) => task.status === "awaiting-approval");
+    add(
+      "runtime.approvals",
+      "Pending approvals",
+      pendingApprovals.length ? "warn" : "pass",
+      `${pendingApprovals.length} approval(s) pending`,
+      pendingApprovals.length ? "Review the dashboard Approvals panel or run /approval <id> approve|reject." : undefined,
+    );
+    const failedTasks = tasks.filter((task) => task.status === "failed");
+    add(
+      "runtime.failures",
+      "Failed tasks",
+      failedTasks.length ? "warn" : "pass",
+      `${failedTasks.length} failed task(s) recorded`,
+      failedTasks.length ? "Inspect failed tasks and healing procedures." : undefined,
+    );
+    const enabledGateways = gateways.filter((gateway) => gateway.enabled);
+    const enabledGatewaysMissingToken = enabledGateways.filter((gateway) => !gateway.tokenConfigured && gateway.platform !== "webhook");
+    add(
+      "integrations.gateway",
+      "Gateway integrations",
+      enabledGatewaysMissingToken.length ? "warn" : "pass",
+      `${gateways.length} gateway(s), ${enabledGateways.length} enabled`,
+      enabledGatewaysMissingToken.length ? "Configure credentials for enabled gateway integrations." : undefined,
+    );
+    const failedJobs = jobs.filter((job) => job.lastStatus === "failure");
+    add(
+      "scheduler.jobs",
+      "Scheduler jobs",
+      failedJobs.length ? "warn" : "pass",
+      `${jobs.length} job(s), ${failedJobs.length} recent failure(s)`,
+      failedJobs.length ? "Inspect Scheduler job detail and lastError." : undefined,
+    );
+    const promotedProcedures = healing.filter((procedure) => procedure.status === "promoted");
+    add(
+      "healing.procedures",
+      "Healing procedures",
+      "pass",
+      `${healing.length} procedure(s), ${promotedProcedures.length} promoted`,
+    );
+
+    const status = checks.some((check) => check.status === "fail")
+      ? "fail"
+      : checks.some((check) => check.status === "warn")
+        ? "warn"
+        : "pass";
+
+    return {
+      status,
+      generatedAt: new Date().toISOString(),
+      workspace: PATHS.workspaceRoot,
+      dataDir: PATHS.dataDir,
+      installRoot: PATHS.installRoot,
+      checks,
+      counts: {
+        sessions: this.powerhouse.listSessions().length,
+        tasks: tasks.length,
+        plans: this.powerhouse.planStore.list().length,
+        approvals: pendingApprovals.length,
+        jobs: jobs.length,
+        gateways: gateways.length,
+        memory: this.powerhouse.memory.list().length,
+        healingProcedures: healing.length,
+      },
+      config: {
+        provider: config.provider,
+        model: config.model,
+        baseUrl: config.baseUrl,
+        llmApiKeyConfigured: Boolean(config.llmApiKey),
+        sessionTokenConfigured: Boolean(config.sessionToken),
+      },
+      node: {
+        version: process.version,
+        platform: process.platform,
+        arch: process.arch,
+      },
+    };
+  }
+
   createSupportBundle(): Record<string, unknown> {
     this.powerhouse.start();
     const bundleId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
@@ -1243,6 +1383,7 @@ export class LocalAgentixRuntime {
     const jobs = this.listJobs();
     const gateways = this.listGateways();
     const plans = this.powerhouse.planStore.list();
+    const doctor = this.doctor();
     const audit = this.listAudit();
     const healing = this.healingStats();
     const memory = this.powerhouse.memory.list().slice(-250);
@@ -1274,6 +1415,7 @@ export class LocalAgentixRuntime {
       },
     });
     writeJson("config.json", safeConfig);
+    writeJson("doctor.json", doctor);
     writeJson("sessions.json", sessions);
     writeJson("tasks.json", tasks);
     writeJson("plans.json", plans);
@@ -1291,6 +1433,7 @@ export class LocalAgentixRuntime {
       files: [
         "manifest.json",
         "config.json",
+        "doctor.json",
         "sessions.json",
         "tasks.json",
         "plans.json",

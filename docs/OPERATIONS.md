@@ -49,7 +49,7 @@ Repeated task failures create candidate healing procedures. Promoted procedures 
 
 - `GET /health` on the inbox server
 - `GET /health` on the bridge server
-- `agentix doctor` for configuration and runtime validation
+- `agentix doctor` for Hermes diagnostics; `agentix --agentix-cli doctor` or `GET /doctor` for Agentix backend diagnostics
 - If `AGENTIX_SESSION_TOKEN` is configured, all non-health control endpoints require `Authorization: Bearer <token>`
 
 ## Release Smoke
@@ -70,7 +70,7 @@ Use `agentix support` to create a timestamped bundle under `data/support/` with:
 
 - manifest metadata
 - sanitized config
-- sessions, tasks, approvals, jobs, audit, healing, and memory snapshots
+- sessions, tasks, approvals, jobs, audit, healing, doctor, and memory snapshots
 - plan execution snapshots
 
 ## Recovery

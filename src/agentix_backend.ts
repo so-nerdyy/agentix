@@ -136,6 +136,10 @@ export class AgentixBackend {
     return this.get(`/search?q=${encodeURIComponent(query)}`);
   }
 
+  async doctor(): Promise<Record<string, unknown>> {
+    return this.get("/doctor");
+  }
+
   async listTasks(sessionId?: string): Promise<Array<Record<string, unknown>>> {
     const suffix = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
     return this.get(`/tasks${suffix}`);

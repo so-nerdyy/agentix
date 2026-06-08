@@ -120,6 +120,8 @@ export class HermesShell {
           this.showHistory();
           break;
         case "doctor":
+          console.log(this.formatDoctor(await this.backend.doctor()));
+          console.log("\nHermes diagnostics:");
           console.log(await hermesCommand("doctor", []));
           break;
         case "usage":
@@ -483,6 +485,25 @@ export class HermesShell {
       ...audit.slice(0, 5).map((entry) => `  - ${String(entry.type ?? "")} ${String(entry.id ?? "")}`),
       `Logs (${logs.length})`,
       ...logs.slice(0, 5).map((entry) => `  - ${String(entry.level ?? "")} ${String(entry.message ?? "").slice(0, 120)}`),
+    ].join("\n");
+  }
+
+  private formatDoctor(report: Record<string, unknown>): string {
+    const checks = (report.checks as Array<Record<string, unknown>> | undefined) ?? [];
+    const counts = (report.counts as Record<string, unknown> | undefined) ?? {};
+    const config = (report.config as Record<string, unknown> | undefined) ?? {};
+    return [
+      `Agentix backend doctor: ${String(report.status ?? "unknown").toUpperCase()}`,
+      `Workspace: ${String(report.workspace ?? "")}`,
+      `Model: ${String(config.provider ?? "auto")} / ${String(config.model ?? "")}`,
+      `LLM key: ${config.llmApiKeyConfigured ? "configured" : "missing"}`,
+      `Counts: sessions=${String(counts.sessions ?? 0)} tasks=${String(counts.tasks ?? 0)} plans=${String(counts.plans ?? 0)} approvals=${String(counts.approvals ?? 0)}`,
+      "Checks:",
+      ...checks.map((check) => {
+        const status = String(check.status ?? "unknown").toUpperCase();
+        const action = check.action ? ` (action: ${String(check.action)})` : "";
+        return `  [${status}] ${String(check.label ?? check.id ?? "")}: ${String(check.detail ?? "")}${action}`;
+      }),
     ].join("\n");
   }
 }

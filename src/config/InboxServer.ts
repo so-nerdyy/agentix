@@ -66,6 +66,7 @@ export async function startInboxServer(opts: { port?: number; host?: string } = 
     version: VERSION,
     sseClients: subscriberCount(),
   }));
+  server.get("/doctor", async () => runtime.doctor());
 
   server.post("/execute", async (request) => {
     const body = request.body as Record<string, unknown>;

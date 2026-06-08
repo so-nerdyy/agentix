@@ -15,6 +15,7 @@ export function buildHelpText(version: string): string {
     "  ui, web              aliases for dashboard",
     "  gateway              inspect or manage gateway integrations",
     "  logs                 print recent runtime logs",
+    "  doctor               run backend diagnostics",
     "  support              create a support bundle",
     "  mods                 list available tools/modules",
     "  plugin, extension    alias for mods",

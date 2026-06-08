@@ -22,6 +22,7 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
   });
 
   server.get("/health", async () => ({ status: "ok", backend: "agentix" }));
+  server.get("/doctor", async () => runtime.doctor());
 
   server.post("/execute/stream", async (request, reply) => {
     const body = request.body as Record<string, unknown>;

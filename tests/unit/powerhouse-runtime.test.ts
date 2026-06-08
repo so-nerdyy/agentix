@@ -139,6 +139,9 @@ describe("Powerhouse restored runtime", () => {
     expect(runtime.listMemory(session.id).some((item) => String(item.content).includes("test runtime facade"))).toBe(true);
     expect(runtime.listTools().some((tool) => tool.name === "user-message")).toBe(true);
     expect(Array.isArray(runtime.listApprovals())).toBe(true);
+    const doctor = runtime.doctor();
+    expect(String(doctor.status)).toMatch(/pass|warn|fail/);
+    expect(Array.isArray(doctor.checks)).toBe(true);
 
     runtime.shutdown();
   });
@@ -715,8 +718,10 @@ describe("Powerhouse restored runtime", () => {
     expect(existsSync(join(bundle.bundleDir, "manifest.json"))).toBe(true);
     expect(existsSync(join(bundle.bundleDir, "tasks.json"))).toBe(true);
     expect(existsSync(join(bundle.bundleDir, "plans.json"))).toBe(true);
+    expect(existsSync(join(bundle.bundleDir, "doctor.json"))).toBe(true);
     expect(bundle.files).toContain("manifest.json");
     expect(bundle.files).toContain("plans.json");
+    expect(bundle.files).toContain("doctor.json");
 
     const manifest = JSON.parse(readFileSync(join(bundle.bundleDir, "manifest.json"), "utf-8"));
     expect(manifest.counts.tasks).toBeGreaterThanOrEqual(1);

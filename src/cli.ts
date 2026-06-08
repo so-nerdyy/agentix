@@ -38,6 +38,31 @@ async function isBridgeHealthy(): Promise<boolean> {
   }
 }
 
+function formatDoctorReport(report: Record<string, unknown>): string {
+  const checks = Array.isArray(report.checks) ? report.checks as Array<Record<string, unknown>> : [];
+  const counts = report.counts as Record<string, unknown> | undefined;
+  const config = report.config as Record<string, unknown> | undefined;
+  return [
+    `Agentix doctor: ${String(report.status ?? "unknown").toUpperCase()}`,
+    `Workspace: ${String(report.workspace ?? "n/a")}`,
+    `Data dir: ${String(report.dataDir ?? "n/a")}`,
+    "",
+    "Checks:",
+    ...checks.map((check) => {
+      const status = String(check.status ?? "unknown").toUpperCase().padEnd(4);
+      const action = check.action ? `\n      action: ${String(check.action)}` : "";
+      return `  [${status}] ${String(check.label ?? check.id ?? "check")}: ${String(check.detail ?? "")}${action}`;
+    }),
+    "",
+    "Counts:",
+    `  sessions=${String(counts?.sessions ?? 0)} tasks=${String(counts?.tasks ?? 0)} plans=${String(counts?.plans ?? 0)} approvals=${String(counts?.approvals ?? 0)}`,
+    `  jobs=${String(counts?.jobs ?? 0)} gateways=${String(counts?.gateways ?? 0)} memory=${String(counts?.memory ?? 0)} healing=${String(counts?.healingProcedures ?? 0)}`,
+    "",
+    "Config:",
+    `  provider=${String(config?.provider ?? "n/a")} model=${String(config?.model ?? "n/a")} llmKey=${config?.llmApiKeyConfigured ? "configured" : "missing"} sessionToken=${config?.sessionTokenConfigured ? "configured" : "missing"}`,
+  ].join("\n");
+}
+
 async function main() {
   const [cmd, ...args] = process.argv.slice(2);
   const portArg = readFlagValue(args, "--port");
@@ -102,6 +127,17 @@ async function main() {
         console.log(`Bridge entry: ${PATHS.bridgeEntry}`);
         console.log(`Inbox entry: ${PATHS.inboxEntry}`);
         console.log(`Support bundle: ${(bundle as { bundleDir?: string }).bundleDir ?? "n/a"}`);
+      }
+      return;
+    case "doctor":
+      ensureDataDirs();
+      {
+        const report = getBackendRuntime().doctor();
+        if (cleanArgs.includes("--json")) {
+          console.log(JSON.stringify(report, null, 2));
+        } else {
+          console.log(formatDoctorReport(report));
+        }
       }
       return;
     case "mods":

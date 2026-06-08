@@ -25,6 +25,7 @@ describe("frontend dashboard build surface", () => {
     expect(html).toContain('data-view="plans"');
     expect(html).toContain('data-view="gateway"');
     expect(html).toContain('data-view="approvals"');
+    expect(html).toContain('data-view="diagnostics"');
     expect(html).toContain('id="composeForm"');
     expect(app).toContain("new EventSource");
     expect(app).toContain("Authorization: `Bearer ${state.sessionToken}`");
@@ -34,6 +35,8 @@ describe("frontend dashboard build surface", () => {
     expect(app).toContain("data-action=\"inspect-plan");
     expect(app).toContain("/gateway");
     expect(app).toContain("/support/bundle");
+    expect(app).toContain("/doctor");
+    expect(app).toContain("diagnosticsCards");
     expect(app).toContain("data-action=\"approve");
     expect(app).toContain("data-action=\"restart-task-detail");
   });

@@ -8,6 +8,7 @@ describe("CLI help", () => {
     expect(help).toContain("agentix <command>");
     expect(help).toContain("dashboard");
     expect(help).toContain("logs");
+    expect(help).toContain("doctor");
     expect(help).toContain("support");
     expect(help).toContain("server");
     expect(help).toContain("plugin, extension");
