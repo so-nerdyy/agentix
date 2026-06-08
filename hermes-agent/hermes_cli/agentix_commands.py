@@ -166,6 +166,59 @@ def handle_model(args: Any) -> bool:
     return True
 
 
+def _print_doctor_report(report: dict[str, Any]) -> None:
+    checks = list(_iter_entries(report.get("checks")))
+    counts = report.get("counts") if isinstance(report.get("counts"), dict) else {}
+    config = report.get("config") if isinstance(report.get("config"), dict) else {}
+    print(f"Agentix doctor: {str(report.get('status', 'unknown')).upper()}")
+    print(f"Workspace: {report.get('workspace', 'n/a')}")
+    print(f"Data dir: {report.get('dataDir', 'n/a')}")
+    print()
+    print("Checks:")
+    for check in checks:
+        status = str(check.get("status", "unknown")).upper().ljust(4)
+        print(f"  [{status}] {check.get('label', check.get('id', 'check'))}: {check.get('detail', '')}")
+        if check.get("action"):
+            print(f"      action: {check.get('action')}")
+    print()
+    print("Counts:")
+    print(
+        "  "
+        f"sessions={counts.get('sessions', 0)} "
+        f"tasks={counts.get('tasks', 0)} "
+        f"plans={counts.get('plans', 0)} "
+        f"approvals={counts.get('approvals', 0)}"
+    )
+    print(
+        "  "
+        f"jobs={counts.get('jobs', 0)} "
+        f"gateways={counts.get('gateways', 0)} "
+        f"memory={counts.get('memory', 0)} "
+        f"healing={counts.get('healingProcedures', 0)}"
+    )
+    print()
+    print("Config:")
+    print(
+        "  "
+        f"provider={config.get('provider', 'n/a')} "
+        f"model={config.get('model', 'n/a')} "
+        f"llmKey={'configured' if config.get('llmApiKeyConfigured') else 'missing'} "
+        f"sessionToken={'configured' if config.get('sessionTokenConfigured') else 'missing'}"
+    )
+
+
+def handle_doctor(args: Any) -> bool:
+    if not using_agentix_backend():
+        return False
+
+    report = _backend().doctor()
+    if getattr(args, "json", False):
+        _dump(report)
+    else:
+        _print_doctor_report(report if isinstance(report, dict) else {"status": "unknown"})
+    return True
+
+
 def handle_oneshot(
     prompt: str,
     model: str | None = None,

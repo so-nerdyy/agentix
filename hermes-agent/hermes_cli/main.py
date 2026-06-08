@@ -6332,6 +6332,10 @@ def cmd_hooks(args):
 
 def cmd_doctor(args):
     """Check configuration and dependencies."""
+    from hermes_cli.agentix_commands import handle_doctor
+    if handle_doctor(args):
+        return
+
     from hermes_cli.doctor import run_doctor
 
     run_doctor(args)
@@ -12873,6 +12877,9 @@ def main():
     )
     doctor_parser.add_argument(
         "--fix", action="store_true", help="Attempt to fix issues automatically"
+    )
+    doctor_parser.add_argument(
+        "--json", action="store_true", help="Print Agentix backend diagnostics as JSON"
     )
     doctor_parser.add_argument(
         "--ack",

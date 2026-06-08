@@ -98,9 +98,9 @@ class AgentixBackend:
         with urllib.request.urlopen(req, timeout=60) as resp:
             return json.loads(resp.read().decode("utf-8"))
 
-    def _get(self, path: str) -> Any:
+    def _get(self, path: str, timeout: int = 10) -> Any:
         req = urllib.request.Request(f"{_get_bridge_url()}{path}", headers=_auth_headers())
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
 
     def _delete(self, path: str) -> Any:
@@ -159,6 +159,9 @@ class AgentixBackend:
 
     def list_sessions(self) -> Any:
         return self.get_sessions()
+
+    def doctor(self) -> Any:
+        return self._get("/doctor", timeout=60)
 
     def get_session(self, session_id: str) -> Any:
         return self._get(f"/sessions/{quote(session_id)}")
