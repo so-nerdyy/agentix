@@ -140,6 +140,25 @@ async function main() {
         }
       }
       return;
+    case "plans":
+      ensureDataDirs();
+      for (const plan of getBackendRuntime().listPlans()) {
+        console.log(
+          `${String(plan.id ?? "")}: ${String(plan.status ?? "")} ${String(plan.planner ?? "")} steps=${String(plan.stepCount ?? 0)} tasks=${String(plan.taskCount ?? 0)} ${String(plan.stimulus ?? "").slice(0, 120)}`,
+        );
+      }
+      return;
+    case "plan":
+      ensureDataDirs();
+      {
+        const [planId] = cleanArgs;
+        if (!planId) {
+          console.log("Usage: agentix --agentix-cli plan <plan-id>");
+          return;
+        }
+        console.log(JSON.stringify(getBackendRuntime().getPlan(planId), null, 2));
+      }
+      return;
     case "mods":
     case "plugin":
     case "extension":

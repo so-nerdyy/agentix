@@ -23,6 +23,7 @@ describe("launcher help", () => {
     expect(result.stdout).toContain("setup");
     expect(result.stdout).toContain("server");
     expect(result.stdout).toContain("support");
+    expect(result.stdout).toContain("plans");
     expect(result.stdout).toContain("--bridge-port");
   });
 

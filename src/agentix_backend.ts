@@ -140,6 +140,14 @@ export class AgentixBackend {
     return this.get("/doctor");
   }
 
+  async listPlans(): Promise<Array<Record<string, unknown>>> {
+    return this.get("/plans");
+  }
+
+  async getPlan(planId: string): Promise<Record<string, unknown>> {
+    return this.get(`/plans/${encodeURIComponent(planId)}`);
+  }
+
   async listTasks(sessionId?: string): Promise<Array<Record<string, unknown>>> {
     const suffix = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
     return this.get(`/tasks${suffix}`);

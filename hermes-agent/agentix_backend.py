@@ -192,6 +192,12 @@ class AgentixBackend:
     def search(self, query: str) -> Any:
         return self._get(f"/search?q={quote(query)}")
 
+    def list_plans(self) -> Any:
+        return self._get("/plans")
+
+    def get_plan(self, plan_id: str) -> Any:
+        return self._get(f"/plans/{quote(plan_id)}")
+
     def list_logs(self, limit: int = 100) -> Any:
         return self._get(f"/logs?limit={int(limit)}")
 

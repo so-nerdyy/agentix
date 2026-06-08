@@ -28,6 +28,7 @@ The installed `agentix` command launches Hermes for the frontend, but it sets `A
 - `agentix memory status|search|consolidate` uses Agentix memory.
 - `agentix tools list` lists Agentix Pi agents.
 - `agentix logs` reads Agentix runtime logs.
+- `agentix --agentix-cli plans`, shell `/plans`, and shell `/plan <id>` inspect Agentix Symphony plan executions.
 - Dashboard `/ui` reads Agentix `/plans` and `/plans/:id` to inspect Symphony plan execution, dependencies, approvals, and task linkage.
 
 Standalone upstream Hermes still uses its native local stores when those Agentix environment variables are absent.

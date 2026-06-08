@@ -219,6 +219,16 @@ def handle_chat(args: Any) -> bool:
         if lowered == "/sessions":
             _print_sessions(list(_iter_entries(backend.list_sessions())), 20)
             continue
+        if lowered == "/plans":
+            _print_plans(list(_iter_entries(backend.list_plans())))
+            continue
+        if lowered.startswith("/plan"):
+            plan_id = line[len("/plan"):].strip()
+            if not plan_id:
+                print("Usage: /plan <plan-id>")
+                continue
+            _print_plan_detail(backend.get_plan(plan_id))
+            continue
         if lowered == "/tools":
             _print_tools(backend.list_tools())
             continue
@@ -283,6 +293,50 @@ def _print_sessions(sessions: list[dict[str, Any]], limit: int) -> None:
             f"{_clip(status, 10):<10} "
             f"{_clip(json.dumps(metadata, ensure_ascii=False), 32)}"
         )
+
+
+def _print_plans(plans: list[dict[str, Any]]) -> None:
+    if not plans:
+        print("No Agentix Symphony plans recorded.")
+        return
+    print(f"{'ID':<18} {'Status':<16} {'Planner':<10} {'Steps':<6} {'Tasks':<6} Stimulus")
+    print("-" * 96)
+    for plan in plans[:20]:
+        print(
+            f"{_clip(plan.get('id'), 18):<18} "
+            f"{_clip(plan.get('status'), 16):<16} "
+            f"{_clip(plan.get('planner'), 10):<10} "
+            f"{str(plan.get('stepCount', 0)):<6} "
+            f"{str(plan.get('taskCount', 0)):<6} "
+            f"{_clip(plan.get('stimulus'), 80)}"
+        )
+
+
+def _print_plan_detail(detail: dict[str, Any]) -> None:
+    plan = detail.get("plan") if isinstance(detail.get("plan"), dict) else {}
+    steps = list(_iter_entries(detail.get("steps")))
+    tasks = list(_iter_entries(detail.get("tasks")))
+    audit = list(_iter_entries(detail.get("audit")))
+    print(f"Plan {plan.get('id', '')} [{plan.get('status', '')}]")
+    print(f"  Planner: {plan.get('planner', '')}")
+    print(f"  Stimulus: {_clip(plan.get('stimulus'), 180)}")
+    if plan.get("reasoning"):
+        print(f"  Reasoning: {plan.get('reasoning')}")
+    if plan.get("fallbackReason"):
+        print(f"  Fallback: {plan.get('fallbackReason')}")
+    print(f"  Steps ({len(steps)})")
+    for step in steps:
+        depends = ",".join(step.get("dependsOn") or []) or "none"
+        print(
+            f"    - {step.get('id', '')} [{step.get('status', 'pending')}] "
+            f"{step.get('kind', '')} depends={depends} task={step.get('taskId', '-')}"
+        )
+    print(f"  Tasks ({len(tasks)})")
+    for task in tasks[:8]:
+        print(f"    - {task.get('id', '')} [{task.get('status', '')}] {task.get('kind', '')}")
+    print(f"  Audit ({len(audit)})")
+    for entry in audit[:5]:
+        print(f"    - {entry.get('type', '')} {entry.get('id', '')}")
 
 
 def handle_sessions(args: Any, sessions_parser: Any = None) -> bool:

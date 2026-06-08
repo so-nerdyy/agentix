@@ -32,6 +32,7 @@ When `agentix` launches Hermes, it sets `AGENTIX_FRONTEND=hermes`. In this mode 
 - `agentix tools list`
 - `agentix logs`
 - `agentix cron`
+- `agentix --agentix-cli plans` and shell `/plans` inspect Agentix Symphony plans
 
 Set `AGENTIX_DISABLE_BACKEND_COMMANDS=1` only for debugging upstream Hermes command behavior. Set `AGENTIX_DISABLE_BACKEND_CHAT=1` only for debugging upstream Hermes prompt execution.
 

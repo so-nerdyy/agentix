@@ -21,6 +21,8 @@ const BACKEND_COMMANDS = new Set([
   "ui",
   "web",
   "support",
+  "plans",
+  "plan",
   "mods",
   "plugin",
   "extension",
@@ -99,6 +101,7 @@ function buildLauncherHelp() {
     "  dashboard, ui, web      start the web control surface only",
     "                         flags: --port <n> --host <addr>",
     "  support                 create a support bundle",
+    "  plans, plan             inspect Symphony plan executions",
     "  mods                    list available tools/modules",
     "  plugin, extension       plugin compatibility helpers",
     "  broadcast, eval, shell   backend compatibility entrypoints",
@@ -147,6 +150,18 @@ function buildCommandHelp(command) {
         "",
         "Creates a timestamped support bundle under data/support/ with runtime snapshots,",
         "logs, memory, tasks, approvals, jobs, healing state, and config metadata.",
+      ].join("\n");
+    case "plans":
+      return [
+        "Usage: agentix --agentix-cli plans",
+        "",
+        "Lists Symphony plan executions from the Agentix backend.",
+      ].join("\n");
+    case "plan":
+      return [
+        "Usage: agentix --agentix-cli plan <plan-id>",
+        "",
+        "Prints the full Symphony plan execution record as JSON.",
       ].join("\n");
     case "mods":
     case "plugin":

@@ -44,6 +44,7 @@ From any project folder, `agentix` opens the interactive shell. Use `agentix das
 - `agentix tools list` - inspect Agentix Pi agents
 - `agentix memory search <query>` - search Agentix memory
 - `agentix sessions list` - inspect Agentix sessions
+- `agentix --agentix-cli plans` - inspect Symphony plan executions
 - `agentix logs` - inspect Agentix runtime logs
 - `agentix dashboard` - start the web control surface
 - `agentix server` - start the Agentix backend bridge/API

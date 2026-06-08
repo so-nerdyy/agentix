@@ -16,6 +16,7 @@ export function buildHelpText(version: string): string {
     "  gateway              inspect or manage gateway integrations",
     "  logs                 print recent runtime logs",
     "  doctor               run backend diagnostics",
+    "  plans, plan          inspect Symphony plan executions",
     "  support              create a support bundle",
     "  mods                 list available tools/modules",
     "  plugin, extension    alias for mods",

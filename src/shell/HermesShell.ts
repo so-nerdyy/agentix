@@ -314,6 +314,19 @@ export class HermesShell {
           console.log(this.formatSearchResults(await this.backend.search(query)));
           break;
         }
+        case "plans": {
+          console.log(this.formatPlans(await this.backend.listPlans()));
+          break;
+        }
+        case "plan": {
+          const [planId] = [...subArgs, ...restArgs];
+          if (!planId) {
+            console.log("Usage: /plan <plan-id>\n");
+            break;
+          }
+          console.log(this.formatPlan(await this.backend.getPlan(planId)));
+          break;
+        }
         case "task": {
           const [taskId, action, ...actionArgs] = [...subArgs, ...restArgs];
           if (!taskId) {
@@ -431,6 +444,8 @@ export class HermesShell {
   /tools <args>       Manage tools
   /tool <id> [action] Inspect a tool
   /search <query>     Search tasks, sessions, memory, logs, jobs, healing
+  /plans              List Symphony plan executions
+  /plan <id>          Inspect a Symphony plan execution
   /task <id> [action] Inspect or control a task
   /memory <query>     Search memory
   /logs [query]       Search logs
@@ -505,5 +520,41 @@ export class HermesShell {
         return `  [${status}] ${String(check.label ?? check.id ?? "")}: ${String(check.detail ?? "")}${action}`;
       }),
     ].join("\n");
+  }
+
+  private formatPlans(plans: Array<Record<string, unknown>>): string {
+    if (!Array.isArray(plans) || plans.length === 0) {
+      return "No Symphony plans recorded.";
+    }
+    return [
+      "Symphony plans:",
+      ...plans.slice(0, 20).map((plan) =>
+        `  - ${String(plan.id ?? "")} [${String(plan.status ?? "")}] ${String(plan.planner ?? "")} steps=${String(plan.stepCount ?? 0)} tasks=${String(plan.taskCount ?? 0)} ${String(plan.stimulus ?? "").slice(0, 100)}`,
+      ),
+    ].join("\n");
+  }
+
+  private formatPlan(detail: Record<string, unknown>): string {
+    const plan = (detail.plan as Record<string, unknown> | undefined) ?? {};
+    const steps = (detail.steps as Array<Record<string, unknown>> | undefined) ?? [];
+    const tasks = (detail.tasks as Array<Record<string, unknown>> | undefined) ?? [];
+    const audit = (detail.audit as Array<Record<string, unknown>> | undefined) ?? [];
+    return [
+      `Plan ${String(plan.id ?? "")} [${String(plan.status ?? "")}]`,
+      `Planner: ${String(plan.planner ?? "")}`,
+      `Stimulus: ${String(plan.stimulus ?? "").slice(0, 180)}`,
+      plan.reasoning ? `Reasoning: ${String(plan.reasoning)}` : "",
+      plan.fallbackReason ? `Fallback: ${String(plan.fallbackReason)}` : "",
+      `Steps (${steps.length})`,
+      ...steps.map((step) =>
+        `  - ${String(step.id ?? "")} [${String(step.status ?? "pending")}] ${String(step.kind ?? "")} depends=${String((step.dependsOn as unknown[] | undefined)?.join(",") ?? "none")} task=${String(step.taskId ?? "-")}`,
+      ),
+      `Tasks (${tasks.length})`,
+      ...tasks.slice(0, 8).map((task) =>
+        `  - ${String(task.id ?? "")} [${String(task.status ?? "")}] ${String(task.kind ?? "")}`,
+      ),
+      `Audit (${audit.length})`,
+      ...audit.slice(0, 5).map((entry) => `  - ${String(entry.type ?? "")} ${String(entry.id ?? "")}`),
+    ].filter(Boolean).join("\n");
   }
 }
