@@ -6262,6 +6262,10 @@ def cmd_auth(args):
 
 def cmd_status(args):
     """Show status of all components."""
+    from hermes_cli.agentix_commands import handle_status
+    if handle_status(args):
+        return
+
     from hermes_cli.status import show_status
 
     show_status(args)

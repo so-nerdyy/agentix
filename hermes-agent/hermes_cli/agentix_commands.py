@@ -219,6 +219,50 @@ def handle_doctor(args: Any) -> bool:
     return True
 
 
+def handle_status(args: Any) -> bool:
+    if not using_agentix_backend():
+        return False
+
+    report = _backend().doctor()
+    if not isinstance(report, dict):
+        print("Agentix backend status: UNKNOWN")
+        return True
+
+    counts = report.get("counts") if isinstance(report.get("counts"), dict) else {}
+    config = report.get("config") if isinstance(report.get("config"), dict) else {}
+    checks = list(_iter_entries(report.get("checks")))
+    warnings = [check for check in checks if check.get("status") == "warn"]
+    failures = [check for check in checks if check.get("status") == "fail"]
+
+    print(f"Agentix backend status: {str(report.get('status', 'unknown')).upper()}")
+    print(f"Workspace: {report.get('workspace', 'n/a')}")
+    print(
+        "Runtime: "
+        f"sessions={counts.get('sessions', 0)} "
+        f"tasks={counts.get('tasks', 0)} "
+        f"plans={counts.get('plans', 0)} "
+        f"jobs={counts.get('jobs', 0)} "
+        f"gateways={counts.get('gateways', 0)}"
+    )
+    print(
+        "Model: "
+        f"{config.get('provider', 'n/a')} / {config.get('model', 'n/a')} "
+        f"({'key configured' if config.get('llmApiKeyConfigured') else 'no key'})"
+    )
+    if failures:
+        print("Failures:")
+        for check in failures:
+            print(f"  - {check.get('label', check.get('id', 'check'))}: {check.get('detail', '')}")
+    if warnings:
+        print("Warnings:")
+        for check in warnings[:8]:
+            print(f"  - {check.get('label', check.get('id', 'check'))}: {check.get('detail', '')}")
+    if getattr(args, "all", False) or getattr(args, "deep", False):
+        print()
+        _print_doctor_report(report)
+    return True
+
+
 def handle_oneshot(
     prompt: str,
     model: str | None = None,
