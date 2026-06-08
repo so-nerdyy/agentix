@@ -244,6 +244,25 @@ describe("Powerhouse restored runtime", () => {
     runtime.shutdown();
   });
 
+  it("renames, prunes, and optimizes sessions through the runtime facade", async () => {
+    const runtime = new LocalAgentixRuntime();
+
+    const session = runtime.createSession({ model: "rename-model" });
+    const renamed = runtime.renameSession(session.id, "Renamed Session");
+    const detail = runtime.getSession(session.id);
+    const optimized = runtime.optimizeSessions();
+    const pruned = runtime.pruneSessions({ olderThanDays: 0, source: "agentix-runtime" });
+
+    expect(renamed.ok).toBe(true);
+    expect(detail?.session.metadata.title).toBe("Renamed Session");
+    expect(optimized.ok).toBe(true);
+    expect(pruned.ok).toBe(true);
+    expect(pruned.pruned).toContain(session.id);
+    expect(runtime.listSessions().some((item) => item.id === session.id)).toBe(false);
+
+    runtime.shutdown();
+  });
+
   it("controls task lifecycle through the runtime facade", async () => {
     const runtime = new LocalAgentixRuntime();
 

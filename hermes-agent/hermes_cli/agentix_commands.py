@@ -401,9 +401,38 @@ def handle_sessions(args: Any, sessions_parser: Any = None) -> bool:
         print("\nUse `agentix sessions list` and continue in the normal Agentix shell.")
         return True
 
-    if action in {"rename", "prune", "optimize"}:
-        print(f"Agentix backend does not support `sessions {action}` yet.")
-        print("Use `agentix sessions list|stats|export|delete` for backend-owned sessions.")
+    if action == "rename":
+        session_id = getattr(args, "session_id", "")
+        title = " ".join(getattr(args, "title", []) or []).strip()
+        result = backend.rename_session(session_id, title)
+        if result.get("ok"):
+            print(f"Session '{session_id}' renamed to: {title}")
+        else:
+            print(result.get("error", f"Session not found: {session_id}"))
+        return True
+
+    if action == "prune":
+        if not getattr(args, "yes", False):
+            try:
+                answer = input("Prune Agentix sessions? [y/N] ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                answer = ""
+            if answer not in {"y", "yes"}:
+                print("Cancelled.")
+                return True
+        result = backend.prune_sessions(
+            older_than_days=getattr(args, "older_than", None),
+            source=getattr(args, "source", None),
+        )
+        print(f"Pruned {result.get('count', 0)} Agentix session(s).")
+        return True
+
+    if action == "optimize":
+        result = backend.optimize_sessions()
+        print("Agentix session store optimized.")
+        print(f"  Sessions: {result.get('sessions', 0)}")
+        print(f"  Memory:   {result.get('memory', 0)}")
+        print(f"  Detail:   {result.get('detail', '')}")
         return True
 
     if sessions_parser is not None:

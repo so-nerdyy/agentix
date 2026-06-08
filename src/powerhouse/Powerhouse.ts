@@ -128,6 +128,11 @@ export class Powerhouse {
     EventBus.emit("session:close", { sessionId: id });
   }
 
+  renameSession(id: string, title: string): Session | undefined {
+    this.start();
+    return this.sessions.updateMetadata(id, { title });
+  }
+
   listTasks(sessionId?: string): Task[] {
     return this.taskStore.list(sessionId);
   }

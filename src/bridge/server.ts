@@ -78,6 +78,19 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
     const { id } = request.params as { id: string };
     return runtime.deleteSession(id);
   });
+  server.post("/sessions/:id/rename", async (request) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as Record<string, unknown>;
+    return runtime.renameSession(id, String(body.title ?? ""));
+  });
+  server.post("/sessions/prune", async (request) => {
+    const body = request.body as Record<string, unknown>;
+    return runtime.pruneSessions({
+      olderThanDays: body.olderThanDays === undefined ? undefined : Number(body.olderThanDays),
+      source: body.source === undefined ? undefined : String(body.source),
+    });
+  });
+  server.post("/sessions/optimize", async () => runtime.optimizeSessions());
 
   server.get("/memory/search", async (request, reply) => {
     const q = (request.query as Record<string, string>).q || "";

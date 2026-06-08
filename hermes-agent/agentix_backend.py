@@ -173,6 +173,20 @@ class AgentixBackend:
         self._delete(f"/sessions/{quote(session_id)}")
         return None
 
+    def rename_session(self, session_id: str, title: str) -> Any:
+        return self._post(f"/sessions/{quote(session_id)}/rename", {"title": title})
+
+    def prune_sessions(self, older_than_days: Optional[int] = None, source: Optional[str] = None) -> Any:
+        body: Dict[str, Any] = {}
+        if older_than_days is not None:
+            body["olderThanDays"] = older_than_days
+        if source:
+            body["source"] = source
+        return self._post("/sessions/prune", body)
+
+    def optimize_sessions(self) -> Any:
+        return self._post("/sessions/optimize", {})
+
     def memory_search(self, query: str) -> Any:
         return self._get(f"/memory/search?q={quote(query)}")
 

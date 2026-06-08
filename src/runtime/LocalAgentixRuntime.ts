@@ -300,6 +300,48 @@ export class LocalAgentixRuntime {
     this.powerhouse.closeSession(id);
   }
 
+  renameSession(id: string, title: string): Record<string, unknown> {
+    const session = this.powerhouse.renameSession(id, title);
+    if (!session) return { ok: false, error: `unknown session: ${id}` };
+    return {
+      ok: true,
+      session: {
+        id: session.id,
+        status: session.status,
+        createdAt: new Date(session.createdAt).toISOString(),
+        updatedAt: new Date(session.updatedAt).toISOString(),
+        metadata: session.metadata,
+      },
+    };
+  }
+
+  pruneSessions(opts: { olderThanDays?: number; source?: string } = {}): Record<string, unknown> {
+    this.powerhouse.start();
+    const olderThanDays = Math.max(0, Number(opts.olderThanDays ?? 90));
+    const cutoff = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
+    const source = opts.source?.trim();
+    const pruned: string[] = [];
+    for (const session of this.powerhouse.listSessions()) {
+      if (session.updatedAt > cutoff) continue;
+      if (source && String(session.metadata?.source ?? "") !== source) continue;
+      this.powerhouse.closeSession(session.id);
+      pruned.push(session.id);
+    }
+    return { ok: true, count: pruned.length, pruned, olderThanDays, source: source || null };
+  }
+
+  optimizeSessions(): Record<string, unknown> {
+    this.powerhouse.start();
+    const sessions = this.powerhouse.listSessions().length;
+    const memory = this.powerhouse.memory.list().length;
+    return {
+      ok: true,
+      sessions,
+      memory,
+      detail: "Agentix sessions are JSON-backed; no database vacuum is required.",
+    };
+  }
+
   memorySearch(query: string): Array<{ content: string; score: number }> {
     return this.powerhouse.memory.search(query);
   }

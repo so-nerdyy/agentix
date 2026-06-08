@@ -111,6 +111,18 @@ export class AgentixBackend {
     }
   }
 
+  async renameSession(id: string, title: string): Promise<Record<string, unknown>> {
+    return this.post(`/sessions/${encodeURIComponent(id)}/rename`, { title });
+  }
+
+  async pruneSessions(input: { olderThanDays?: number; source?: string }): Promise<Record<string, unknown>> {
+    return this.post("/sessions/prune", input);
+  }
+
+  async optimizeSessions(): Promise<Record<string, unknown>> {
+    return this.post("/sessions/optimize", {});
+  }
+
   async memorySearch(query: string): Promise<Array<{ content: string; score: number }>> {
     return this.get(`/memory/search?q=${encodeURIComponent(query)}`);
   }

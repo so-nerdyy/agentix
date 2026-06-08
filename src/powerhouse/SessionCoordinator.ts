@@ -46,6 +46,15 @@ export class SessionCoordinator {
     this.persist(s);
   }
 
+  updateMetadata(id: string, metadata: Record<string, unknown>): Session | undefined {
+    const s = this.byId.get(id);
+    if (!s) return undefined;
+    s.metadata = { ...s.metadata, ...metadata };
+    s.updatedAt = Date.now();
+    this.persist(s);
+    return s;
+  }
+
   addPendingTask(sessionId: string, taskId: string): void {
     const s = this.byId.get(sessionId);
     if (!s) return;
