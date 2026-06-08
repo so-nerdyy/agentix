@@ -4,7 +4,7 @@ Agentix is a Hermes-class agent platform with an Agentix-owned backend.
 
 - Hermes owns the user-facing shell, setup wizard, update flow, cron UX, gateway UX, and command surface.
 - Agentix owns LLM-backed Symphony planning, task orchestration, validation, approvals, memory, healing, Pi agents, and runtime services.
-- The web dashboard lives at `/ui` when `agentix server` is running.
+- The web dashboard lives at `/ui` when `agentix server` is running, with live task, Symphony plan, approval, healing, memory, gateway, scheduler, audit, log, and support-bundle controls.
 
 ## Quick Start
 

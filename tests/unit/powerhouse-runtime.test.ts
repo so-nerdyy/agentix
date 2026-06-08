@@ -133,6 +133,9 @@ describe("Powerhouse restored runtime", () => {
     expect(result.status).toBe("complete");
     expect(runtime.listSessions().some((item) => item.id === session.id)).toBe(true);
     expect(runtime.listTasks(session.id)).toHaveLength(1);
+    const sessionPlans = runtime.listPlans().filter((plan) => plan.sessionId === session.id);
+    expect(sessionPlans).toHaveLength(1);
+    expect(runtime.getPlan(String(sessionPlans[0]?.id))?.steps).toHaveLength(1);
     expect(runtime.listMemory(session.id).some((item) => String(item.content).includes("test runtime facade"))).toBe(true);
     expect(runtime.listTools().some((tool) => tool.name === "user-message")).toBe(true);
     expect(Array.isArray(runtime.listApprovals())).toBe(true);
@@ -215,9 +218,11 @@ describe("Powerhouse restored runtime", () => {
     expect(Array.isArray(taskSearch.audit)).toBe(true);
     expect(Array.isArray(taskSearch.logs)).toBe(true);
     expect(Array.isArray(taskSearch.jobs)).toBe(true);
+    expect(Array.isArray(taskSearch.plans)).toBe(true);
     expect(Array.isArray(taskSearch.healing)).toBe(true);
     expect(Array.isArray(taskSearch.gateways)).toBe(true);
     expect(taskSearch.tasks.length).toBeGreaterThan(0);
+    expect(taskSearch.plans.length).toBeGreaterThan(0);
     expect(sessionSearch.sessions.some((item) => item.id === session.id)).toBe(true);
 
     runtime.shutdown();

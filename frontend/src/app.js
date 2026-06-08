@@ -4,6 +4,7 @@ const state = {
   sessionId: localStorage.getItem("agentix.sessionId") || "",
   selectedSessionId: localStorage.getItem("agentix.selectedSessionId") || "",
   selectedTaskId: localStorage.getItem("agentix.selectedTaskId") || "",
+  selectedPlanId: localStorage.getItem("agentix.selectedPlanId") || "",
   taskFilter: localStorage.getItem("agentix.taskFilter") || "",
   taskStatusFilter: localStorage.getItem("agentix.taskStatusFilter") || "",
   approvalFilter: localStorage.getItem("agentix.approvalFilter") || "",
@@ -11,6 +12,9 @@ const state = {
   searchResults: null,
   sessions: [],
   tasks: [],
+  plans: [],
+  planDetail: null,
+  planDetailLoading: false,
   tools: [],
   selectedToolId: localStorage.getItem("agentix.selectedToolId") || "",
   approvals: [],
@@ -63,6 +67,8 @@ const refs = {
   connectEventsButton: el("connectEventsButton"),
   clearEventsButton: el("clearEventsButton"),
   reloadTasksButton: el("reloadTasksButton"),
+  reloadPlansButton: el("reloadPlansButton"),
+  planDetail: el("planDetail"),
   reloadToolsButton: el("reloadToolsButton"),
   toolDetail: el("toolDetail"),
   reloadApprovalsButton: el("reloadApprovalsButton"),
@@ -94,6 +100,7 @@ const refs = {
   searchInput: el("searchInput"),
   searchSummary: el("searchSummary"),
   searchTasksList: el("searchTasksList"),
+  searchPlansList: el("searchPlansList"),
   searchSessionsList: el("searchSessionsList"),
   searchMemoryList: el("searchMemoryList"),
   searchLogsList: el("searchLogsList"),
@@ -114,6 +121,7 @@ const refs = {
   eventStream: el("eventStream"),
   tasksList: el("tasksList"),
   taskDetail: el("taskDetail"),
+  plansList: el("plansList"),
   toolsList: el("toolsList"),
   approvalsList: el("approvalsList"),
   jobsList: el("jobsList"),
@@ -131,6 +139,7 @@ const refs = {
 const viewTitles = {
   live: "Live activity",
   tasks: "Tasks and state",
+  plans: "Symphony plans",
   search: "Global search",
   tools: "Tools and capabilities",
   approvals: "Approval queue",
@@ -183,6 +192,7 @@ function setSessionId(id) {
 
 function saveFilterState() {
   localStorage.setItem("agentix.selectedTaskId", state.selectedTaskId || "");
+  localStorage.setItem("agentix.selectedPlanId", state.selectedPlanId || "");
   localStorage.setItem("agentix.selectedSessionId", state.selectedSessionId || "");
   localStorage.setItem("agentix.selectedJobId", state.selectedJobId || "");
   localStorage.setItem("agentix.selectedGatewayId", state.selectedGatewayId || "");
@@ -239,6 +249,7 @@ function paletteItems() {
     { title: "Live activity", hint: "Go to the live event stream", action: () => setView("live"), keywords: ["live", "events", "stream"] },
     { title: "Search", hint: "Search tasks, sessions, memory, logs, and jobs", action: () => setView("search"), keywords: ["search", "find", "query"] },
     { title: "Tasks", hint: "Inspect and control tasks", action: () => setView("tasks"), keywords: ["task", "tasks", "inspect"] },
+    { title: "Plans", hint: "Inspect Symphony plans and step execution", action: () => setView("plans"), keywords: ["plan", "plans", "symphony", "steps"] },
     { title: "Tools", hint: "View available tools", action: () => setView("tools"), keywords: ["tool", "tools"] },
     { title: "Approvals", hint: "Open approval queue", action: () => setView("approvals"), keywords: ["approval", "approve", "reject"] },
     { title: "Scheduler", hint: "Manage scheduled jobs", action: () => setView("scheduler"), keywords: ["scheduler", "cron", "job"] },
@@ -375,6 +386,7 @@ function renderStats() {
   const stats = [
     ["Session", state.sessionId || "none", state.health?.version || "Agentix"],
     ["Tasks", String(state.tasks.length), `${state.tasks.filter((task) => task.status !== "complete").length} open`],
+    ["Plans", String(state.plans.length), `${state.plans.filter((plan) => plan.status === "awaiting-approval").length} paused`],
     ["Approvals", String(state.approvals.length), "awaiting decisions"],
     ["Scheduler", String(state.jobs.length), `${state.jobs.filter((job) => job.enabled).length} enabled`],
     ["Gateway", String(state.gateways.length), `${state.gateways.filter((gateway) => gateway.enabled).length} enabled`],
@@ -400,12 +412,94 @@ function taskCard(task) {
         <span class="pill">${escapeHtml(task.status)}</span>
         ${task.requiresApproval ? '<span class="pill danger">approval</span>' : ""}
       </div>
-      <div class="meta">${escapeHtml(task.id)} / ${escapeHtml(task.sessionId)}</div>
+      <div class="meta">${escapeHtml(task.id)} / ${escapeHtml(task.sessionId)}${task.planId ? ` / ${escapeHtml(task.planId)}` : ""}${task.stepId ? ` / step ${escapeHtml(task.stepId)}` : ""}</div>
       <div class="muted">${escapeHtml(JSON.stringify(task.payload, null, 2))}</div>
       <div class="meta">created ${fmtTime(task.createdAt)}${task.finishedAt ? ` · finished ${fmtTime(task.finishedAt)}` : ""}</div>
       <div class="row">
         <button class="ghost" data-action="select-task" data-id="${escapeHtml(task.id)}">Focus</button>
       </div>
+    </div>
+  `;
+}
+
+function planCard(plan) {
+  const tone = plan.status === "complete" ? "success" : plan.status === "failed" ? "danger" : "warn";
+  const progress = `${plan.completedSteps || 0}/${plan.stepCount || 0} steps`;
+  return `
+    <div class="card ${state.selectedPlanId === plan.id ? "selected" : ""}">
+      <div class="row">
+        <h4>${escapeHtml(plan.id)}</h4>
+        <span class="pill ${tone}">${escapeHtml(plan.status)}</span>
+        <span class="pill">${escapeHtml(plan.planner || "planner")}</span>
+      </div>
+      <div class="meta">${escapeHtml(plan.sessionId)} · ${progress} · ${plan.taskCount || 0} tasks</div>
+      <div class="muted">${escapeHtml(plan.stimulus || "")}</div>
+      <div class="meta">updated ${fmtTime(plan.updatedAt)}${plan.awaitingApprovals ? ` · approvals ${plan.awaitingApprovals}` : ""}${plan.failedTasks ? ` · failed ${plan.failedTasks}` : ""}</div>
+      <div class="row">
+        <button class="primary" data-action="inspect-plan" data-id="${escapeHtml(plan.id)}">Inspect</button>
+      </div>
+    </div>
+  `;
+}
+
+function planDetailCard() {
+  if (state.planDetailLoading) {
+    return '<div class="card muted">Loading plan details...</div>';
+  }
+  if (!state.planDetail) {
+    return '<div class="card muted">Select a Symphony plan to inspect step dependencies, task state, audit, and logs.</div>';
+  }
+  const { execution, steps, audit, logs } = state.planDetail;
+  return `
+    <div class="card selected">
+      <div class="row">
+        <h4>${escapeHtml(execution.id)}</h4>
+        <span class="pill ${execution.status === "complete" ? "success" : execution.status === "failed" ? "danger" : "warn"}">${escapeHtml(execution.status)}</span>
+        <span class="pill">${escapeHtml(execution.planner)}</span>
+      </div>
+      <div class="meta">${escapeHtml(execution.sessionId)} · ${execution.stepCount} steps · ${execution.taskCount} tasks</div>
+      <div class="muted">${escapeHtml(execution.stimulus)}</div>
+      ${execution.reasoning ? `<div class="muted">Reasoning: ${escapeHtml(execution.reasoning)}</div>` : ""}
+      ${execution.fallbackReason ? `<div class="muted danger-text">Fallback: ${escapeHtml(execution.fallbackReason)}</div>` : ""}
+      <div class="panel-section">
+        <div class="eyebrow">Step timeline</div>
+        <div class="plan-timeline">
+          ${steps.map(planStepCard).join("")}
+        </div>
+      </div>
+      <div class="panel-section">
+        <div class="eyebrow">Audit</div>
+        <div class="list">${audit.length ? audit.map(auditCard).join("") : '<div class="card muted">No audit entries recorded for this plan.</div>'}</div>
+      </div>
+      <div class="panel-section">
+        <div class="eyebrow">Logs</div>
+        <div class="list">${logs.length ? logs.map((entry, index) => logCard(entry, index)).join("") : '<div class="card muted">No logs recorded for this plan.</div>'}</div>
+      </div>
+    </div>
+  `;
+}
+
+function planStepCard(step) {
+  const task = step.task;
+  const status = task?.status || "pending";
+  const tone = status === "complete" ? "success" : status === "failed" ? "danger" : status === "awaiting-approval" ? "warn" : "";
+  return `
+    <div class="plan-step ${tone}">
+      <div class="row">
+        <strong>${escapeHtml(step.id)}</strong>
+        <span class="pill">${escapeHtml(step.kind)}</span>
+        <span class="pill ${tone}">${escapeHtml(status)}</span>
+        ${step.requiresApproval ? '<span class="pill danger">approval</span>' : ""}
+      </div>
+      <div class="meta">depends on ${escapeHtml(step.dependsOn?.join(", ") || "nothing")} · max attempts ${step.maxAttempts}</div>
+      <div class="muted">${escapeHtml(JSON.stringify(step.payload, null, 2))}</div>
+      ${
+        task
+          ? `<div class="meta">task ${escapeHtml(task.id)} · started ${fmtTime(task.startedAt)} · finished ${fmtTime(task.finishedAt)}</div>
+             ${task.error ? `<div class="muted danger-text">${escapeHtml(task.error)}</div>` : ""}
+             <div class="row"><button class="ghost" data-action="select-task" data-id="${escapeHtml(task.id)}">Open task</button></div>`
+          : '<div class="meta">No task has been created for this step yet.</div>'
+      }
     </div>
   `;
 }
@@ -1117,6 +1211,13 @@ function renderLists() {
   if (state.selectedTaskId && (!state.taskDetail || state.taskDetail.task.id !== state.selectedTaskId) && !state.taskDetailLoading) {
     void loadTaskDetail(state.selectedTaskId);
   }
+  if (!state.selectedPlanId && state.plans[0]?.id) {
+    state.selectedPlanId = state.plans[0].id;
+    saveFilterState();
+  }
+  if (state.selectedPlanId && (!state.planDetail || state.planDetail.execution.id !== state.selectedPlanId) && !state.planDetailLoading) {
+    void loadPlanDetail(state.selectedPlanId);
+  }
   if (state.selectedSessionId && (!state.sessionDetail || state.sessionDetail.session.id !== state.selectedSessionId) && !state.sessionDetailLoading) {
     void loadSessionDetail(state.selectedSessionId);
   }
@@ -1157,6 +1258,8 @@ function renderLists() {
   }
   refs.taskDetail.innerHTML = taskDetailCard();
   refs.tasksList.innerHTML = visibleTasks.map(taskCard).join("") || '<div class="card muted">No tasks match the current filters.</div>';
+  refs.planDetail.innerHTML = planDetailCard();
+  refs.plansList.innerHTML = state.plans.map(planCard).join("") || '<div class="card muted">No Symphony plans recorded yet.</div>';
   refs.toolDetail.innerHTML = toolDetailCard();
   refs.toolsList.innerHTML = state.tools.map(toolCard).join("") || '<div class="card muted">No tools loaded yet.</div>';
   refs.approvalDetail.innerHTML = approvalDetailCard();
@@ -1294,6 +1397,22 @@ function searchCard(item, kind) {
       </div>
     `;
   }
+  if (kind === "plan") {
+    return `
+      <div class="card">
+        <div class="row">
+          <h4>${escapeHtml(item.id)}</h4>
+          <span class="pill">${escapeHtml(item.status)}</span>
+          <span class="pill">${escapeHtml(item.planner)}</span>
+        </div>
+        <div class="meta">${escapeHtml(item.sessionId)} · ${item.stepCount || 0} steps · ${item.taskCount || 0} tasks</div>
+        <div class="muted">${escapeHtml(item.stimulus || "")}</div>
+        <div class="row">
+          <button class="ghost" data-action="search-open-plan" data-id="${escapeHtml(item.id)}">Open</button>
+        </div>
+      </div>
+    `;
+  }
   if (kind === "gateway") {
     return `
       <div class="card">
@@ -1378,6 +1497,7 @@ function renderSearch() {
   if (!results) {
     refs.searchSummary.textContent = "Search the runtime to find tasks, sessions, memory, logs, jobs, healing records, and gateways.";
     refs.searchTasksList.innerHTML = "";
+    refs.searchPlansList.innerHTML = "";
     refs.searchSessionsList.innerHTML = "";
     refs.searchMemoryList.innerHTML = "";
     refs.searchLogsList.innerHTML = "";
@@ -1389,6 +1509,7 @@ function renderSearch() {
   }
   refs.searchSummary.textContent = `Results for "${results.query}"`;
   refs.searchTasksList.innerHTML = (results.tasks || []).map((item) => searchCard(item, "task")).join("") || '<div class="card muted">No tasks matched.</div>';
+  refs.searchPlansList.innerHTML = (results.plans || []).map((item) => searchCard(item, "plan")).join("") || '<div class="card muted">No plans matched.</div>';
   refs.searchSessionsList.innerHTML = (results.sessions || []).map((item) => searchCard(item, "session")).join("") || '<div class="card muted">No sessions matched.</div>';
   refs.searchMemoryList.innerHTML = (results.memory || []).map((item) => searchCard(item, "memory")).join("") || '<div class="card muted">No memory records matched.</div>';
   refs.searchLogsList.innerHTML = (results.logs || []).map((item) => searchCard(item, "log")).join("") || '<div class="card muted">No logs matched.</div>';
@@ -1400,10 +1521,11 @@ function renderSearch() {
 
 async function refreshAll() {
   try {
-    const [health, sessions, tasks, tools, logs, approvals, jobs, audit, healing, gateways] = await Promise.all([
+    const [health, sessions, tasks, plans, tools, logs, approvals, jobs, audit, healing, gateways] = await Promise.all([
       api("/health"),
       api("/sessions"),
       api(`/tasks${state.sessionId ? `?sessionId=${encodeURIComponent(state.sessionId)}` : ""}`),
+      api("/plans").catch(() => []),
       api("/tools").catch(() => []),
       api("/logs").catch(() => []),
       api("/approvals"),
@@ -1415,6 +1537,7 @@ async function refreshAll() {
     state.health = health;
     state.sessions = sessions || [];
     state.tasks = tasks || [];
+    state.plans = plans || [];
     state.tools = tools || [];
     state.logs = logs || [];
     state.approvals = approvals || [];
@@ -1438,6 +1561,11 @@ async function refreshAll() {
       await loadTaskDetail(state.selectedTaskId);
     } else {
       state.taskDetail = null;
+    }
+    if (state.selectedPlanId) {
+      await loadPlanDetail(state.selectedPlanId);
+    } else {
+      state.planDetail = null;
     }
     if (!state.selectedGatewayId && state.gateways[0]?.id) {
       state.selectedGatewayId = state.gateways[0].id;
@@ -1486,6 +1614,25 @@ async function loadTaskDetail(taskId) {
     appendEvent("task detail failed", err instanceof Error ? err.message : String(err), "danger");
   } finally {
     state.taskDetailLoading = false;
+    renderLists();
+  }
+}
+
+async function loadPlanDetail(planId) {
+  if (!planId) {
+    state.planDetail = null;
+    state.planDetailLoading = false;
+    return;
+  }
+  state.planDetailLoading = true;
+  renderLists();
+  try {
+    state.planDetail = await api(`/plans/${encodeURIComponent(planId)}`);
+  } catch (err) {
+    state.planDetail = null;
+    appendEvent("plan detail failed", err instanceof Error ? err.message : String(err), "danger");
+  } finally {
+    state.planDetailLoading = false;
     renderLists();
   }
 }
@@ -1787,6 +1934,10 @@ async function handleSlash(text) {
       setView("tasks");
       await refreshAll();
       break;
+    case "plans":
+      setView("plans");
+      await refreshAll();
+      break;
     case "tools":
       setView("tools");
       await refreshAll();
@@ -1928,6 +2079,11 @@ async function clickAction(event) {
       saveFilterState();
       setView("tools");
       await loadToolDetail(id);
+    } else if (action === "inspect-plan") {
+      state.selectedPlanId = id;
+      saveFilterState();
+      setView("plans");
+      await loadPlanDetail(id);
     } else if (action === "delete-job") {
       await api(`/scheduler/jobs/${encodeURIComponent(id)}`, { method: "DELETE" });
     } else if (action === "promote-proc") {
@@ -1967,6 +2123,11 @@ async function clickAction(event) {
       saveFilterState();
       setView("tasks");
       await loadTaskDetail(id);
+    } else if (action === "search-open-plan") {
+      state.selectedPlanId = id;
+      saveFilterState();
+      setView("plans");
+      await loadPlanDetail(id);
     } else if (action === "search-open-session") {
       setSessionId(id);
       setView("sessions");
@@ -2047,7 +2208,7 @@ function boot() {
     button.addEventListener("click", () => {
       refs.composeInput.value = button.dataset.quick;
       const quick = button.dataset.quick?.replace(/^\//, "") || "compose";
-      setView(quick === "scheduler" ? "scheduler" : quick === "support" ? "support" : quick === "logs" ? "logs" : quick === "memory" ? "memory" : quick === "tasks" ? "tasks" : quick === "tools" ? "tools" : quick === "approvals" ? "approvals" : quick === "gateway" ? "gateway" : quick);
+      setView(quick === "scheduler" ? "scheduler" : quick === "support" ? "support" : quick === "logs" ? "logs" : quick === "memory" ? "memory" : quick === "plans" ? "plans" : quick === "tasks" ? "tasks" : quick === "tools" ? "tools" : quick === "approvals" ? "approvals" : quick === "gateway" ? "gateway" : quick);
     });
   });
   refs.saveTokenButton.addEventListener("click", async () => {
@@ -2065,6 +2226,7 @@ function boot() {
     renderHistory();
   });
   refs.reloadTasksButton.addEventListener("click", refreshAll);
+  refs.reloadPlansButton.addEventListener("click", refreshAll);
   refs.reloadSearchButton.addEventListener("click", refreshAll);
   refs.reloadToolsButton.addEventListener("click", refreshAll);
   refs.reloadApprovalsButton.addEventListener("click", refreshAll);
@@ -2187,11 +2349,11 @@ function boot() {
         "1": "live",
         "2": "search",
         "3": "tasks",
-        "4": "tools",
-        "5": "approvals",
-        "6": "scheduler",
-        "7": "gateway",
-        "8": "memory",
+        "4": "plans",
+        "5": "tools",
+        "6": "approvals",
+        "7": "scheduler",
+        "8": "gateway",
         "9": "healing",
         "0": "compose",
       };

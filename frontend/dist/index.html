@@ -34,6 +34,7 @@
           <button class="nav active" data-view="live">Live</button>
           <button class="nav" data-view="search">Search</button>
           <button class="nav" data-view="tasks">Tasks</button>
+          <button class="nav" data-view="plans">Plans</button>
           <button class="nav" data-view="tools">Tools</button>
           <button class="nav" data-view="approvals">Approvals</button>
           <button class="nav" data-view="scheduler">Scheduler</button>
@@ -52,12 +53,13 @@
             <div>
               <div class="eyebrow">Command surface</div>
               <h2 id="viewTitle">Live activity</h2>
-              <div class="muted">Shortcuts: Alt+1 Live · Alt+2 Search · Alt+3 Tasks · Alt+4 Tools · Alt+5 Approvals · Alt+6 Scheduler · Alt+7 Gateway · Alt+8 Memory · Alt+9 Healing · Alt+0 Compose</div>
+              <div class="muted">Shortcuts: Alt+1 Live · Alt+2 Search · Alt+3 Tasks · Alt+4 Plans · Alt+5 Tools · Alt+6 Approvals · Alt+7 Scheduler · Alt+8 Gateway · Alt+9 Healing · Alt+0 Compose</div>
             </div>
             <div class="hero-actions">
               <button class="ghost" id="openPaletteButton" type="button">Command palette</button>
               <button class="ghost" data-quick="/search">/search</button>
               <button class="ghost" data-quick="/tasks">/tasks</button>
+              <button class="ghost" data-quick="/plans">/plans</button>
               <button class="ghost" data-quick="/tools">/tools</button>
               <button class="ghost" data-quick="/approvals">/approvals</button>
               <button class="ghost" data-quick="/scheduler">/scheduler</button>
@@ -97,6 +99,10 @@
               <div class="panel-section">
                 <div class="eyebrow">Tasks</div>
                 <div class="list" id="searchTasksList"></div>
+              </div>
+              <div class="panel-section">
+                <div class="eyebrow">Plans</div>
+                <div class="list" id="searchPlansList"></div>
               </div>
               <div class="panel-section">
                 <div class="eyebrow">Sessions</div>
@@ -149,6 +155,17 @@
               </div>
               <div id="taskDetail" class="detail"></div>
               <div class="list" id="tasksList"></div>
+            </article>
+
+            <article class="panel" data-panel="plans">
+              <div class="panel-head">
+                <h3>Plans</h3>
+                <div class="panel-tools">
+                  <button class="ghost" id="reloadPlansButton" type="button">Reload</button>
+                </div>
+              </div>
+              <div id="planDetail" class="detail"></div>
+              <div class="list" id="plansList"></div>
             </article>
 
             <article class="panel" data-panel="tools">

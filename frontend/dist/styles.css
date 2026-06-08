@@ -416,6 +416,36 @@ button:hover {
   margin-top: 4px;
 }
 
+.plan-timeline {
+  display: grid;
+  gap: 10px;
+  position: relative;
+}
+
+.plan-step {
+  position: relative;
+  padding: 14px 14px 14px 18px;
+  border: 1px solid var(--border);
+  border-left: 4px solid rgba(148, 166, 191, 0.45);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.01)),
+    var(--bg-alt);
+  display: grid;
+  gap: 8px;
+}
+
+.plan-step.success {
+  border-left-color: var(--success);
+}
+
+.plan-step.warn {
+  border-left-color: var(--accent-2);
+}
+
+.plan-step.danger {
+  border-left-color: var(--danger);
+}
+
 #supportSummary {
   white-space: pre-wrap;
 }

@@ -115,6 +115,16 @@ export async function startInboxServer(opts: { port?: number; host?: string } = 
     }
     return runtime.controlTask(id, body.action as never);
   });
+  server.get("/plans", async () => runtime.listPlans());
+  server.get("/plans/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const plan = runtime.getPlan(id);
+    if (!plan) {
+      reply.status(404);
+      return { error: `unknown plan: ${id}` };
+    }
+    return plan;
+  });
   server.get("/tools", async () => runtime.listTools());
   server.get("/tools/:id", async (request, reply) => {
     const { id } = request.params as { id: string };

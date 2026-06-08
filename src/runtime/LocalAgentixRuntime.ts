@@ -37,6 +37,17 @@ export type RuntimeSearchResults = {
     skills: string[];
     runCount: number;
   }>;
+  plans: Array<{
+    id: string;
+    sessionId: string;
+    status: string;
+    planner: string;
+    stimulus: string;
+    stepCount: number;
+    taskCount: number;
+    createdAt: string;
+    updatedAt: string;
+  }>;
   healing: Array<{ fingerprint: string; count: number; firstSeenAt: string; lastSeenAt: string; lastError: string }>;
   gateways: Array<{ id: string; platform: string; name: string; enabled: boolean; status: string; endpoint: string | null; tokenConfigured: boolean; messageCount: number; lastSeenAt: string | null; lastError: string | null }>;
 };
@@ -222,6 +233,43 @@ export type RuntimeGatewayDetail = {
   logs: Array<Record<string, unknown>>;
 };
 
+export type RuntimePlanDetail = {
+  execution: {
+    id: string;
+    sessionId: string;
+    status: string;
+    planner: string;
+    reasoning: string | null;
+    fallbackReason: string | null;
+    stimulus: string;
+    stepCount: number;
+    taskCount: number;
+    createdAt: string;
+    updatedAt: string;
+  };
+  steps: Array<{
+    id: string;
+    kind: string;
+    priority: string;
+    dependsOn: string[];
+    requiresApproval: boolean;
+    maxAttempts: number;
+    payload: Record<string, unknown>;
+    task: {
+      id: string;
+      status: string;
+      error: string | null;
+      result: unknown;
+      createdAt: string;
+      startedAt: string | null;
+      finishedAt: string | null;
+    } | null;
+  }>;
+  tasks: Array<Record<string, unknown>>;
+  audit: Array<Record<string, unknown>>;
+  logs: Array<Record<string, unknown>>;
+};
+
 export class LocalAgentixRuntime {
   private readonly powerhouse = new Powerhouse();
   private readonly scheduler = new SchedulerService(this.powerhouse);
@@ -331,6 +379,7 @@ export class LocalAgentixRuntime {
         audit: [],
         logs: [],
         jobs: [],
+        plans: [],
         healing: [],
         gateways: [],
       };
@@ -427,6 +476,22 @@ export class LocalAgentixRuntime {
         runCount: job.runCount,
       }));
 
+    const plans = this.powerhouse
+      .planStore
+      .list()
+      .filter((execution) => matchesRecord(execution))
+      .map((execution) => ({
+        id: execution.plan.id,
+        sessionId: execution.sessionId,
+        status: execution.status,
+        planner: execution.plan.planner,
+        stimulus: execution.plan.stimulus,
+        stepCount: execution.plan.steps.length,
+        taskCount: execution.taskIds.length,
+        createdAt: new Date(execution.createdAt).toISOString(),
+        updatedAt: new Date(execution.updatedAt).toISOString(),
+      }));
+
     const healing = this.powerhouse
       .healing
       .list()
@@ -463,6 +528,7 @@ export class LocalAgentixRuntime {
       audit,
       logs,
       jobs,
+      plans,
       healing,
       gateways,
     };
@@ -473,6 +539,8 @@ export class LocalAgentixRuntime {
       id: task.id,
       sessionId: task.sessionId,
       kind: task.kind,
+      planId: task.planId ?? null,
+      stepId: task.stepId ?? null,
       status: task.status,
       requiresApproval: task.requiresApproval,
       createdAt: new Date(task.createdAt).toISOString(),
@@ -480,6 +548,103 @@ export class LocalAgentixRuntime {
       finishedAt: task.finishedAt ? new Date(task.finishedAt).toISOString() : null,
       error: task.error ?? null,
     }));
+  }
+
+  listPlans(): Array<Record<string, unknown>> {
+    return this.powerhouse.planStore.list().map((execution) => {
+      const tasks = this.powerhouse.listTasks().filter((task) => task.planId === execution.plan.id);
+      return {
+        id: execution.plan.id,
+        sessionId: execution.sessionId,
+        status: execution.status,
+        planner: execution.plan.planner,
+        reasoning: execution.plan.reasoning ?? null,
+        fallbackReason: execution.plan.fallbackReason ?? null,
+        stimulus: execution.plan.stimulus,
+        stepCount: execution.plan.steps.length,
+        taskCount: execution.taskIds.length,
+        completedSteps: tasks.filter((task) => task.status === "complete").length,
+        awaitingApprovals: tasks.filter((task) => task.status === "awaiting-approval").length,
+        failedTasks: tasks.filter((task) => task.status === "failed").length,
+        createdAt: new Date(execution.createdAt).toISOString(),
+        updatedAt: new Date(execution.updatedAt).toISOString(),
+      };
+    });
+  }
+
+  getPlan(planId: string): RuntimePlanDetail | null {
+    this.powerhouse.start();
+    const execution = this.powerhouse.planStore.get(planId);
+    if (!execution) return null;
+    const tasks = this.powerhouse
+      .listTasks()
+      .filter((task) => task.planId === planId);
+    const taskByStep = new Map(tasks.filter((task) => task.stepId).map((task) => [task.stepId!, task]));
+    const normalizedTasks = tasks.map((task) => ({
+      ...task,
+      createdAt: new Date(task.createdAt).toISOString(),
+      startedAt: task.startedAt ? new Date(task.startedAt).toISOString() : null,
+      finishedAt: task.finishedAt ? new Date(task.finishedAt).toISOString() : null,
+      error: task.error ?? null,
+    }));
+    const audit = this.powerhouse
+      .audit
+      .list(250)
+      .filter((entry) =>
+        entry.subjectId === planId ||
+        entry.data?.planId === planId ||
+        tasks.some((task) => task.id === entry.subjectId),
+      )
+      .map((entry) => ({ ...entry }));
+    const logs = this.runtimeLogs
+      .list(250)
+      .filter((entry) =>
+        String(entry.message ?? "").includes(planId) ||
+        tasks.some((task) => String(entry.message ?? "").includes(task.id)),
+      )
+      .map((entry) => ({ ...entry }));
+
+    return {
+      execution: {
+        id: execution.plan.id,
+        sessionId: execution.sessionId,
+        status: execution.status,
+        planner: execution.plan.planner,
+        reasoning: execution.plan.reasoning ?? null,
+        fallbackReason: execution.plan.fallbackReason ?? null,
+        stimulus: execution.plan.stimulus,
+        stepCount: execution.plan.steps.length,
+        taskCount: execution.taskIds.length,
+        createdAt: new Date(execution.createdAt).toISOString(),
+        updatedAt: new Date(execution.updatedAt).toISOString(),
+      },
+      steps: execution.plan.steps.map((step) => {
+        const task = taskByStep.get(step.id);
+        return {
+          id: step.id,
+          kind: step.kind,
+          priority: step.priority,
+          dependsOn: step.dependsOn,
+          requiresApproval: step.requiresApproval,
+          maxAttempts: step.maxAttempts,
+          payload: step.payload,
+          task: task
+            ? {
+                id: task.id,
+                status: task.status,
+                error: task.error ?? null,
+                result: task.result,
+                createdAt: new Date(task.createdAt).toISOString(),
+                startedAt: task.startedAt ? new Date(task.startedAt).toISOString() : null,
+                finishedAt: task.finishedAt ? new Date(task.finishedAt).toISOString() : null,
+              }
+            : null,
+        };
+      }),
+      tasks: normalizedTasks,
+      audit,
+      logs,
+    };
   }
 
   getSession(sessionId: string): RuntimeSessionDetail | null {
