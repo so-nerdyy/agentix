@@ -91,6 +91,8 @@ const refs = {
   diagnosticsSummary: el("diagnosticsSummary"),
   diagnosticsList: el("diagnosticsList"),
   reloadSessionsButton: el("reloadSessionsButton"),
+  pruneSessionsButton: el("pruneSessionsButton"),
+  optimizeSessionsButton: el("optimizeSessionsButton"),
   sessionDetail: el("sessionDetail"),
   consolidateButton: el("consolidateButton"),
   newSessionButton: el("newSessionButton"),
@@ -1178,16 +1180,19 @@ function diagnosticsSummaryText() {
 }
 
 function sessionCard(session) {
+  const title = session.metadata?.title;
+  const source = session.metadata?.source;
   return `
     <div class="card ${state.selectedSessionId === session.id ? "selected" : ""}">
       <div class="row">
-        <h4>${escapeHtml(session.id)}</h4>
+        <h4>${escapeHtml(title || session.id)}</h4>
         <span class="pill">${escapeHtml(session.status || "active")}</span>
       </div>
-      <div class="meta">created ${fmtTime(session.createdAt)}</div>
+      <div class="meta">${escapeHtml(session.id)} - created ${fmtTime(session.createdAt)}${source ? ` - ${escapeHtml(source)}` : ""}</div>
       <div class="row">
         <button class="primary" data-action="inspect-session" data-id="${escapeHtml(session.id)}">Inspect</button>
         <button class="ghost" data-action="select-session" data-id="${escapeHtml(session.id)}">Use</button>
+        <button class="ghost" data-action="rename-session" data-id="${escapeHtml(session.id)}">Rename</button>
         <button class="ghost" data-action="delete-session" data-id="${escapeHtml(session.id)}">Close</button>
       </div>
     </div>
@@ -1212,6 +1217,7 @@ function sessionDetailCard() {
       <div class="muted"><pre>${escapeHtml(JSON.stringify(session.metadata || {}, null, 2))}</pre></div>
       <div class="row">
         <button class="primary" data-action="select-session" data-id="${escapeHtml(session.id)}">Use in composer</button>
+        <button class="ghost" data-action="rename-session" data-id="${escapeHtml(session.id)}">Rename</button>
         <button class="ghost" data-action="delete-session" data-id="${escapeHtml(session.id)}">Close</button>
       </div>
       <div class="panel-section">
@@ -2239,6 +2245,22 @@ async function clickAction(event) {
         await navigator.clipboard.writeText(JSON.stringify(task, null, 2));
         appendEvent("task copied", `Copied ${id} JSON to clipboard`, "success");
       }
+    } else if (action === "rename-session") {
+      const current = state.sessions.find((session) => session.id === id) || state.sessionDetail?.session;
+      const previous = current?.metadata?.title || "";
+      const title = prompt("Session title", previous);
+      if (title === null) return;
+      const trimmed = title.trim();
+      if (!trimmed) {
+        appendEvent("rename skipped", "Session title cannot be empty.", "warn");
+        return;
+      }
+      await api(`/sessions/${encodeURIComponent(id)}/rename`, {
+        method: "POST",
+        body: JSON.stringify({ title: trimmed }),
+      });
+      appendEvent("session renamed", `${id} -> ${trimmed}`, "success");
+      await loadSessionDetail(id);
     } else if (action === "delete-session") {
       await api(`/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
       if (state.sessionId === id) setSessionId("");
@@ -2298,6 +2320,28 @@ function boot() {
   refs.reloadAuditButton.addEventListener("click", refreshAll);
   refs.reloadLogsButton.addEventListener("click", refreshAll);
   refs.reloadDiagnosticsButton.addEventListener("click", loadDiagnostics);
+  refs.pruneSessionsButton.addEventListener("click", async () => {
+    const daysText = prompt("Prune sessions older than how many days?", "90");
+    if (daysText === null) return;
+    const olderThanDays = Number(daysText);
+    if (!Number.isFinite(olderThanDays) || olderThanDays < 0) {
+      appendEvent("prune skipped", "Enter a non-negative number of days.", "warn");
+      return;
+    }
+    const result = await api("/sessions/prune", {
+      method: "POST",
+      body: JSON.stringify({ olderThanDays }),
+    });
+    appendEvent("sessions pruned", `Closed ${result.count || 0} session(s).`, "success");
+    state.selectedSessionId = "";
+    state.sessionDetail = null;
+    await refreshAll();
+  });
+  refs.optimizeSessionsButton.addEventListener("click", async () => {
+    const result = await api("/sessions/optimize", { method: "POST", body: "{}" });
+    appendEvent("sessions optimized", result.detail || `Checked ${result.sessions || 0} session(s).`, "success");
+    await refreshAll();
+  });
   refs.searchForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     await runSearch(refs.searchInput.value);

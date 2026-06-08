@@ -36,6 +36,9 @@ describe("frontend dashboard build surface", () => {
     expect(app).toContain("/gateway");
     expect(app).toContain("/support/bundle");
     expect(app).toContain("/doctor");
+    expect(app).toContain("/sessions/prune");
+    expect(app).toContain("/sessions/optimize");
+    expect(app).toContain("data-action=\"rename-session");
     expect(app).toContain("diagnosticsCards");
     expect(app).toContain("data-action=\"approve");
     expect(app).toContain("data-action=\"restart-task-detail");
