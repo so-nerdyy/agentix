@@ -378,15 +378,38 @@ function buildRuntimeEnv(extra = {}) {
 
 function healthCheck(timeoutMs = 2000) {
   return new Promise((resolveHealth) => {
+    let settled = false;
+    const finish = (healthy) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolveHealth(healthy);
+    };
+
     const req = http.get(`${bridgeUrl()}/health`, { timeout: timeoutMs }, (res) => {
-      resolveHealth(res.statusCode === 200);
+      const healthy = res.statusCode === 200;
+      res.resume();
+      res.on("end", () => finish(healthy));
+      res.on("error", () => finish(false));
     });
-    req.on("error", () => resolveHealth(false));
+    req.on("error", () => finish(false));
     req.on("timeout", () => {
       req.destroy();
-      resolveHealth(false);
+      finish(false);
     });
   });
+}
+
+async function waitForBridgeHealth(timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await healthCheck(1000)) {
+      return true;
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
+  }
+  return false;
 }
 
 function venvPython() {
@@ -447,8 +470,7 @@ async function ensureBridgeRunning() {
   });
   child.unref();
 
-  await new Promise((resolveDelay) => setTimeout(resolveDelay, 1200));
-  if (!(await healthCheck(3000))) {
+  if (!(await waitForBridgeHealth(10000))) {
     throw new Error("Agentix bridge failed to start");
   }
 }

@@ -726,3 +726,65 @@ def handle_cron(args: Any) -> bool:
         return True
 
     return False
+
+
+def _print_gateways(gateways: list[dict[str, Any]]) -> None:
+    if not gateways:
+        print("No Agentix gateways configured.")
+        return
+    print(f"{'ID':<14} {'Platform':<10} {'Enabled':<8} {'Status':<10} {'Messages':<8} Name")
+    print("-" * 88)
+    for gateway in gateways:
+        print(
+            f"{_clip(gateway.get('id'), 14):<14} "
+            f"{_clip(gateway.get('platform'), 10):<10} "
+            f"{str(bool(gateway.get('enabled'))).lower():<8} "
+            f"{_clip(gateway.get('status'), 10):<10} "
+            f"{str(gateway.get('messageCount', 0)):<8} "
+            f"{_clip(gateway.get('name'), 80)}"
+        )
+
+
+def handle_gateway(args: Any) -> bool:
+    if not using_agentix_backend():
+        return False
+
+    command = getattr(args, "gateway_command", None) or "list"
+    backend = _backend()
+
+    if command in {"run", "start", "stop", "restart", "install", "uninstall", "migrate-legacy"}:
+        return False
+
+    if command in {"list", "setup"}:
+        _print_gateways(list(_iter_entries(backend.list_gateways())))
+        if command == "setup":
+            print("\nUse `agentix gateway enable <id>` to enable a gateway, or configure credentials with `agentix setup`.")
+        return True
+
+    if command == "status":
+        gateways = list(_iter_entries(backend.list_gateways()))
+        enabled = [gateway for gateway in gateways if gateway.get("enabled")]
+        print("Agentix gateway registry")
+        print(f"  Gateways: {len(gateways)}")
+        print(f"  Enabled:  {len(enabled)}")
+        _print_gateways(gateways)
+        return True
+
+    if command in {"enable", "disable"}:
+        gateway_id = getattr(args, "gateway_id", "")
+        result = backend.set_gateway_enabled(gateway_id, command == "enable")
+        gateway = result.get("gateway", result)
+        print(f"{'Enabled' if command == 'enable' else 'Disabled'} Agentix gateway: {gateway.get('id', gateway_id)}")
+        return True
+
+    if command in {"message", "send"}:
+        gateway_id = getattr(args, "gateway_id", "")
+        stimulus = " ".join(getattr(args, "stimulus", []) or []).strip()
+        if not stimulus:
+            print("Usage: agentix gateway message <gateway-id> <stimulus>")
+            return True
+        result = backend.receive_gateway_message(gateway_id=gateway_id, stimulus=stimulus)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return True
+
+    return False

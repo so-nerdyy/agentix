@@ -1924,6 +1924,10 @@ def cmd_gateway(args):
     """Gateway management commands."""
     _sync_bundled_skills_quietly()
 
+    from hermes_cli.agentix_commands import handle_gateway
+    if handle_gateway(args):
+        return
+
     from hermes_cli.gateway import gateway_command
 
     gateway_command(args)
@@ -12165,6 +12169,16 @@ def main():
 
     # gateway setup
     gateway_subparsers.add_parser("setup", help="Configure messaging platforms")
+
+    gateway_enable = gateway_subparsers.add_parser("enable", help="Enable an Agentix gateway integration")
+    gateway_enable.add_argument("gateway_id", help="Gateway ID to enable")
+
+    gateway_disable = gateway_subparsers.add_parser("disable", help="Disable an Agentix gateway integration")
+    gateway_disable.add_argument("gateway_id", help="Gateway ID to disable")
+
+    gateway_message = gateway_subparsers.add_parser("message", aliases=["send"], help="Send a stimulus through an Agentix gateway")
+    gateway_message.add_argument("gateway_id", help="Gateway ID to receive the message")
+    gateway_message.add_argument("stimulus", nargs="+", help="Message stimulus")
 
     # gateway migrate-legacy
     gateway_migrate_legacy = gateway_subparsers.add_parser(
