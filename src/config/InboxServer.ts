@@ -67,6 +67,33 @@ export async function startInboxServer(opts: { port?: number; host?: string } = 
     sseClients: subscriberCount(),
   }));
   server.get("/doctor", async () => runtime.doctor());
+  server.get("/usage", async () => runtime.usage());
+
+  server.post("/execute/stream", async (request, reply) => {
+    const body = request.body as Record<string, unknown>;
+
+    reply.raw.setHeader("Content-Type", "text/event-stream");
+    reply.raw.setHeader("Cache-Control", "no-cache");
+    reply.raw.setHeader("Connection", "keep-alive");
+    reply.raw.setHeader("X-Accel-Buffering", "no");
+
+    try {
+      await runtime.execute({
+        stimulus: String(body.stimulus ?? body.text ?? ""),
+        sessionId: body.sessionId as string | undefined,
+        onDelta: (delta: string) => {
+          reply.raw.write(`data: ${delta.replace(/\n/g, "\\n")}\n\n`);
+        },
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      reply.raw.write(`data: ${JSON.stringify({ error: message }).replace(/\n/g, "\\n")}\n\n`);
+    }
+
+    reply.raw.write("data: [DONE]\n\n");
+    reply.raw.end();
+    return reply;
+  });
 
   server.post("/execute", async (request) => {
     const body = request.body as Record<string, unknown>;
@@ -209,6 +236,10 @@ export async function startInboxServer(opts: { port?: number; host?: string } = 
     const { id } = request.params as { id: string };
     const body = request.body as Record<string, unknown> | undefined;
     return runtime.reject(id, body?.reason as string | undefined);
+  });
+  server.get("/memory", async (request) => {
+    const query = request.query as Record<string, string | undefined>;
+    return runtime.listMemory(query.sessionId);
   });
   server.get("/memory/search", async (request) => {
     const q = (request.query as Record<string, string>).q || "";

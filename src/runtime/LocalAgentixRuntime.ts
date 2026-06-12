@@ -1261,6 +1261,42 @@ export class LocalAgentixRuntime {
     };
   }
 
+  usage(): Record<string, unknown> {
+    const sessions = this.powerhouse.listSessions();
+    const tasks = this.powerhouse.listTasks();
+    const plans = this.powerhouse.planStore.list();
+    const jobs = this.scheduler.list();
+    const gateways = this.gateways.list();
+    const memory = this.powerhouse.memory.list();
+    const tasksByStatus: Record<string, number> = {};
+    const jobsByLastStatus: Record<string, number> = {};
+
+    for (const task of tasks) {
+      tasksByStatus[task.status] = (tasksByStatus[task.status] ?? 0) + 1;
+    }
+    for (const job of jobs) {
+      const status = job.lastStatus ?? "never-run";
+      jobsByLastStatus[status] = (jobsByLastStatus[status] ?? 0) + 1;
+    }
+
+    return {
+      generatedAt: new Date().toISOString(),
+      counts: {
+        sessions: sessions.length,
+        tasks: tasks.length,
+        plans: plans.length,
+        jobs: jobs.length,
+        gateways: gateways.length,
+        enabledGateways: gateways.filter((gateway) => gateway.enabled).length,
+        memory: memory.length,
+      },
+      tasksByStatus,
+      jobsByLastStatus,
+      enabledGateways: gateways.filter((gateway) => gateway.enabled).map((gateway) => gateway.id),
+      note: "Provider token and cost usage is not persisted yet; this reports backend runtime usage.",
+    };
+  }
+
   doctor(): Record<string, unknown> {
     this.powerhouse.start();
     const config = loadConfig();

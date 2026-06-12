@@ -39,6 +39,22 @@ describe("HTTP session token auth", () => {
       expect((await fetch(`${base}/sessions`, {
         headers: { Authorization: "Bearer secret-token" },
       })).status).toBe(200);
+      expect((await fetch(`${base}/usage`, {
+        headers: { Authorization: "Bearer secret-token" },
+      })).status).toBe(200);
+      expect((await fetch(`${base}/memory`, {
+        headers: { Authorization: "Bearer secret-token" },
+      })).status).toBe(200);
+      const stream = await fetch(`${base}/execute/stream`, {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer secret-token",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ stimulus: "inbox stream smoke" }),
+      });
+      expect(stream.status).toBe(200);
+      expect(await stream.text()).toContain("data: [DONE]");
     } finally {
       await server.close();
     }
@@ -55,6 +71,9 @@ describe("HTTP session token auth", () => {
       expect((await fetch(`${base}/health`)).status).toBe(200);
       expect((await fetch(`${base}/sessions`)).status).toBe(401);
       expect((await fetch(`${base}/sessions`, {
+        headers: { Authorization: "Bearer bridge-token" },
+      })).status).toBe(200);
+      expect((await fetch(`${base}/usage`, {
         headers: { Authorization: "Bearer bridge-token" },
       })).status).toBe(200);
     } finally {

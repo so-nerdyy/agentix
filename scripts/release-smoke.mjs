@@ -309,6 +309,25 @@ async function smokeServer() {
         process.env.PYTHONPATH,
       ].filter(Boolean).join(process.platform === "win32" ? ";" : ":"),
     };
+    const installedOneshotPrompt = "release smoke installed oneshot delegation";
+    const installedOneshot = await run(agentixCommand, [
+      "-z",
+      process.platform === "win32" ? `"${installedOneshotPrompt}"` : installedOneshotPrompt,
+    ], {
+      cwd: smokeRoot,
+      env: hermesEnv,
+      timeoutMs: 120_000,
+    });
+    assert(installedOneshot.stdout.includes("Agentix is running with the Hermes frontend and Agentix backend."), "installed agentix -z did not route through Agentix backend");
+    assert(installedOneshot.stdout.includes(`Input: ${installedOneshotPrompt}`), "installed agentix -z output did not preserve input");
+
+    const installedUsage = await run(agentixCommand, ["usage"], {
+      cwd: smokeRoot,
+      env: hermesEnv,
+      timeoutMs: 120_000,
+    });
+    assert(installedUsage.stdout.includes("Agentix backend usage"), "installed agentix usage did not route through Agentix backend");
+
     const oneshot = await run(python, [
       "-c",
       "from hermes_cli.oneshot import run_oneshot; raise SystemExit(run_oneshot('release smoke oneshot delegation'))",
@@ -357,6 +376,13 @@ async function smokeServer() {
     });
     assert(execution.status === "complete", `execute status was ${execution.status}`);
     assert(Array.isArray(execution.taskIds) && execution.taskIds.length > 0, "execute did not return task ids");
+
+    const streamed = await fetchText(`${inboxUrl}/execute/stream`, {
+      method: "POST",
+      body: JSON.stringify({ stimulus: "release smoke streamed task" }),
+      timeoutMs: 60_000,
+    });
+    assert(streamed.includes("data: [DONE]"), "dashboard execute stream did not complete");
 
     const tasks = await fetchJson(`${inboxUrl}/tasks`);
     assert(Array.isArray(tasks) && tasks.length > 0, "tasks endpoint did not return created task");

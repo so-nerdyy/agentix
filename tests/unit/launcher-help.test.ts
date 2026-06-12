@@ -39,6 +39,33 @@ describe("launcher help", () => {
     expect(result.stdout).not.toContain("Agentix dashboard available");
   });
 
+  it("prints local help for help <backend-command>", () => {
+    const result = spawnSync(process.execPath, [join(process.cwd(), "bin", "agentix.js"), "help", "server"], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Usage: agentix server");
+    expect(result.stdout).toContain("backend bridge/API and inbox server");
+  });
+
+  it("prints Agentix help for backend-adapted Hermes commands", () => {
+    const gateway = spawnSync(process.execPath, [join(process.cwd(), "bin", "agentix.js"), "gateway", "--help"], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    const logs = spawnSync(process.execPath, [join(process.cwd(), "bin", "agentix.js"), "help", "logs"], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+
+    expect(gateway.status).toBe(0);
+    expect(gateway.stdout).toContain("Agentix backend runtime");
+    expect(logs.status).toBe(0);
+    expect(logs.stdout).toContain("persisted runtime log entries");
+  });
+
   it("documents launch flags for dashboard and server", () => {
     const result = spawnSync(process.execPath, [join(process.cwd(), "bin", "agentix.js"), "--help"], {
       encoding: "utf8",

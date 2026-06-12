@@ -142,6 +142,15 @@ describe("Powerhouse restored runtime", () => {
     const doctor = runtime.doctor();
     expect(String(doctor.status)).toMatch(/pass|warn|fail/);
     expect(Array.isArray(doctor.checks)).toBe(true);
+    const usage = runtime.usage() as {
+      counts: { sessions: number; tasks: number; plans: number; memory: number };
+      tasksByStatus: Record<string, number>;
+    };
+    expect(usage.counts.sessions).toBeGreaterThan(0);
+    expect(usage.counts.tasks).toBeGreaterThan(0);
+    expect(usage.counts.plans).toBeGreaterThan(0);
+    expect(usage.counts.memory).toBeGreaterThan(0);
+    expect(usage.tasksByStatus.complete).toBeGreaterThan(0);
 
     runtime.shutdown();
   });
@@ -554,6 +563,34 @@ describe("Powerhouse restored runtime", () => {
 
     expect(result.ok).toBe(true);
     expect(powerhouse.memory.search("scheduled")).not.toHaveLength(0);
+
+    scheduler.stop();
+    powerhouse.stop();
+  });
+
+  it("delays the first automatic scheduler tick to protect startup", async () => {
+    const powerhouse = makePowerhouse();
+    const dir = tempDir("agentix-scheduler-grace-");
+    const scheduler = new SchedulerService(
+      powerhouse,
+      new ScheduledJobStore(join(dir, "jobs.json")),
+      new AuditLog(join(dir, "audit.jsonl")),
+      [dir],
+    );
+    const job = scheduler.create({
+      name: "startup grace",
+      stimulus: "",
+      schedule: "every 1m",
+      noAgent: true,
+    });
+    scheduler.jobs.update(job.id, { nextRunAt: Date.now() - 1 });
+
+    scheduler.start(20, 100);
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+    expect(scheduler.jobs.get(job.id)?.runCount).toBe(0);
+
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+    expect(scheduler.jobs.get(job.id)?.runCount).toBe(1);
 
     scheduler.stop();
     powerhouse.stop();

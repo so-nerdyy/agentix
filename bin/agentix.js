@@ -39,6 +39,7 @@ const HERMES_COMMANDS = new Set([
   "doctor",
   "status",
   "usage",
+  "insights",
   "cron",
   "gateway",
   "sessions",
@@ -58,13 +59,14 @@ const BRIDGELESS_HERMES_COMMANDS = new Set([
   "setup",
   "model",
   "update",
-  "usage",
   "auth",
   "config",
   "plugins",
   "skills",
   "fortune",
 ]);
+
+const AGENTIX_COMMAND_HELP = new Set(["gateway", "logs"]);
 
 const AGENTIX_HERMES_HOME = process.env.HERMES_HOME
   ? resolve(process.env.HERMES_HOME)
@@ -84,7 +86,8 @@ function buildLauncherHelp() {
     "  update                  check for updates",
     "  doctor                  validate config/runtime health",
     "  status                  summarize backend health and runtime counts",
-    "  usage                   inspect usage and limits",
+    "  usage                   inspect Agentix backend runtime usage",
+    "  insights                inspect Hermes session analytics",
     "  cron                    manage scheduled jobs",
     "  gateway                 manage integrations",
     "  sessions                inspect sessions",
@@ -563,12 +566,12 @@ async function main() {
       console.log(buildLauncherHelp());
       return;
     }
-    if (HERMES_COMMANDS.has(args[0])) {
-      await spawnHermes([args[0], "--help"]);
+    if (BACKEND_COMMANDS.has(args[0]) || AGENTIX_COMMAND_HELP.has(args[0])) {
+      console.log(buildCommandHelp(args[0]));
       return;
     }
-    if (BACKEND_COMMANDS.has(args[0])) {
-      await spawnNodeCli([args[0], "--help"]);
+    if (HERMES_COMMANDS.has(args[0])) {
+      await spawnHermes([args[0], "--help"]);
       return;
     }
     await spawnHermes(["--help"]);
@@ -576,7 +579,7 @@ async function main() {
   }
 
   if (args.includes("--help") || args.includes("-h")) {
-    if (BACKEND_COMMANDS.has(cmd)) {
+    if (BACKEND_COMMANDS.has(cmd) || AGENTIX_COMMAND_HELP.has(cmd)) {
       console.log(buildCommandHelp(cmd));
       return;
     }

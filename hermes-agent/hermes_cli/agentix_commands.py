@@ -263,6 +263,40 @@ def handle_status(args: Any) -> bool:
     return True
 
 
+def handle_usage(args: Any) -> bool:
+    if not using_agentix_backend():
+        return False
+
+    usage = _backend().usage()
+    if not isinstance(usage, dict):
+        usage = {}
+    counts = usage.get("counts") if isinstance(usage.get("counts"), dict) else {}
+    tasks_by_status = usage.get("tasksByStatus") if isinstance(usage.get("tasksByStatus"), dict) else {}
+    jobs_by_status = usage.get("jobsByLastStatus") if isinstance(usage.get("jobsByLastStatus"), dict) else {}
+    enabled_gateways = usage.get("enabledGateways") if isinstance(usage.get("enabledGateways"), list) else []
+    if getattr(args, "json", False):
+        _dump(usage)
+        return True
+
+    print("Agentix backend usage")
+    print(f"  Sessions:  {counts.get('sessions', 0)}")
+    print(f"  Tasks:     {counts.get('tasks', 0)}")
+    print(f"  Plans:     {counts.get('plans', 0)}")
+    print(f"  Jobs:      {counts.get('jobs', 0)}")
+    print(f"  Memory:    {counts.get('memory', 0)}")
+    print(f"  Gateways:  {counts.get('gateways', 0)} ({len(enabled_gateways)} enabled)")
+    if tasks_by_status:
+        print("  Task status:")
+        for status, count in sorted(tasks_by_status.items()):
+            print(f"    {status}: {count}")
+    if jobs_by_status:
+        print("  Job last status:")
+        for status, count in sorted(jobs_by_status.items()):
+            print(f"    {status}: {count}")
+    print("  Token/cost usage: not persisted yet")
+    return True
+
+
 def handle_oneshot(
     prompt: str,
     model: str | None = None,

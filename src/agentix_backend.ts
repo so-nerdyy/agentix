@@ -152,6 +152,10 @@ export class AgentixBackend {
     return this.get("/doctor");
   }
 
+  async usage(): Promise<Record<string, unknown>> {
+    return this.get("/usage");
+  }
+
   async listPlans(): Promise<Array<Record<string, unknown>>> {
     return this.get("/plans");
   }

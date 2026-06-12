@@ -163,6 +163,9 @@ class AgentixBackend:
     def doctor(self) -> Any:
         return self._get("/doctor", timeout=60)
 
+    def usage(self) -> Any:
+        return self._get("/usage", timeout=60)
+
     def get_session(self, session_id: str) -> Any:
         return self._get(f"/sessions/{quote(session_id)}")
 

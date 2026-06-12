@@ -18,6 +18,7 @@ interface ScriptRunResult {
 
 export class SchedulerService {
   private timer: NodeJS.Timeout | null = null;
+  private runningDue = false;
 
   constructor(
     private readonly powerhouse: Powerhouse,
@@ -26,17 +27,27 @@ export class SchedulerService {
     private readonly scriptBaseDirs = defaultScriptBaseDirs(),
   ) {}
 
-  start(intervalMs = 30_000): void {
+  start(intervalMs = 30_000, initialDelayMs = 90_000): void {
     this.stop();
-    const timer = setInterval(() => {
+    const run = () => {
+      if (this.runningDue) return;
+      this.runningDue = true;
       this.runDue().catch((err) => {
         this.audit.record({
           type: "scheduler.error",
           actor: "scheduler",
           data: { error: err instanceof Error ? err.message : String(err) },
         });
+      }).finally(() => {
+        this.runningDue = false;
       });
-    }, intervalMs);
+    };
+    const timer = setTimeout(() => {
+      run();
+      const interval = setInterval(run, intervalMs);
+      interval.unref?.();
+      this.timer = interval;
+    }, initialDelayMs);
     timer.unref?.();
     this.timer = timer;
   }

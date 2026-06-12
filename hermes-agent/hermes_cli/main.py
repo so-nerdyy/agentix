@@ -6271,6 +6271,15 @@ def cmd_status(args):
     show_status(args)
 
 
+def cmd_usage(args):
+    """Show Agentix backend runtime usage."""
+    from hermes_cli.agentix_commands import handle_usage
+    if handle_usage(args):
+        return
+
+    print("Usage analytics are available through `hermes insights` in standalone Hermes.")
+
+
 def cmd_cron(args):
     """Cron job management."""
     from hermes_cli.agentix_commands import handle_cron
@@ -14257,6 +14266,17 @@ Examples:
     sessions_parser.set_defaults(func=cmd_sessions)
 
     # =========================================================================
+    # usage command
+    # =========================================================================
+    usage_parser = subparsers.add_parser(
+        "usage",
+        help="Show Agentix backend runtime usage",
+        description="Summarize Agentix sessions, tasks, plans, jobs, gateways, and memory usage",
+    )
+    usage_parser.add_argument("--json", action="store_true", help="Print usage as JSON")
+    usage_parser.set_defaults(func=cmd_usage)
+
+    # =========================================================================
     # insights command
     # =========================================================================
     insights_parser = subparsers.add_parser(
@@ -15005,6 +15025,17 @@ Examples:
     # Handle top-level --oneshot / -z: single-shot mode, stdout = final
     # response only, nothing else. Bypasses cli.py entirely.
     if getattr(args, "oneshot", None):
+        from hermes_cli.agentix_commands import handle_oneshot
+
+        agentix_exit = handle_oneshot(
+            args.oneshot,
+            model=getattr(args, "model", None),
+            provider=getattr(args, "provider", None),
+            toolsets=getattr(args, "toolsets", None),
+        )
+        if agentix_exit is not None:
+            sys.exit(agentix_exit)
+
         from hermes_cli.oneshot import run_oneshot
 
         sys.exit(

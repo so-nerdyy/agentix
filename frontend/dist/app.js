@@ -23,6 +23,7 @@ const state = {
   selectedJobId: localStorage.getItem("agentix.selectedJobId") || "",
   selectedGatewayId: localStorage.getItem("agentix.selectedGatewayId") || "",
   memory: [],
+  memorySearchResults: null,
   healing: { failures: [], procedures: [] },
   gatewayFilter: localStorage.getItem("agentix.gatewayFilter") || "",
   gateways: [],
@@ -985,6 +986,20 @@ function memoryCard(item) {
   `;
 }
 
+function memorySearchCard(item) {
+  const score = Number(item.score);
+  const scoreLabel = Number.isFinite(score) ? score.toFixed(2) : "n/a";
+  return `
+    <div class="card">
+      <div class="row">
+        <h4>Memory match</h4>
+        <span class="pill">score ${escapeHtml(scoreLabel)}</span>
+      </div>
+      <div class="muted">${escapeHtml(item.content)}</div>
+    </div>
+  `;
+}
+
 function healingView() {
   const failureList = (state.healing.failures || [])
     .map(
@@ -1331,7 +1346,9 @@ function renderLists() {
   }
   refs.gatewayDetail.innerHTML = gatewayDetailCard();
   refs.gatewayList.innerHTML = visibleGateways.map(gatewayCard).join("") || '<div class="card muted">No gateways match the current filter.</div>';
-  refs.memoryList.innerHTML = state.memory.map(memoryCard).join("") || '<div class="card muted">Search memory to see results.</div>';
+  refs.memoryList.innerHTML = state.memorySearchResults
+    ? state.memorySearchResults.map(memorySearchCard).join("") || '<div class="card muted">No memory records matched.</div>'
+    : state.memory.map(memoryCard).join("") || '<div class="card muted">No memory recorded for this session.</div>';
   refs.healingList.innerHTML = healingView();
   refs.auditDetail.innerHTML = auditDetailCard();
   refs.auditList.innerHTML = state.audit.map(auditCard).join("") || '<div class="card muted">No audit entries yet.</div>';
@@ -1602,7 +1619,11 @@ async function refreshAll() {
       localStorage.setItem("agentix.sessionId", state.sessionId);
     }
     if (state.sessionId) {
-      state.memory = await api(`/memory/search?q=${encodeURIComponent(state.sessionId)}`).catch(() => []);
+      state.memory = await api(`/memory?sessionId=${encodeURIComponent(state.sessionId)}`).catch(() => []);
+      state.memorySearchResults = null;
+    } else {
+      state.memory = [];
+      state.memorySearchResults = null;
     }
     if (state.searchQuery) {
       state.searchResults = await api(`/search?q=${encodeURIComponent(state.searchQuery)}`).catch(() => null);
@@ -2078,7 +2099,7 @@ async function searchMemory(event) {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
   const query = String(form.get("query") || "");
-  state.memory = await api(`/memory/search?q=${encodeURIComponent(query)}`);
+  state.memorySearchResults = await api(`/memory/search?q=${encodeURIComponent(query)}`);
   setView("memory");
   render();
 }
@@ -2182,6 +2203,11 @@ async function clickAction(event) {
       setView("sessions");
       await loadSessionDetail(id);
     } else if (action === "select-task") {
+      state.selectedTaskId = id;
+      saveFilterState();
+      setView("tasks");
+      await loadTaskDetail(id);
+    } else if (action === "inspect-task") {
       state.selectedTaskId = id;
       saveFilterState();
       setView("tasks");

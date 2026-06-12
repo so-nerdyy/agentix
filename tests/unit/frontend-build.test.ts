@@ -43,4 +43,22 @@ describe("frontend dashboard build surface", () => {
     expect(app).toContain("data-action=\"approve");
     expect(app).toContain("data-action=\"restart-task-detail");
   });
+
+  it("opens task details from approval details", () => {
+    const app = readFrontendFile("src", "app.js");
+
+    expect(app).toMatch(
+      /else if \(action === "inspect-task"\) \{\s+state\.selectedTaskId = id;\s+saveFilterState\(\);\s+setView\("tasks"\);\s+await loadTaskDetail\(id\);/,
+    );
+  });
+
+  it("loads session memory records separately from scored memory searches", () => {
+    const app = readFrontendFile("src", "app.js");
+
+    expect(app).toContain('api(`/memory?sessionId=${encodeURIComponent(state.sessionId)}`)');
+    expect(app).not.toContain('state.memory = await api(`/memory/search?q=${encodeURIComponent(state.sessionId)}`)');
+    expect(app).toContain("function memorySearchCard(item)");
+    expect(app).toContain("state.memorySearchResults = await api(`/memory/search?q=${encodeURIComponent(query)}`)");
+    expect(app).toContain("state.memorySearchResults.map(memorySearchCard)");
+  });
 });
