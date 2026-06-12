@@ -159,6 +159,124 @@ async function main() {
         console.log(JSON.stringify(getBackendRuntime().getPlan(planId), null, 2));
       }
       return;
+    case "tasks":
+      ensureDataDirs();
+      {
+        const [sessionId] = cleanArgs;
+        for (const task of getBackendRuntime().listTasks(sessionId)) {
+          console.log(
+            `${String(task.id ?? "")}: ${String(task.status ?? "")} ${String(task.kind ?? "")} session=${String(task.sessionId ?? "")}`,
+          );
+        }
+      }
+      return;
+    case "task":
+      ensureDataDirs();
+      {
+        const [taskId, action = "inspect", ...actionArgs] = cleanArgs;
+        if (!taskId) {
+          console.log("Usage: agentix task <task-id> [inspect|approve|reject|cancel|retry|restart] [reason]");
+          return;
+        }
+        if (action === "inspect") {
+          console.log(JSON.stringify(getBackendRuntime().getTask(taskId), null, 2));
+          return;
+        }
+        if (action === "approve") {
+          console.log(JSON.stringify(await getBackendRuntime().approve(taskId), null, 2));
+          return;
+        }
+        if (action === "reject") {
+          console.log(JSON.stringify(await getBackendRuntime().reject(taskId, actionArgs.join(" ").trim() || undefined), null, 2));
+          return;
+        }
+        if (action === "cancel" || action === "retry" || action === "restart") {
+          console.log(JSON.stringify(await getBackendRuntime().controlTask(taskId, action), null, 2));
+          return;
+        }
+        console.log(`Unknown task action: ${action}`);
+      }
+      return;
+    case "approvals":
+      ensureDataDirs();
+      for (const approval of getBackendRuntime().listApprovals()) {
+        console.log(
+          `${String(approval.id ?? "")}: ${String(approval.kind ?? "")} session=${String(approval.sessionId ?? "")}`,
+        );
+      }
+      return;
+    case "approval":
+      ensureDataDirs();
+      {
+        const [taskId, action = "inspect", ...actionArgs] = cleanArgs;
+        if (!taskId) {
+          console.log("Usage: agentix approval <task-id> [inspect|approve|reject] [reason]");
+          return;
+        }
+        if (action === "inspect") {
+          console.log(JSON.stringify(getBackendRuntime().getApproval(taskId), null, 2));
+          return;
+        }
+        if (action === "approve") {
+          console.log(JSON.stringify(await getBackendRuntime().approve(taskId), null, 2));
+          return;
+        }
+        if (action === "reject") {
+          console.log(JSON.stringify(await getBackendRuntime().reject(taskId, actionArgs.join(" ").trim() || undefined), null, 2));
+          return;
+        }
+        console.log(`Unknown approval action: ${action}`);
+      }
+      return;
+    case "search":
+      ensureDataDirs();
+      {
+        const query = cleanArgs.join(" ").trim();
+        if (!query) {
+          console.log("Usage: agentix search <query>");
+          return;
+        }
+        console.log(JSON.stringify(getBackendRuntime().search(query), null, 2));
+      }
+      return;
+    case "audit":
+      ensureDataDirs();
+      {
+        const [auditId] = cleanArgs;
+        if (auditId) {
+          console.log(JSON.stringify(getBackendRuntime().getAudit(auditId), null, 2));
+          return;
+        }
+        for (const entry of getBackendRuntime().listAudit()) {
+          console.log(
+            `${String(entry.id ?? "")}: ${String(entry.type ?? "")} actor=${String(entry.actor ?? "")} subject=${String(entry.subjectId ?? "-")}`,
+          );
+        }
+      }
+      return;
+    case "healing":
+      ensureDataDirs();
+      {
+        const [entryId, action = "inspect"] = cleanArgs;
+        if (!entryId) {
+          console.log(JSON.stringify(getBackendRuntime().healingStats(), null, 2));
+          return;
+        }
+        if (action === "inspect") {
+          console.log(JSON.stringify(getBackendRuntime().getHealingDetail(entryId), null, 2));
+          return;
+        }
+        if (action === "promote") {
+          console.log(JSON.stringify(getBackendRuntime().promoteHealingProcedure(entryId), null, 2));
+          return;
+        }
+        if (action === "deprecate") {
+          console.log(JSON.stringify(getBackendRuntime().deprecateHealingProcedure(entryId), null, 2));
+          return;
+        }
+        console.log(`Unknown healing action: ${action}`);
+      }
+      return;
     case "mods":
     case "plugin":
     case "extension":

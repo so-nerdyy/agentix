@@ -199,15 +199,24 @@
               <div class="panel-head">
                 <h3>Scheduler</h3>
                 <div class="panel-tools">
+                  <button class="primary" id="runDueJobsButton" type="button">Run due now</button>
                   <button class="ghost" id="reloadJobsButton" type="button">Reload</button>
                 </div>
               </div>
-              <form class="inline-form" id="jobForm">
+              <form class="inline-form scheduler-form" id="jobForm">
                 <input name="name" placeholder="Job name" required />
-                <input name="stimulus" placeholder="Stimulus" required />
+                <input name="stimulus" placeholder="Stimulus (optional for script-only jobs)" />
                 <input name="schedule" placeholder="Schedule: every 1m, 0 9 * * *, 30m" value="every 1m" required />
+                <input name="script" placeholder="Script path (optional)" />
+                <input name="workdir" placeholder="Absolute working directory (optional)" />
+                <input name="skills" placeholder="Skills, comma separated (optional)" />
+                <label class="check-field">
+                  <input name="noAgent" type="checkbox" />
+                  <span>Run script without agent</span>
+                </label>
                 <button class="primary" type="submit">Create</button>
               </form>
+              <div id="schedulerFeedback" class="scheduler-feedback" role="status" aria-live="polite" hidden></div>
               <div id="jobDetail" class="detail"></div>
               <div class="list" id="jobsList"></div>
             </article>

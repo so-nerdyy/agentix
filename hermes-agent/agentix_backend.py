@@ -203,6 +203,16 @@ class AgentixBackend:
     def consolidate_memory(self, session_id: Optional[str] = None) -> Any:
         return self._post("/memory/consolidate", {"sessionId": session_id})
 
+    def reset_memory(
+        self,
+        target: str = "all",
+        session_id: Optional[str] = None,
+    ) -> Any:
+        body: Dict[str, Any] = {"target": target}
+        if session_id:
+            body["sessionId"] = session_id
+        return self._post("/memory/reset", body)
+
     def list_tools(self) -> Any:
         return self._get("/tools")
 

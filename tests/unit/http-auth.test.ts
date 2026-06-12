@@ -55,6 +55,16 @@ describe("HTTP session token auth", () => {
       });
       expect(stream.status).toBe(200);
       expect(await stream.text()).toContain("data: [DONE]");
+      const reset = await fetch(`${base}/memory/reset`, {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer secret-token",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ target: "all" }),
+      });
+      expect(reset.status).toBe(200);
+      expect((await reset.json()) as { ok: boolean }).toMatchObject({ ok: true });
     } finally {
       await server.close();
     }

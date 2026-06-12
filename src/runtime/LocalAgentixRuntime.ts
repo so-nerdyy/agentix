@@ -361,6 +361,24 @@ export class LocalAgentixRuntime {
     };
   }
 
+  resetMemory(input: {
+    target?: "all" | "memory" | "user";
+    sessionId?: string;
+  } = {}): Record<string, unknown> {
+    const target = input.target ?? "all";
+    const roles = target === "user"
+      ? ["user" as const]
+      : target === "memory"
+        ? ["assistant" as const, "system" as const]
+        : undefined;
+    return {
+      ok: true,
+      target,
+      sessionId: input.sessionId ?? null,
+      ...this.powerhouse.memory.reset({ sessionId: input.sessionId, roles }),
+    };
+  }
+
   listTools(): Array<{ name: string; description: string }> {
     this.powerhouse.start();
     return this.powerhouse.agents.list().map((agent) => ({

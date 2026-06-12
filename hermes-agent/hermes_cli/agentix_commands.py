@@ -696,6 +696,35 @@ def handle_memory(args: Any) -> bool:
         _dump(backend.consolidate_memory(session_id))
         return True
 
+    if sub == "reset":
+        target = getattr(args, "target", "all") or "all"
+        if not getattr(args, "yes", False):
+            try:
+                answer = input(
+                    f"Reset Agentix {target} memory records? Type 'yes' to confirm: "
+                ).strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                answer = ""
+            if answer != "yes":
+                print("Cancelled.")
+                return True
+        result = backend.reset_memory(target=target)
+        print(f"Removed {result.get('removed', 0)} Agentix memory record(s).")
+        print(f"Remaining records: {result.get('remaining', 0)}")
+        return True
+
+    if sub == "off":
+        from hermes_cli.config import load_config, save_config
+
+        config = load_config()
+        if not isinstance(config.get("memory"), dict):
+            config["memory"] = {}
+        config["memory"]["provider"] = ""
+        save_config(config)
+        print("External Hermes memory provider disabled.")
+        print("Agentix built-in episodic/procedural memory remains active.")
+        return True
+
     return False
 
 

@@ -44,6 +44,7 @@ const state = {
   sessionDetailLoading: false,
   jobDetail: null,
   jobDetailLoading: false,
+  schedulerFeedback: null,
   approvalDetail: null,
   approvalDetailLoading: false,
   healingDetail: null,
@@ -78,6 +79,8 @@ const refs = {
   healingDetail: el("healingDetail"),
   auditDetail: el("auditDetail"),
   reloadJobsButton: el("reloadJobsButton"),
+  runDueJobsButton: el("runDueJobsButton"),
+  schedulerFeedback: el("schedulerFeedback"),
   jobDetail: el("jobDetail"),
   reloadGatewayButton: el("reloadGatewayButton"),
   gatewayFilterInput: el("gatewayFilterInput"),
@@ -842,6 +845,31 @@ function jobStatus(job) {
   return `<span class="pill ${statusClass}">${escapeHtml(job.lastStatus)}</span>`;
 }
 
+function parseSkills(value) {
+  return String(value || "")
+    .split(/[\n,]/)
+    .map((skill) => skill.trim())
+    .filter(Boolean);
+}
+
+function setSchedulerFeedback(message, tone = "success") {
+  state.schedulerFeedback = { message, tone };
+  renderSchedulerFeedback();
+}
+
+function renderSchedulerFeedback() {
+  if (!refs.schedulerFeedback) return;
+  if (!state.schedulerFeedback) {
+    refs.schedulerFeedback.hidden = true;
+    refs.schedulerFeedback.textContent = "";
+    refs.schedulerFeedback.className = "scheduler-feedback";
+    return;
+  }
+  refs.schedulerFeedback.hidden = false;
+  refs.schedulerFeedback.textContent = state.schedulerFeedback.message;
+  refs.schedulerFeedback.className = `scheduler-feedback ${state.schedulerFeedback.tone}`;
+}
+
 function jobCard(job) {
   return `
     <div class="card ${state.selectedJobId === job.id ? "selected" : ""}">
@@ -880,9 +908,41 @@ function jobDetailCard() {
         ${jobStatus(job)}
       </div>
       <div class="meta">${escapeHtml(job.id)} · ${escapeHtml(jobSchedule(job))}</div>
-      <div class="muted">${escapeHtml(job.stimulus)}</div>
       <div class="meta">next ${fmtTime(job.nextRunAt)} · last ${fmtTime(job.lastRunAt)} · runs ${job.runCount}</div>
       ${job.lastError ? `<div class="muted danger-text">${escapeHtml(job.lastError)}</div>` : ""}
+      <form class="job-edit-form" data-job-edit="${escapeHtml(job.id)}">
+        <label>
+          <span>Name</span>
+          <input name="name" value="${escapeHtml(job.name)}" required />
+        </label>
+        <label>
+          <span>Schedule</span>
+          <input name="schedule" value="${escapeHtml(job.schedule || jobSchedule(job))}" required />
+        </label>
+        <label class="wide">
+          <span>Stimulus</span>
+          <textarea name="stimulus" rows="3">${escapeHtml(job.stimulus || "")}</textarea>
+        </label>
+        <label>
+          <span>Script</span>
+          <input name="script" value="${escapeHtml(job.script || "")}" placeholder="Optional script path" />
+        </label>
+        <label>
+          <span>Working directory</span>
+          <input name="workdir" value="${escapeHtml(job.workdir || "")}" placeholder="Optional absolute path" />
+        </label>
+        <label class="wide">
+          <span>Skills</span>
+          <input name="skills" value="${escapeHtml((job.skills || []).join(", "))}" placeholder="Comma separated" />
+        </label>
+        <label class="check-field wide">
+          <input name="noAgent" type="checkbox" ${job.noAgent ? "checked" : ""} />
+          <span>Run script without agent</span>
+        </label>
+        <div class="row wide">
+          <button class="primary" type="submit">Save changes</button>
+        </div>
+      </form>
       <div class="row">
         <button class="primary" data-action="run-job" data-id="${escapeHtml(job.id)}">Run now</button>
         <button class="ghost" data-action="toggle-job" data-id="${escapeHtml(job.id)}">${job.enabled ? "Disable" : "Enable"}</button>
@@ -1337,6 +1397,7 @@ function renderLists() {
     void loadJobDetail(state.selectedJobId);
   }
   refs.jobDetail.innerHTML = jobDetailCard();
+  renderSchedulerFeedback();
   if (!visibleGateways.some((gateway) => gateway.id === state.selectedGatewayId)) {
     state.selectedGatewayId = visibleGateways[0]?.id || state.gateways[0]?.id || "";
     saveFilterState();
@@ -1611,6 +1672,10 @@ async function refreshAll() {
     state.logs = logs || [];
     state.approvals = approvals || [];
     state.jobs = jobs || [];
+    if (state.selectedJobId && !state.jobs.some((job) => job.id === state.selectedJobId)) {
+      state.selectedJobId = state.jobs[0]?.id || "";
+      saveFilterState();
+    }
     state.audit = audit || [];
     state.healing = healing || { failures: [], procedures: [] };
     state.gateways = gateways || [];
@@ -1639,6 +1704,11 @@ async function refreshAll() {
       await loadPlanDetail(state.selectedPlanId);
     } else {
       state.planDetail = null;
+    }
+    if (state.selectedJobId) {
+      await loadJobDetail(state.selectedJobId);
+    } else {
+      state.jobDetail = null;
     }
     if (!state.selectedGatewayId && state.gateways[0]?.id) {
       state.selectedGatewayId = state.gateways[0].id;
@@ -2081,18 +2151,78 @@ async function handleSlash(text) {
 async function createJob(event) {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
-  await api("/scheduler/jobs", {
-    method: "POST",
-    body: JSON.stringify({
-      name: form.get("name"),
-      stimulus: form.get("stimulus"),
-      schedule: form.get("schedule"),
-      enabled: true,
-    }),
-  });
-  event.currentTarget.reset();
-  event.currentTarget.elements.schedule.value = "every 1m";
-  await refreshAll();
+  try {
+    const job = await api("/scheduler/jobs", {
+      method: "POST",
+      body: JSON.stringify({
+        name: String(form.get("name") || "").trim(),
+        stimulus: String(form.get("stimulus") || "").trim(),
+        schedule: String(form.get("schedule") || "").trim(),
+        script: String(form.get("script") || "").trim(),
+        noAgent: form.get("noAgent") === "on",
+        workdir: String(form.get("workdir") || "").trim(),
+        skills: parseSkills(form.get("skills")),
+        enabled: true,
+      }),
+    });
+    event.currentTarget.reset();
+    event.currentTarget.elements.schedule.value = "every 1m";
+    state.selectedJobId = job.id || "";
+    saveFilterState();
+    const message = `Created scheduled job ${job.name || job.id}.`;
+    setSchedulerFeedback(message);
+    appendEvent("scheduler job created", message, "success");
+    await refreshAll();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    setSchedulerFeedback(`Create failed: ${message}`, "danger");
+    appendEvent("scheduler create failed", message, "danger");
+  }
+}
+
+async function updateJob(event) {
+  const formElement = event.target.closest("[data-job-edit]");
+  if (!formElement) return;
+  event.preventDefault();
+  const id = formElement.dataset.jobEdit;
+  const form = new FormData(formElement);
+  try {
+    await api(`/scheduler/jobs/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        name: String(form.get("name") || "").trim(),
+        stimulus: String(form.get("stimulus") || "").trim(),
+        schedule: String(form.get("schedule") || "").trim(),
+        script: String(form.get("script") || "").trim(),
+        noAgent: form.get("noAgent") === "on",
+        workdir: String(form.get("workdir") || "").trim(),
+        skills: parseSkills(form.get("skills")),
+      }),
+    });
+    const message = `Saved changes to ${String(form.get("name") || id).trim()}.`;
+    setSchedulerFeedback(message);
+    appendEvent("scheduler job updated", message, "success");
+    await refreshAll();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    setSchedulerFeedback(`Update failed: ${message}`, "danger");
+    appendEvent("scheduler update failed", message, "danger");
+  }
+}
+
+async function runDueJobs() {
+  try {
+    const result = await api("/scheduler/run-due", { method: "POST", body: "{}" });
+    const count = Number(result?.count || 0);
+    const message = count === 1 ? "Ran 1 due scheduled job." : `Ran ${count} due scheduled jobs.`;
+    setSchedulerFeedback(message, count ? "success" : "warn");
+    appendEvent("scheduler due run", message, count ? "success" : "warn");
+    await refreshAll();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    setSchedulerFeedback(`Run due failed: ${message}`, "danger");
+    appendEvent("scheduler due run failed", message, "danger");
+  }
 }
 
 async function searchMemory(event) {
@@ -2125,16 +2255,25 @@ async function clickAction(event) {
         body: JSON.stringify({ reason: "rejected from dashboard" }),
       });
     } else if (action === "run-job") {
-      await api(`/scheduler/jobs/${encodeURIComponent(id)}/run`, {
+      const result = await api(`/scheduler/jobs/${encodeURIComponent(id)}/run`, {
         method: "POST",
         body: "{}",
       });
+      const job = state.jobs.find((item) => item.id === id);
+      const message = result?.ok === false
+        ? `Run failed for ${job?.name || id}: ${result.error || "unknown error"}`
+        : `Ran scheduled job ${job?.name || id}.`;
+      setSchedulerFeedback(message, result?.ok === false ? "danger" : "success");
+      appendEvent("scheduler job run", message, result?.ok === false ? "danger" : "success");
     } else if (action === "toggle-job") {
       const job = state.jobs.find((item) => item.id === id);
       await api(`/scheduler/jobs/${encodeURIComponent(id)}/${job?.enabled ? "disable" : "enable"}`, {
         method: "POST",
         body: "{}",
       });
+      const message = `${job?.enabled ? "Disabled" : "Enabled"} scheduled job ${job?.name || id}.`;
+      setSchedulerFeedback(message);
+      appendEvent("scheduler job toggled", message, "success");
     } else if (action === "inspect-job") {
       state.selectedJobId = id;
       saveFilterState();
@@ -2174,7 +2313,16 @@ async function clickAction(event) {
       setView("plans");
       await loadPlanDetail(id);
     } else if (action === "delete-job") {
+      const job = state.jobs.find((item) => item.id === id);
       await api(`/scheduler/jobs/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (state.selectedJobId === id) {
+        state.selectedJobId = "";
+        state.jobDetail = null;
+        saveFilterState();
+      }
+      const message = `Deleted scheduled job ${job?.name || id}.`;
+      setSchedulerFeedback(message);
+      appendEvent("scheduler job deleted", message, "success");
     } else if (action === "promote-proc") {
       await api(`/healing/procedures/${encodeURIComponent(id)}/promote`, { method: "POST", body: "{}" });
     } else if (action === "deprecate-proc") {
@@ -2341,6 +2489,7 @@ function boot() {
   refs.reloadToolsButton.addEventListener("click", refreshAll);
   refs.reloadApprovalsButton.addEventListener("click", refreshAll);
   refs.reloadJobsButton.addEventListener("click", refreshAll);
+  refs.runDueJobsButton.addEventListener("click", runDueJobs);
   refs.reloadGatewayButton.addEventListener("click", refreshAll);
   refs.reloadHealingButton.addEventListener("click", refreshAll);
   refs.reloadAuditButton.addEventListener("click", refreshAll);
@@ -2445,6 +2594,7 @@ function boot() {
   });
   refs.memoryForm.addEventListener("submit", searchMemory);
   refs.jobForm.addEventListener("submit", createJob);
+  refs.jobDetail.addEventListener("submit", updateJob);
   refs.composeForm.addEventListener("submit", submitCompose);
   refs.sessionSelect.addEventListener("change", () => setSessionId(refs.sessionSelect.value));
   refs.taskFilterInput.addEventListener("input", () => {

@@ -249,6 +249,13 @@ export async function startInboxServer(opts: { port?: number; host?: string } = 
     const body = request.body as Record<string, unknown> | undefined;
     return runtime.consolidateMemory(body?.sessionId as string | undefined);
   });
+  server.post("/memory/reset", async (request) => {
+    const body = request.body as Record<string, unknown> | undefined;
+    return runtime.resetMemory({
+      target: body?.target as "all" | "memory" | "user" | undefined,
+      sessionId: body?.sessionId as string | undefined,
+    });
+  });
   server.get("/audit", async () => runtime.listAudit());
   server.get("/audit/:id", async (request, reply) => {
     const { id } = request.params as { id: string };

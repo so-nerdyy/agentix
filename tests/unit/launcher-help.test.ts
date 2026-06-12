@@ -24,6 +24,9 @@ describe("launcher help", () => {
     expect(result.stdout).toContain("server");
     expect(result.stdout).toContain("support");
     expect(result.stdout).toContain("plans");
+    expect(result.stdout).toContain("tasks, task");
+    expect(result.stdout).toContain("approvals, approval");
+    expect(result.stdout).toContain("healing");
     expect(result.stdout).toContain("--bridge-port");
   });
 
@@ -84,6 +87,11 @@ describe("launcher help", () => {
     expect(hermesCommands).toContain("logs");
     expect(backendCommands).not.toContain("gateway");
     expect(backendCommands).not.toContain("logs");
+    expect(backendCommands).toContain("task");
+    expect(backendCommands).toContain("approval");
+    expect(backendCommands).toContain("search");
+    expect(backendCommands).toContain("audit");
+    expect(backendCommands).toContain("healing");
   });
 
   it("does not start the bridge for setup/model before configuration exists", () => {

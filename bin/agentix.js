@@ -23,6 +23,13 @@ const BACKEND_COMMANDS = new Set([
   "support",
   "plans",
   "plan",
+  "tasks",
+  "task",
+  "approvals",
+  "approval",
+  "search",
+  "audit",
+  "healing",
   "mods",
   "plugin",
   "extension",
@@ -107,6 +114,11 @@ function buildLauncherHelp() {
     "                         flags: --port <n> --host <addr>",
     "  support                 create a support bundle",
     "  plans, plan             inspect Symphony plan executions",
+    "  tasks, task             list tasks or inspect/control one task",
+    "  approvals, approval     list approvals or decide one task",
+    "  search                   search backend runtime records",
+    "  audit                    list or inspect audit entries",
+    "  healing                  inspect/manage healing procedures",
     "  mods                    list available tools/modules",
     "  plugin, extension       plugin compatibility helpers",
     "  broadcast, eval, shell   backend compatibility entrypoints",
@@ -167,6 +179,48 @@ function buildCommandHelp(command) {
         "Usage: agentix --agentix-cli plan <plan-id>",
         "",
         "Prints the full Symphony plan execution record as JSON.",
+      ].join("\n");
+    case "tasks":
+      return [
+        "Usage: agentix tasks [session-id]",
+        "",
+        "Lists backend tasks, optionally filtered to one session.",
+      ].join("\n");
+    case "task":
+      return [
+        "Usage: agentix task <task-id> [inspect|approve|reject|cancel|retry|restart] [reason]",
+        "",
+        "Inspects or controls one backend task.",
+      ].join("\n");
+    case "approvals":
+      return [
+        "Usage: agentix approvals",
+        "",
+        "Lists tasks awaiting approval.",
+      ].join("\n");
+    case "approval":
+      return [
+        "Usage: agentix approval <task-id> [inspect|approve|reject] [reason]",
+        "",
+        "Inspects or decides one approval.",
+      ].join("\n");
+    case "search":
+      return [
+        "Usage: agentix search <query>",
+        "",
+        "Searches tasks, sessions, memory, logs, audit, jobs, plans, healing, and gateways.",
+      ].join("\n");
+    case "audit":
+      return [
+        "Usage: agentix audit [audit-id]",
+        "",
+        "Lists audit entries or prints one detailed entry.",
+      ].join("\n");
+    case "healing":
+      return [
+        "Usage: agentix healing [fingerprint|procedure-id] [inspect|promote|deprecate]",
+        "",
+        "Inspects healing state and manages learned recovery procedures.",
       ].join("\n");
     case "mods":
     case "plugin":

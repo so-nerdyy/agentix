@@ -136,6 +136,13 @@ export class AgentixBackend {
     return this.post("/memory/consolidate", { sessionId });
   }
 
+  async resetMemory(input: {
+    target?: "all" | "memory" | "user";
+    sessionId?: string;
+  } = {}): Promise<Record<string, unknown>> {
+    return this.post("/memory/reset", input);
+  }
+
   async listTools(): Promise<Array<{ name: string; description: string }>> {
     return this.get("/tools");
   }

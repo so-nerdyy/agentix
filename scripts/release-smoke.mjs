@@ -224,6 +224,8 @@ async function smokeCli() {
   const help = await run(agentixCommand, ["help"], { timeoutMs: 30_000 });
   assert(help.stdout.includes("open the Hermes-style interactive shell"), "agentix help missing shell launch help");
   assert(help.stdout.includes("server"), "agentix help missing server command");
+  assert(help.stdout.includes("tasks, task"), "agentix help missing task commands");
+  assert(help.stdout.includes("approvals, approval"), "agentix help missing approval commands");
 
   const workspaceDir = join(smokeRoot, "workspace-cli");
   await mkdir(workspaceDir, { recursive: true });
@@ -246,6 +248,25 @@ async function smokeCli() {
     timeoutMs: 60_000,
   });
   assert(support.stdout.includes("Support bundle:"), "agentix support did not create a support bundle");
+
+  const backendEnv = {
+    ...process.env,
+    AGENTIX_DATA_DIR: supportDataDir,
+  };
+  const search = await run(agentixCommand, ["--agentix-cli", "search", "release-smoke"], {
+    env: backendEnv,
+    timeoutMs: 60_000,
+  });
+  assert(search.stdout.includes("\"query\": \"release-smoke\""), "installed backend search command failed");
+  const healing = await run(agentixCommand, ["--agentix-cli", "healing"], {
+    env: backendEnv,
+    timeoutMs: 60_000,
+  });
+  assert(healing.stdout.includes("\"failures\""), "installed backend healing command failed");
+  await run(agentixCommand, ["--agentix-cli", "approvals"], {
+    env: backendEnv,
+    timeoutMs: 60_000,
+  });
 }
 
 async function smokeServer() {
@@ -368,6 +389,21 @@ async function smokeServer() {
     });
     assert(cronAdapter.stdout.includes("Created Agentix scheduled job"), "Hermes cron adapter did not create an Agentix scheduler job");
     assert(cronAdapter.stdout.includes("release smoke cli cron"), "Hermes cron adapter list did not include created job");
+
+    const memoryReset = await run(python, [
+      "-c",
+      [
+        "from types import SimpleNamespace",
+        "from hermes_cli.agentix_commands import handle_memory",
+        "args = SimpleNamespace(memory_command='reset', target='all', yes=True)",
+        "assert handle_memory(args)",
+      ].join("; "),
+    ], {
+      cwd: smokeRoot,
+      env: hermesEnv,
+      timeoutMs: 120_000,
+    });
+    assert(memoryReset.stdout.includes("Removed"), "Hermes memory reset did not route through Agentix backend");
 
     const execution = await fetchJson(`${inboxUrl}/execute`, {
       method: "POST",

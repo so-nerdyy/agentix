@@ -544,6 +544,26 @@ describe("Powerhouse restored runtime", () => {
     powerhouse.stop();
   });
 
+  it("resets Agentix memory by role target", () => {
+    const dir = tempDir("agentix-memory-reset-");
+    const memory = new MemoryStore(join(dir, "memory.jsonl"));
+    memory.add({ sessionId: "session-1", role: "user", content: "user profile", tags: [] });
+    memory.add({ sessionId: "session-1", role: "assistant", content: "assistant note", tags: [] });
+    memory.add({ sessionId: "session-2", role: "system", content: "system note", tags: [] });
+
+    const userReset = memory.reset({ roles: ["user"] });
+
+    expect(userReset.removed).toBe(1);
+    expect(memory.list()).toHaveLength(2);
+    expect(memory.list().some((record) => record.role === "user")).toBe(false);
+
+    const sessionReset = memory.reset({ sessionId: "session-1" });
+
+    expect(sessionReset.removed).toBe(1);
+    expect(memory.list()).toHaveLength(1);
+    expect(memory.list()[0]?.sessionId).toBe("session-2");
+  });
+
   it("runs scheduled jobs through Powerhouse", async () => {
     const powerhouse = makePowerhouse();
     const dir = tempDir("agentix-scheduler-");

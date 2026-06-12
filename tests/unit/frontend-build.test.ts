@@ -61,4 +61,30 @@ describe("frontend dashboard build surface", () => {
     expect(app).toContain("state.memorySearchResults = await api(`/memory/search?q=${encodeURIComponent(query)}`)");
     expect(app).toContain("state.memorySearchResults.map(memorySearchCard)");
   });
+
+  it("exposes scheduler parity controls and advanced create fields", () => {
+    const html = readFrontendFile("src", "index.html");
+
+    expect(html).toContain('id="runDueJobsButton"');
+    expect(html).toContain('id="schedulerFeedback"');
+    expect(html).toContain('name="script"');
+    expect(html).toContain('name="noAgent"');
+    expect(html).toContain('name="workdir"');
+    expect(html).toContain('name="skills"');
+  });
+
+  it("creates, edits, and runs due scheduler jobs with feedback events", () => {
+    const app = readFrontendFile("src", "app.js");
+
+    expect(app).toContain('api("/scheduler/jobs", {');
+    expect(app).toContain('api(`/scheduler/jobs/${encodeURIComponent(id)}`, {');
+    expect(app).toContain('method: "PUT"');
+    expect(app).toContain('api("/scheduler/run-due", { method: "POST", body: "{}" })');
+    expect(app).toContain('appendEvent("scheduler job created"');
+    expect(app).toContain('appendEvent("scheduler job updated"');
+    expect(app).toContain('appendEvent("scheduler due run"');
+    expect(app).toContain('data-job-edit="${escapeHtml(job.id)}"');
+    expect(app).toContain('skills: parseSkills(form.get("skills"))');
+    expect(app).toContain('noAgent: form.get("noAgent") === "on"');
+  });
 });

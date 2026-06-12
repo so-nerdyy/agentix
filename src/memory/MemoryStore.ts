@@ -78,6 +78,24 @@ export class MemoryStore {
     });
   }
 
+  reset(input: { sessionId?: string; roles?: MemoryRole[] } = {}): { removed: number; remaining: number } {
+    this.ensureLoaded();
+    const roles = input.roles?.length ? new Set(input.roles) : null;
+    const kept = this.records.filter((record) => {
+      const sessionMatches = !input.sessionId || record.sessionId === input.sessionId;
+      const roleMatches = !roles || roles.has(record.role);
+      return !(sessionMatches && roleMatches);
+    });
+    const removed = this.records.length - kept.length;
+    this.records.splice(0, this.records.length, ...kept);
+    writeFileSync(
+      this.file,
+      kept.length ? `${kept.map((record) => JSON.stringify(record)).join("\n")}\n` : "",
+      "utf-8",
+    );
+    return { removed, remaining: kept.length };
+  }
+
   private ensureLoaded(): void {
     if (this.loaded) return;
     this.loaded = true;
