@@ -68,6 +68,17 @@ export async function startInboxServer(opts: { port?: number; host?: string } = 
   }));
   server.get("/doctor", async () => runtime.doctor());
   server.get("/usage", async () => runtime.usage());
+  server.get("/config", async () => runtime.config());
+  server.post("/config", async (request, reply) => {
+    const body = request.body as Record<string, unknown> | undefined;
+    if (!body?.key) {
+      reply.status(400);
+      return { ok: false, error: "missing config key" };
+    }
+    const result = runtime.setConfigValue(String(body.key), body.value);
+    if (result.ok === false) reply.status(400);
+    return result;
+  });
 
   server.post("/execute/stream", async (request, reply) => {
     const body = request.body as Record<string, unknown>;

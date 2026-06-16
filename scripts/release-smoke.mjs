@@ -349,6 +349,19 @@ async function smokeServer() {
     });
     assert(installedUsage.stdout.includes("Agentix backend usage"), "installed agentix usage did not route through Agentix backend");
 
+    const configSet = await run(agentixCommand, ["config", "set", "provider", "openai"], {
+      cwd: smokeRoot,
+      env: hermesEnv,
+      timeoutMs: 120_000,
+    });
+    assert(configSet.stdout.includes("Set Agentix config provider=openai"), "installed agentix config set did not route through Agentix backend");
+    const configShow = await run(agentixCommand, ["config", "show"], {
+      cwd: smokeRoot,
+      env: hermesEnv,
+      timeoutMs: 120_000,
+    });
+    assert(configShow.stdout.includes("\"provider\": \"openai\""), "installed agentix config show did not read Agentix backend config");
+
     const oneshot = await run(python, [
       "-c",
       "from hermes_cli.oneshot import run_oneshot; raise SystemExit(run_oneshot('release smoke oneshot delegation'))",

@@ -45,9 +45,18 @@ function mergeFromDisk(): AgentixConfig {
   try {
     const raw = readFileSync(PATHS.configFile, "utf-8");
     const parsed = JSON.parse(raw) as Partial<AgentixConfig>;
-    // Never let api_key come from disk. Env wins; otherwise null.
-    const { llmApiKey: _omit, ...rest } = parsed;
-    return { ...DEFAULTS, ...rest, llmApiKey: DEFAULTS.llmApiKey };
+    // Never let secrets come from disk. Environment wins; otherwise null.
+    const {
+      llmApiKey: _omitApiKey,
+      sessionToken: _omitSessionToken,
+      ...rest
+    } = parsed;
+    return {
+      ...DEFAULTS,
+      ...rest,
+      llmApiKey: DEFAULTS.llmApiKey,
+      sessionToken: DEFAULTS.sessionToken,
+    };
   } catch {
     return { ...DEFAULTS };
   }
@@ -64,8 +73,12 @@ export function loadConfig(): AgentixConfig {
 export function saveConfig(partial: Partial<AgentixConfig>): AgentixConfig {
   const current = loadConfig();
   const next: AgentixConfig = { ...current, ...partial };
-  // Strip api key before writing to disk.
-  const { llmApiKey: _omit, ...persisted } = next;
+  // Strip secrets before writing to disk.
+  const {
+    llmApiKey: _omitApiKey,
+    sessionToken: _omitSessionToken,
+    ...persisted
+  } = next;
   writeFileSync(PATHS.configFile, JSON.stringify(persisted, null, 2), "utf-8");
   cached = next;
   return next;

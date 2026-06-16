@@ -166,6 +166,12 @@ class AgentixBackend:
     def usage(self) -> Any:
         return self._get("/usage", timeout=60)
 
+    def config(self) -> Any:
+        return self._get("/config")
+
+    def set_config(self, key: str, value: Any) -> Any:
+        return self._post("/config", {"key": key, "value": value})
+
     def get_session(self, session_id: str) -> Any:
         return self._get(f"/sessions/{quote(session_id)}")
 

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -261,6 +263,91 @@ def handle_status(args: Any) -> bool:
         print()
         _print_doctor_report(report)
     return True
+
+
+def handle_config(args: Any) -> bool:
+    if not using_agentix_backend():
+        return False
+
+    backend = _backend()
+    command = getattr(args, "config_command", None) or "show"
+    if command in {"env-path", "migrate"}:
+        return False
+
+    config = backend.config()
+    if not isinstance(config, dict):
+        config = {}
+
+    if command == "show":
+        _dump(config)
+        return True
+
+    if command == "path":
+        print(config.get("configFile") or (_data_dir() / "config.json"))
+        return True
+
+    if command == "check":
+        missing = []
+        if not config.get("model"):
+            missing.append("model")
+        if not config.get("provider"):
+            missing.append("provider")
+        print("Agentix backend configuration")
+        print(f"  Path: {config.get('configFile', _data_dir() / 'config.json')}")
+        print(f"  Model: {config.get('provider', 'n/a')} / {config.get('model', 'n/a')}")
+        print(f"  LLM key: {'configured' if config.get('llmApiKeyConfigured') else 'missing'}")
+        print(f"  Session token: {'configured' if config.get('sessionTokenConfigured') else 'missing'}")
+        print(f"  Status: {'incomplete' if missing else 'ok'}")
+        return True
+
+    if command == "set":
+        key = str(getattr(args, "key", "") or "").strip()
+        value = getattr(args, "value", None)
+        if not key or value is None:
+            print("Usage: agentix config set <key> <value>")
+            print("Keys: model, provider, baseUrl, sessionTtlMs, approvalTimeoutMs, inboxPort, bridgePort")
+            return True
+        aliases = {
+            "base_url": "baseUrl",
+            "base-url": "baseUrl",
+            "session_ttl": "sessionTtlMs",
+            "session-ttl": "sessionTtlMs",
+            "approval_timeout": "approvalTimeoutMs",
+            "approval-timeout": "approvalTimeoutMs",
+            "inbox_port": "inboxPort",
+            "inbox-port": "inboxPort",
+            "bridge_port": "bridgePort",
+            "bridge-port": "bridgePort",
+        }
+        normalized = aliases.get(key, key)
+        result = backend.set_config(normalized, value)
+        if result.get("ok"):
+            print(f"Set Agentix config {normalized}={result.get('value')}")
+        else:
+            print(result.get("error", "Agentix config update failed."))
+        return True
+
+    if command == "edit":
+        path = Path(str(config.get("configFile") or (_data_dir() / "config.json")))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            path.write_text("{}\n", encoding="utf-8")
+        try:
+            editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
+            if editor:
+                subprocess.run([*shlex.split(editor), str(path)], check=False)
+            elif os.name == "nt":
+                os.startfile(str(path))  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(path)])
+            else:
+                subprocess.Popen(["xdg-open", str(path)])
+        except Exception as exc:
+            print(f"Could not open editor: {exc}")
+            print(path)
+        return True
+
+    return False
 
 
 def handle_usage(args: Any) -> bool:

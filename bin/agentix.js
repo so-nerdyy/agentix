@@ -67,7 +67,6 @@ const BRIDGELESS_HERMES_COMMANDS = new Set([
   "model",
   "update",
   "auth",
-  "config",
   "plugins",
   "skills",
   "fortune",

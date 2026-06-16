@@ -163,6 +163,14 @@ export class AgentixBackend {
     return this.get("/usage");
   }
 
+  async config(): Promise<Record<string, unknown>> {
+    return this.get("/config");
+  }
+
+  async setConfig(key: string, value: unknown): Promise<Record<string, unknown>> {
+    return this.post("/config", { key, value });
+  }
+
   async listPlans(): Promise<Array<Record<string, unknown>>> {
     return this.get("/plans");
   }

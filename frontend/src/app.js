@@ -36,6 +36,9 @@ const state = {
   logs: [],
   supportBundle: null,
   diagnostics: null,
+  usage: null,
+  usageLoading: false,
+  usageError: "",
   events: [],
   health: null,
   taskDetail: null,
@@ -90,6 +93,13 @@ const refs = {
   auditDetail: el("auditDetail"),
   reloadLogsButton: el("reloadLogsButton"),
   logDetail: el("logDetail"),
+  reloadUsageButton: el("reloadUsageButton"),
+  usageGeneratedAt: el("usageGeneratedAt"),
+  usageSummary: el("usageSummary"),
+  usageTaskStatuses: el("usageTaskStatuses"),
+  usageJobStatuses: el("usageJobStatuses"),
+  usageGateways: el("usageGateways"),
+  usageNote: el("usageNote"),
   createSupportButton: el("createSupportButton"),
   reloadDiagnosticsButton: el("reloadDiagnosticsButton"),
   diagnosticsSummary: el("diagnosticsSummary"),
@@ -159,6 +169,7 @@ const viewTitles = {
   healing: "Healing and procedures",
   audit: "Audit trail",
   logs: "Logs",
+  usage: "Runtime usage",
   diagnostics: "Doctor diagnostics",
   support: "Support bundle",
   sessions: "Sessions",
@@ -269,6 +280,7 @@ function paletteItems() {
     { title: "Healing", hint: "Review failure fingerprints", action: () => setView("healing"), keywords: ["heal", "healing", "failure"] },
     { title: "Audit", hint: "Inspect the audit trail", action: () => setView("audit"), keywords: ["audit", "log"] },
     { title: "Logs", hint: "Inspect runtime logs", action: () => setView("logs"), keywords: ["logs", "log"] },
+    { title: "Usage", hint: "Inspect runtime counts and status breakdowns", action: async () => { setView("usage"); await loadUsage(); }, keywords: ["usage", "counts", "tasks", "jobs", "gateways"] },
     { title: "Doctor", hint: "Run backend readiness diagnostics", action: async () => { setView("diagnostics"); await loadDiagnostics(); }, keywords: ["doctor", "diagnostics", "health", "readiness"] },
     { title: "Support bundle", hint: "Generate runtime bundle", action: async () => { setView("support"); state.supportBundle = await api("/support/bundle", { method: "POST" }); appendEvent("support bundle", `Created bundle at ${state.supportBundle.bundleDir}`, "success"); render(); }, keywords: ["support", "bundle"] },
     { title: "Sessions", hint: "Open session management", action: () => setView("sessions"), keywords: ["session", "sessions"] },
@@ -414,6 +426,70 @@ function renderStats() {
       `,
     )
     .join("");
+}
+
+function usageStatusTone(status) {
+  const value = String(status).toLowerCase();
+  if (["complete", "completed", "success", "succeeded", "pass"].includes(value)) return "success";
+  if (["failed", "failure", "error", "rejected", "cancelled"].includes(value)) return "danger";
+  if (["queued", "running", "awaiting-approval", "never-run", "warn"].includes(value)) return "warn";
+  return "";
+}
+
+function usageBreakdown(entries, emptyMessage) {
+  const rows = Object.entries(entries || {}).sort(([left], [right]) => left.localeCompare(right));
+  return rows.length
+    ? rows.map(([status, count]) => `
+        <div class="usage-breakdown-row">
+          <span class="pill ${usageStatusTone(status)}">${escapeHtml(status)}</span>
+          <strong>${escapeHtml(count)}</strong>
+        </div>
+      `).join("")
+    : `<div class="card muted">${escapeHtml(emptyMessage)}</div>`;
+}
+
+function renderUsage() {
+  if (!refs.usageSummary) return;
+  refs.reloadUsageButton.disabled = state.usageLoading;
+  refs.reloadUsageButton.textContent = state.usageLoading ? "Loading..." : "Reload";
+
+  if (state.usageLoading && !state.usage) {
+    refs.usageGeneratedAt.textContent = "Loading current runtime usage...";
+    refs.usageSummary.innerHTML = '<div class="card muted">Requesting usage from Agentix.</div>';
+    refs.usageTaskStatuses.innerHTML = "";
+    refs.usageJobStatuses.innerHTML = "";
+    refs.usageGateways.innerHTML = "";
+    refs.usageNote.textContent = "Provider usage details have not been loaded.";
+    return;
+  }
+
+  if (!state.usage) {
+    refs.usageGeneratedAt.textContent = state.usageError ? "Usage request failed." : "Usage has not been loaded yet.";
+    refs.usageSummary.innerHTML = `<div class="card muted">${escapeHtml(state.usageError || "Reload to request runtime usage.")}</div>`;
+    refs.usageTaskStatuses.innerHTML = "";
+    refs.usageJobStatuses.innerHTML = "";
+    refs.usageGateways.innerHTML = "";
+    refs.usageNote.textContent = "Provider usage details have not been loaded.";
+    return;
+  }
+
+  const counts = state.usage.counts || {};
+  const countEntries = Object.entries(counts);
+  refs.usageGeneratedAt.textContent = `Generated ${fmtTime(state.usage.generatedAt)}`;
+  refs.usageSummary.innerHTML = countEntries.length
+    ? countEntries.map(([label, count]) => `
+        <div class="usage-metric">
+          <div class="stat-label">${escapeHtml(label.replace(/([a-z])([A-Z])/g, "$1 $2"))}</div>
+          <div class="stat-value">${escapeHtml(count)}</div>
+        </div>
+      `).join("")
+    : '<div class="card muted">No runtime counts were returned.</div>';
+  refs.usageTaskStatuses.innerHTML = usageBreakdown(state.usage.tasksByStatus, "No task statuses recorded.");
+  refs.usageJobStatuses.innerHTML = usageBreakdown(state.usage.jobsByLastStatus, "No job statuses recorded.");
+  refs.usageGateways.innerHTML = (state.usage.enabledGateways || []).length
+    ? state.usage.enabledGateways.map((gateway) => `<span class="pill success">${escapeHtml(gateway)}</span>`).join("")
+    : '<div class="card muted">No gateways are enabled.</div>';
+  refs.usageNote.textContent = state.usage.note || "Runtime usage loaded.";
 }
 
 function taskCard(task) {
@@ -1483,6 +1559,7 @@ function render() {
   renderToken();
   renderHealth();
   renderStats();
+  renderUsage();
   renderLists();
   renderSearch();
   renderHistory();
@@ -1649,9 +1726,10 @@ function renderSearch() {
 
 async function refreshAll() {
   try {
-    const [health, diagnostics, sessions, tasks, plans, tools, logs, approvals, jobs, audit, healing, gateways] = await Promise.all([
+    const [health, diagnostics, usage, sessions, tasks, plans, tools, logs, approvals, jobs, audit, healing, gateways] = await Promise.all([
       api("/health"),
       api("/doctor").catch(() => null),
+      api("/usage").catch(() => null),
       api("/sessions"),
       api(`/tasks${state.sessionId ? `?sessionId=${encodeURIComponent(state.sessionId)}` : ""}`),
       api("/plans").catch(() => []),
@@ -1665,6 +1743,8 @@ async function refreshAll() {
     ]);
     state.health = health;
     state.diagnostics = diagnostics;
+    state.usage = usage;
+    state.usageError = usage ? "" : state.usageError;
     state.sessions = sessions || [];
     state.tasks = tasks || [];
     state.plans = plans || [];
@@ -1751,6 +1831,22 @@ async function loadDiagnostics() {
     appendEvent("doctor failed", err instanceof Error ? err.message : String(err), "danger");
   }
   render();
+}
+
+async function loadUsage() {
+  state.usageLoading = true;
+  state.usageError = "";
+  renderUsage();
+  try {
+    state.usage = await api("/usage");
+    appendEvent("usage", "Loaded current runtime usage.", "success");
+  } catch (err) {
+    state.usageError = err instanceof Error ? err.message : String(err);
+    appendEvent("usage failed", state.usageError, "danger");
+  } finally {
+    state.usageLoading = false;
+    renderUsage();
+  }
 }
 
 async function loadTaskDetail(taskId) {
@@ -2114,8 +2210,16 @@ async function handleSlash(text) {
       setView("scheduler");
       await refreshAll();
       break;
+    case "gateway":
+      setView("gateway");
+      await refreshAll();
+      break;
     case "memory":
       setView("memory");
+      await refreshAll();
+      break;
+    case "healing":
+      setView("healing");
       await refreshAll();
       break;
     case "audit":
@@ -2126,6 +2230,10 @@ async function handleSlash(text) {
       setView("logs");
       await refreshAll();
       break;
+    case "usage":
+      setView("usage");
+      await loadUsage();
+      break;
     case "doctor":
     case "diagnostics":
       setView("diagnostics");
@@ -2133,7 +2241,9 @@ async function handleSlash(text) {
       break;
     case "support":
       setView("support");
-      await refreshAll();
+      state.supportBundle = await api("/support/bundle", { method: "POST" });
+      appendEvent("support bundle", `Created bundle at ${state.supportBundle.bundleDir}`, "success");
+      render();
       break;
     case "sessions":
       setView("sessions");
@@ -2463,10 +2573,17 @@ function boot() {
     button.addEventListener("click", () => setView(button.dataset.view));
   });
   document.querySelectorAll("[data-quick]").forEach((button) => {
-    button.addEventListener("click", () => {
-      refs.composeInput.value = button.dataset.quick;
-      const quick = button.dataset.quick?.replace(/^\//, "") || "compose";
-      setView(quick === "doctor" ? "diagnostics" : quick === "diagnostics" ? "diagnostics" : quick === "scheduler" ? "scheduler" : quick === "support" ? "support" : quick === "logs" ? "logs" : quick === "memory" ? "memory" : quick === "plans" ? "plans" : quick === "tasks" ? "tasks" : quick === "tools" ? "tools" : quick === "approvals" ? "approvals" : quick === "gateway" ? "gateway" : quick);
+    button.addEventListener("click", async () => {
+      const command = button.dataset.quick || "";
+      if (!command) return;
+      refs.composeInput.value = command;
+      appendEvent("command", command);
+      try {
+        await handleSlash(command);
+        refs.composeInput.value = "";
+      } catch (err) {
+        appendEvent("command failed", err instanceof Error ? err.message : String(err), "danger");
+      }
     });
   });
   refs.saveTokenButton.addEventListener("click", async () => {
@@ -2494,6 +2611,7 @@ function boot() {
   refs.reloadHealingButton.addEventListener("click", refreshAll);
   refs.reloadAuditButton.addEventListener("click", refreshAll);
   refs.reloadLogsButton.addEventListener("click", refreshAll);
+  refs.reloadUsageButton.addEventListener("click", loadUsage);
   refs.reloadDiagnosticsButton.addEventListener("click", loadDiagnostics);
   refs.pruneSessionsButton.addEventListener("click", async () => {
     const daysText = prompt("Prune sessions older than how many days?", "90");

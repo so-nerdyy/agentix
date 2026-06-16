@@ -4,7 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 
 import { join } from "node:path";
 import { PATHS } from "../config/paths.js";
 import { EventBus } from "../config/EventBus.js";
-import { loadConfig } from "../config/index.js";
+import { loadConfig, saveConfig, type AgentixConfig } from "../config/index.js";
 import { randomUUID } from "node:crypto";
 import { RuntimeLogStore } from "../logging/RuntimeLogStore.js";
 import type { TaskAction } from "../powerhouse/types.js";
@@ -1313,6 +1313,66 @@ export class LocalAgentixRuntime {
       enabledGateways: gateways.filter((gateway) => gateway.enabled).map((gateway) => gateway.id),
       note: "Provider token and cost usage is not persisted yet; this reports backend runtime usage.",
     };
+  }
+
+  config(): Record<string, unknown> {
+    const config = loadConfig();
+    return {
+      model: config.model,
+      provider: config.provider,
+      baseUrl: config.baseUrl,
+      sessionTtlMs: config.sessionTtlMs,
+      approvalTimeoutMs: config.approvalTimeoutMs,
+      inboxPort: config.inboxPort,
+      bridgePort: config.bridgePort,
+      dataDir: config.dataDir,
+      workspace: PATHS.workspaceRoot,
+      configFile: PATHS.configFile,
+      llmApiKeyConfigured: Boolean(config.llmApiKey),
+      sessionTokenConfigured: Boolean(config.sessionToken),
+    };
+  }
+
+  setConfigValue(key: string, value: unknown): Record<string, unknown> {
+    const normalized = key.trim();
+    const numericKeys = new Set([
+      "sessionTtlMs",
+      "approvalTimeoutMs",
+      "inboxPort",
+      "bridgePort",
+    ]);
+    const stringKeys = new Set(["model", "provider", "baseUrl"]);
+    if (!numericKeys.has(normalized) && !stringKeys.has(normalized)) {
+      return {
+        ok: false,
+        error: `unsupported config key: ${normalized}`,
+        allowedKeys: [...stringKeys, ...numericKeys],
+      };
+    }
+
+    let parsed: string | number | null;
+    if (numericKeys.has(normalized)) {
+      const number = Number(value);
+      if (!Number.isFinite(number) || number <= 0) {
+        return { ok: false, error: `${normalized} must be a positive number` };
+      }
+      parsed = number;
+    } else {
+      const text = String(value ?? "").trim();
+      parsed = normalized === "baseUrl" && !text ? null : text;
+      if (normalized !== "baseUrl" && !parsed) {
+        return { ok: false, error: `${normalized} cannot be empty` };
+      }
+    }
+
+    saveConfig({ [normalized]: parsed } as Partial<AgentixConfig>);
+    this.powerhouse.audit.record({
+      type: "config.updated",
+      actor: "user",
+      subjectId: normalized,
+      data: { key: normalized, value: parsed },
+    });
+    return { ok: true, key: normalized, value: parsed, config: this.config() };
   }
 
   doctor(): Record<string, unknown> {

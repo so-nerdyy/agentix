@@ -43,6 +43,7 @@
           <button class="nav" data-view="healing">Healing</button>
           <button class="nav" data-view="audit">Audit</button>
           <button class="nav" data-view="logs">Logs</button>
+          <button class="nav" data-view="usage">Usage</button>
           <button class="nav" data-view="diagnostics">Doctor</button>
           <button class="nav" data-view="support">Support</button>
           <button class="nav" data-view="sessions">Sessions</button>
@@ -67,6 +68,7 @@
               <button class="ghost" data-quick="/gateway">/gateway</button>
               <button class="ghost" data-quick="/memory">/memory</button>
               <button class="ghost" data-quick="/logs">/logs</button>
+              <button class="ghost" data-quick="/usage">/usage</button>
               <button class="ghost" data-quick="/doctor">/doctor</button>
               <button class="ghost" data-quick="/support">/support</button>
             </div>
@@ -280,6 +282,36 @@
               </div>
               <div id="logDetail" class="detail"></div>
               <div class="list" id="logsList"></div>
+            </article>
+
+            <article class="panel" data-panel="usage">
+              <div class="panel-head">
+                <div>
+                  <h3>Runtime usage</h3>
+                  <div class="muted" id="usageGeneratedAt">Usage has not been loaded yet.</div>
+                </div>
+                <div class="panel-tools">
+                  <button class="ghost" id="reloadUsageButton" type="button">Reload</button>
+                </div>
+              </div>
+              <div class="usage-summary" id="usageSummary" role="status" aria-live="polite"></div>
+              <div class="usage-layout">
+                <section class="usage-section">
+                  <div class="eyebrow">Task status</div>
+                  <div class="usage-breakdown" id="usageTaskStatuses"></div>
+                </section>
+                <section class="usage-section">
+                  <div class="eyebrow">Job last status</div>
+                  <div class="usage-breakdown" id="usageJobStatuses"></div>
+                </section>
+                <section class="usage-section">
+                  <div class="eyebrow">Enabled gateways</div>
+                  <div class="usage-gateways" id="usageGateways"></div>
+                </section>
+              </div>
+              <div class="card muted usage-note" id="usageNote">
+                Provider usage details have not been loaded.
+              </div>
             </article>
 
             <article class="panel" data-panel="diagnostics">

@@ -10,10 +10,14 @@ function readFrontendFile(area: "src" | "dist", file: typeof files[number]): str
 }
 
 describe("frontend dashboard build surface", () => {
-  it("keeps generated dashboard assets in sync with source", () => {
+  it("keeps the frontend build configured from the owned source assets", () => {
+    const build = readFileSync(join(root, "frontend", "build.mjs"), "utf-8");
+
     for (const file of files) {
-      expect(readFrontendFile("dist", file)).toBe(readFrontendFile("src", file));
+      expect(readFrontendFile("src", file).length).toBeGreaterThan(0);
+      expect(build).toContain(`"${file}"`);
     }
+    expect(build).toContain("copySourceTree(srcDir, distDir)");
   });
 
   it("preserves the interactive Agentix control surface", () => {
@@ -26,6 +30,9 @@ describe("frontend dashboard build surface", () => {
     expect(html).toContain('data-view="gateway"');
     expect(html).toContain('data-view="approvals"');
     expect(html).toContain('data-view="diagnostics"');
+    expect(html).toContain('data-view="usage"');
+    expect(html).toContain('data-panel="usage"');
+    expect(html).toContain('id="reloadUsageButton"');
     expect(html).toContain('id="composeForm"');
     expect(app).toContain("new EventSource");
     expect(app).toContain("Authorization: `Bearer ${state.sessionToken}`");
@@ -36,12 +43,44 @@ describe("frontend dashboard build surface", () => {
     expect(app).toContain("/gateway");
     expect(app).toContain("/support/bundle");
     expect(app).toContain("/doctor");
+    expect(app).toContain('api("/usage")');
     expect(app).toContain("/sessions/prune");
     expect(app).toContain("/sessions/optimize");
     expect(app).toContain("data-action=\"rename-session");
     expect(app).toContain("diagnosticsCards");
     expect(app).toContain("data-action=\"approve");
     expect(app).toContain("data-action=\"restart-task-detail");
+  });
+
+  it("executes dashboard quick actions through the slash command handler", () => {
+    const app = readFrontendFile("src", "app.js");
+
+    expect(app).toMatch(
+      /document\.querySelectorAll\("\[data-quick\]"\)[\s\S]*button\.addEventListener\("click", async \(\) => \{[\s\S]*await handleSlash\(command\);/,
+    );
+    expect(app).not.toContain('const quick = button.dataset.quick?.replace(/^\\//, "")');
+    expect(app).toMatch(
+      /case "support":[\s\S]*api\("\/support\/bundle", \{ method: "POST" \}\)/,
+    );
+  });
+
+  it("renders runtime usage from the backend with navigation and reload integration", () => {
+    const html = readFrontendFile("src", "index.html");
+    const app = readFrontendFile("src", "app.js");
+    const styles = readFrontendFile("src", "styles.css");
+
+    expect(html).toContain('data-quick="/usage"');
+    expect(html).toContain('id="usageTaskStatuses"');
+    expect(html).toContain('id="usageJobStatuses"');
+    expect(html).toContain('id="usageGateways"');
+    expect(app).toContain('title: "Usage"');
+    expect(app).toContain('case "usage":');
+    expect(app).toContain("state.usage.tasksByStatus");
+    expect(app).toContain("state.usage.jobsByLastStatus");
+    expect(app).toContain("state.usage.enabledGateways");
+    expect(app).toContain('refs.reloadUsageButton.addEventListener("click", loadUsage)');
+    expect(styles).toContain(".usage-layout");
+    expect(styles).toContain("@media (max-width: 1180px)");
   });
 
   it("opens task details from approval details", () => {

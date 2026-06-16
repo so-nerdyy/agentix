@@ -42,6 +42,21 @@ describe("HTTP session token auth", () => {
       expect((await fetch(`${base}/usage`, {
         headers: { Authorization: "Bearer secret-token" },
       })).status).toBe(200);
+      const config = await fetch(`${base}/config`, {
+        headers: { Authorization: "Bearer secret-token" },
+      });
+      expect(config.status).toBe(200);
+      expect((await config.json()) as Record<string, unknown>).not.toHaveProperty("llmApiKey");
+      const configUpdate = await fetch(`${base}/config`, {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer secret-token",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ key: "provider", value: "openai" }),
+      });
+      expect(configUpdate.status).toBe(200);
+      expect((await configUpdate.json()) as { ok: boolean }).toMatchObject({ ok: true });
       expect((await fetch(`${base}/memory`, {
         headers: { Authorization: "Bearer secret-token" },
       })).status).toBe(200);

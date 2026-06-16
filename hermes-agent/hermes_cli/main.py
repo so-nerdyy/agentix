@@ -6383,6 +6383,10 @@ def cmd_debug(args):
 
 def cmd_config(args):
     """Configuration management."""
+    from hermes_cli.agentix_commands import handle_config
+    if handle_config(args):
+        return
+
     from hermes_cli.config import config_command
 
     config_command(args)
