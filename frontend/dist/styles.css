@@ -54,6 +54,13 @@ button:hover {
   transform: translateY(-1px);
 }
 
+a.link-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
 button:disabled {
   cursor: wait;
   opacity: 0.65;
@@ -428,6 +435,56 @@ button:disabled {
   border-left: 3px solid var(--accent-2);
 }
 
+.config-summary {
+  display: grid;
+  gap: 12px;
+}
+
+.config-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.config-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  background: var(--bg-alt);
+}
+
+.config-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.config-form label span {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 11px;
+}
+
+.config-form input {
+  background: rgba(5, 11, 20, 0.65);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 12px;
+  outline: none;
+}
+
+.config-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .panel-stack {
   display: grid;
 }
@@ -765,6 +822,11 @@ button:disabled {
   }
 
   .usage-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .config-grid,
+  .config-form {
     grid-template-columns: 1fr;
   }
 }

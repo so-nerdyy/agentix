@@ -39,6 +39,9 @@ const state = {
   usage: null,
   usageLoading: false,
   usageError: "",
+  config: null,
+  configLoading: false,
+  configFeedback: "",
   events: [],
   health: null,
   taskDetail: null,
@@ -100,6 +103,10 @@ const refs = {
   usageJobStatuses: el("usageJobStatuses"),
   usageGateways: el("usageGateways"),
   usageNote: el("usageNote"),
+  reloadConfigButton: el("reloadConfigButton"),
+  configSummary: el("configSummary"),
+  configForm: el("configForm"),
+  configFeedback: el("configFeedback"),
   createSupportButton: el("createSupportButton"),
   reloadDiagnosticsButton: el("reloadDiagnosticsButton"),
   diagnosticsSummary: el("diagnosticsSummary"),
@@ -170,6 +177,7 @@ const viewTitles = {
   audit: "Audit trail",
   logs: "Logs",
   usage: "Runtime usage",
+  config: "Backend config",
   diagnostics: "Doctor diagnostics",
   support: "Support bundle",
   sessions: "Sessions",
@@ -281,6 +289,7 @@ function paletteItems() {
     { title: "Audit", hint: "Inspect the audit trail", action: () => setView("audit"), keywords: ["audit", "log"] },
     { title: "Logs", hint: "Inspect runtime logs", action: () => setView("logs"), keywords: ["logs", "log"] },
     { title: "Usage", hint: "Inspect runtime counts and status breakdowns", action: async () => { setView("usage"); await loadUsage(); }, keywords: ["usage", "counts", "tasks", "jobs", "gateways"] },
+    { title: "Config", hint: "Inspect and update Agentix backend config", action: async () => { setView("config"); await loadConfigPanel(); }, keywords: ["config", "provider", "model", "ports", "api"] },
     { title: "Doctor", hint: "Run backend readiness diagnostics", action: async () => { setView("diagnostics"); await loadDiagnostics(); }, keywords: ["doctor", "diagnostics", "health", "readiness"] },
     { title: "Support bundle", hint: "Generate runtime bundle", action: async () => { setView("support"); state.supportBundle = await api("/support/bundle", { method: "POST" }); appendEvent("support bundle", `Created bundle at ${state.supportBundle.bundleDir}`, "success"); render(); }, keywords: ["support", "bundle"] },
     { title: "Sessions", hint: "Open session management", action: () => setView("sessions"), keywords: ["session", "sessions"] },
@@ -490,6 +499,64 @@ function renderUsage() {
     ? state.usage.enabledGateways.map((gateway) => `<span class="pill success">${escapeHtml(gateway)}</span>`).join("")
     : '<div class="card muted">No gateways are enabled.</div>';
   refs.usageNote.textContent = state.usage.note || "Runtime usage loaded.";
+}
+
+function configValue(key) {
+  return state.config && state.config[key] !== undefined && state.config[key] !== null
+    ? String(state.config[key])
+    : "";
+}
+
+function renderConfigPanel() {
+  if (!refs.configSummary) return;
+  if (refs.reloadConfigButton) {
+    refs.reloadConfigButton.disabled = state.configLoading;
+    refs.reloadConfigButton.textContent = state.configLoading ? "Loading..." : "Reload";
+  }
+  if (refs.configFeedback) {
+    refs.configFeedback.textContent = state.configFeedback || "Config values save to Agentix backend runtime config.";
+  }
+
+  if (!state.config) {
+    refs.configSummary.innerHTML = `<div class="card muted">${state.configLoading ? "Loading backend config..." : "Reload to inspect backend config."}</div>`;
+    return;
+  }
+
+  const form = refs.configForm;
+  if (form) {
+    for (const key of ["provider", "model", "baseUrl", "inboxPort", "bridgePort", "sessionTtlMs", "approvalTimeoutMs"]) {
+      if (form.elements[key] && document.activeElement !== form.elements[key]) {
+        form.elements[key].value = configValue(key);
+      }
+    }
+  }
+
+  refs.configSummary.innerHTML = `
+    <div class="config-grid">
+      <div class="usage-metric">
+        <div class="stat-label">Provider</div>
+        <div class="stat-value">${escapeHtml(state.config.provider || "n/a")}</div>
+      </div>
+      <div class="usage-metric">
+        <div class="stat-label">Model</div>
+        <div class="stat-value">${escapeHtml(state.config.model || "n/a")}</div>
+      </div>
+      <div class="usage-metric">
+        <div class="stat-label">LLM key</div>
+        <div class="stat-value">${state.config.llmApiKeyConfigured ? "Configured" : "Missing"}</div>
+      </div>
+      <div class="usage-metric">
+        <div class="stat-label">API token</div>
+        <div class="stat-value">${state.config.sessionTokenConfigured ? "Configured" : "Loopback only"}</div>
+      </div>
+    </div>
+    <div class="card muted">
+      <div>Workspace: ${escapeHtml(state.config.workspace || "n/a")}</div>
+      <div>Data: ${escapeHtml(state.config.dataDir || "n/a")}</div>
+      <div>Config: ${escapeHtml(state.config.configFile || "n/a")}</div>
+      <div>Base URL: ${escapeHtml(state.config.baseUrl || "(provider default)")}</div>
+    </div>
+  `;
 }
 
 function taskCard(task) {
@@ -1560,6 +1627,7 @@ function render() {
   renderHealth();
   renderStats();
   renderUsage();
+  renderConfigPanel();
   renderLists();
   renderSearch();
   renderHistory();
@@ -1726,10 +1794,11 @@ function renderSearch() {
 
 async function refreshAll() {
   try {
-    const [health, diagnostics, usage, sessions, tasks, plans, tools, logs, approvals, jobs, audit, healing, gateways] = await Promise.all([
+    const [health, diagnostics, usage, config, sessions, tasks, plans, tools, logs, approvals, jobs, audit, healing, gateways] = await Promise.all([
       api("/health"),
       api("/doctor").catch(() => null),
       api("/usage").catch(() => null),
+      api("/config").catch(() => null),
       api("/sessions"),
       api(`/tasks${state.sessionId ? `?sessionId=${encodeURIComponent(state.sessionId)}` : ""}`),
       api("/plans").catch(() => []),
@@ -1745,6 +1814,7 @@ async function refreshAll() {
     state.diagnostics = diagnostics;
     state.usage = usage;
     state.usageError = usage ? "" : state.usageError;
+    state.config = config;
     state.sessions = sessions || [];
     state.tasks = tasks || [];
     state.plans = plans || [];
@@ -1846,6 +1916,65 @@ async function loadUsage() {
   } finally {
     state.usageLoading = false;
     renderUsage();
+  }
+}
+
+async function loadConfigPanel() {
+  state.configLoading = true;
+  state.configFeedback = "";
+  renderConfigPanel();
+  try {
+    state.config = await api("/config");
+    state.configFeedback = "Backend config loaded.";
+    appendEvent("config", "Loaded backend config.", "success");
+  } catch (err) {
+    state.configFeedback = err instanceof Error ? err.message : String(err);
+    appendEvent("config failed", state.configFeedback, "danger");
+  } finally {
+    state.configLoading = false;
+    renderConfigPanel();
+  }
+}
+
+async function saveConfigPanel(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const keys = ["provider", "model", "baseUrl", "inboxPort", "bridgePort", "sessionTtlMs", "approvalTimeoutMs"];
+  const updates = [];
+  for (const key of keys) {
+    const input = form.elements[key];
+    if (!input) continue;
+    const next = String(input.value ?? "").trim();
+    const current = configValue(key);
+    if (next !== current) {
+      updates.push([key, input.type === "number" ? Number(next) : next]);
+    }
+  }
+  if (updates.length === 0) {
+    state.configFeedback = "No config changes to save.";
+    renderConfigPanel();
+    return;
+  }
+  state.configLoading = true;
+  state.configFeedback = `Saving ${updates.length} setting(s)...`;
+  renderConfigPanel();
+  try {
+    for (const [key, value] of updates) {
+      const result = await api("/config", {
+        method: "POST",
+        body: JSON.stringify({ key, value }),
+      });
+      state.config = result.config || state.config;
+    }
+    state.configFeedback = "Config saved. Restart server if port changes should take effect.";
+    appendEvent("config saved", updates.map(([key]) => key).join(", "), "success");
+    await refreshAll();
+  } catch (err) {
+    state.configFeedback = err instanceof Error ? err.message : String(err);
+    appendEvent("config save failed", state.configFeedback, "danger");
+  } finally {
+    state.configLoading = false;
+    renderConfigPanel();
   }
 }
 
@@ -2234,6 +2363,10 @@ async function handleSlash(text) {
       setView("usage");
       await loadUsage();
       break;
+    case "config":
+      setView("config");
+      await loadConfigPanel();
+      break;
     case "doctor":
     case "diagnostics":
       setView("diagnostics");
@@ -2612,6 +2745,8 @@ function boot() {
   refs.reloadAuditButton.addEventListener("click", refreshAll);
   refs.reloadLogsButton.addEventListener("click", refreshAll);
   refs.reloadUsageButton.addEventListener("click", loadUsage);
+  refs.reloadConfigButton.addEventListener("click", loadConfigPanel);
+  refs.configForm.addEventListener("submit", saveConfigPanel);
   refs.reloadDiagnosticsButton.addEventListener("click", loadDiagnostics);
   refs.pruneSessionsButton.addEventListener("click", async () => {
     const daysText = prompt("Prune sessions older than how many days?", "90");

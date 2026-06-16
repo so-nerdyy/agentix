@@ -31,8 +31,11 @@ describe("frontend dashboard build surface", () => {
     expect(html).toContain('data-view="approvals"');
     expect(html).toContain('data-view="diagnostics"');
     expect(html).toContain('data-view="usage"');
+    expect(html).toContain('data-view="config"');
     expect(html).toContain('data-panel="usage"');
+    expect(html).toContain('data-panel="config"');
     expect(html).toContain('id="reloadUsageButton"');
+    expect(html).toContain('id="configForm"');
     expect(html).toContain('id="composeForm"');
     expect(app).toContain("new EventSource");
     expect(app).toContain("Authorization: `Bearer ${state.sessionToken}`");
@@ -44,6 +47,7 @@ describe("frontend dashboard build surface", () => {
     expect(app).toContain("/support/bundle");
     expect(app).toContain("/doctor");
     expect(app).toContain('api("/usage")');
+    expect(app).toContain('api("/config")');
     expect(app).toContain("/sessions/prune");
     expect(app).toContain("/sessions/optimize");
     expect(app).toContain("data-action=\"rename-session");
@@ -81,6 +85,25 @@ describe("frontend dashboard build surface", () => {
     expect(app).toContain('refs.reloadUsageButton.addEventListener("click", loadUsage)');
     expect(styles).toContain(".usage-layout");
     expect(styles).toContain("@media (max-width: 1180px)");
+  });
+
+  it("renders backend config controls from the Agentix config API", () => {
+    const html = readFrontendFile("src", "index.html");
+    const app = readFrontendFile("src", "app.js");
+    const styles = readFrontendFile("src", "styles.css");
+
+    expect(html).toContain('data-quick="/config"');
+    expect(html).toContain('href="/openapi.json"');
+    expect(html).toContain('name="provider"');
+    expect(html).toContain('name="model"');
+    expect(html).toContain('name="baseUrl"');
+    expect(html).toContain('name="approvalTimeoutMs"');
+    expect(app).toContain("function renderConfigPanel()");
+    expect(app).toContain("function saveConfigPanel(event)");
+    expect(app).toContain('case "config":');
+    expect(app).toContain('body: JSON.stringify({ key, value })');
+    expect(styles).toContain(".config-form");
+    expect(styles).toContain(".config-grid");
   });
 
   it("opens task details from approval details", () => {

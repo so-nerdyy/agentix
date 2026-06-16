@@ -44,6 +44,7 @@
           <button class="nav" data-view="audit">Audit</button>
           <button class="nav" data-view="logs">Logs</button>
           <button class="nav" data-view="usage">Usage</button>
+          <button class="nav" data-view="config">Config</button>
           <button class="nav" data-view="diagnostics">Doctor</button>
           <button class="nav" data-view="support">Support</button>
           <button class="nav" data-view="sessions">Sessions</button>
@@ -69,6 +70,7 @@
               <button class="ghost" data-quick="/memory">/memory</button>
               <button class="ghost" data-quick="/logs">/logs</button>
               <button class="ghost" data-quick="/usage">/usage</button>
+              <button class="ghost" data-quick="/config">/config</button>
               <button class="ghost" data-quick="/doctor">/doctor</button>
               <button class="ghost" data-quick="/support">/support</button>
             </div>
@@ -323,6 +325,54 @@
               </div>
               <div class="card muted" id="diagnosticsSummary">Run backend diagnostics to verify setup, runtime state, integrations, and recovery readiness.</div>
               <div class="list" id="diagnosticsList"></div>
+            </article>
+
+            <article class="panel" data-panel="config">
+              <div class="panel-head">
+                <div>
+                  <h3>Backend config</h3>
+                  <div class="muted">Agentix-owned runtime config. Secrets are shown only as configured/missing.</div>
+                </div>
+                <div class="panel-tools">
+                  <a class="ghost link-button" href="/openapi.json" target="_blank" rel="noreferrer">OpenAPI</a>
+                  <button class="ghost" id="reloadConfigButton" type="button">Reload</button>
+                </div>
+              </div>
+              <div class="config-summary" id="configSummary"></div>
+              <form class="config-form" id="configForm">
+                <label>
+                  <span>Provider</span>
+                  <input name="provider" placeholder="openai, anthropic, local" />
+                </label>
+                <label>
+                  <span>Model</span>
+                  <input name="model" placeholder="gpt-5.3-codex" />
+                </label>
+                <label>
+                  <span>Base URL</span>
+                  <input name="baseUrl" placeholder="optional provider endpoint" />
+                </label>
+                <label>
+                  <span>Inbox port</span>
+                  <input name="inboxPort" type="number" min="1" step="1" />
+                </label>
+                <label>
+                  <span>Bridge port</span>
+                  <input name="bridgePort" type="number" min="1" step="1" />
+                </label>
+                <label>
+                  <span>Session TTL ms</span>
+                  <input name="sessionTtlMs" type="number" min="1" step="1" />
+                </label>
+                <label>
+                  <span>Approval timeout ms</span>
+                  <input name="approvalTimeoutMs" type="number" min="1" step="1" />
+                </label>
+                <div class="config-actions">
+                  <button class="primary" type="submit">Save config</button>
+                  <span class="muted" id="configFeedback">Reload to view current runtime config.</span>
+                </div>
+              </form>
             </article>
 
             <article class="panel" data-panel="support">
