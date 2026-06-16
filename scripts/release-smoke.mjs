@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readdir, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -214,6 +214,21 @@ async function packAndInstall() {
   });
   assert(existsSync(agentixCommand), `installed agentix command missing: ${agentixCommand}`);
   assert(existsSync(agentixEntrypoint), `installed agentix entrypoint missing: ${agentixEntrypoint}`);
+}
+
+function smokeInstallScripts() {
+  log("checking bootstrap installer scripts");
+  const shellInstaller = readFileSync(join(root, "install.sh"), "utf-8");
+  assert(shellInstaller.includes("Install Agentix globally with npm."), "install.sh is not the Agentix installer");
+  assert(shellInstaller.includes("AGENTIX_PACKAGE"), "install.sh missing AGENTIX_PACKAGE support");
+  assert(shellInstaller.includes("npm install -g"), "install.sh missing global npm install");
+  assert(shellInstaller.includes("agentix setup"), "install.sh missing setup next step");
+  assert(!shellInstaller.includes("caveman"), "install.sh contains unrelated plugin installer content");
+
+  const powershellInstaller = readFileSync(join(root, "install.ps1"), "utf-8");
+  assert(powershellInstaller.includes("Installing Agentix package"), "install.ps1 is not the Agentix installer");
+  assert(powershellInstaller.includes("npm install -g"), "install.ps1 missing global npm install");
+  assert(powershellInstaller.includes("agentix setup"), "install.ps1 missing setup next step");
 }
 
 async function smokeCli() {
@@ -471,6 +486,7 @@ async function smokeServer() {
 
 try {
   await removeDirWithRetries(smokeRoot);
+  smokeInstallScripts();
   await packAndInstall();
   await smokeCli();
   await smokeServer();
