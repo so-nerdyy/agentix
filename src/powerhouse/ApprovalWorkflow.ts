@@ -14,9 +14,15 @@ export class ApprovalWorkflow {
   private readonly pending = new Map<string, Task>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
   private readonly timeoutMs: number;
+  private timeoutHandler?: (task: Task, reason: string) => void;
 
-  constructor(opts: { timeoutMs?: number } = {}) {
+  constructor(opts: { timeoutMs?: number; onTimeout?: (task: Task, reason: string) => void } = {}) {
     this.timeoutMs = opts.timeoutMs ?? loadConfig().approvalTimeoutMs;
+    this.timeoutHandler = opts.onTimeout;
+  }
+
+  setTimeoutHandler(handler: (task: Task, reason: string) => void): void {
+    this.timeoutHandler = handler;
   }
 
   /**
@@ -30,10 +36,12 @@ export class ApprovalWorkflow {
     const t = setTimeout(() => {
       this.pending.delete(task.id);
       this.timers.delete(task.id);
+      const reason = `Auto-rejected: approval timeout after ${this.timeoutMs}ms`;
+      this.timeoutHandler?.(task, reason);
       EventBus.emit("task:reject", {
         taskId: task.id,
         sessionId: task.sessionId,
-        reason: `Auto-rejected: approval timeout after ${this.timeoutMs}ms`,
+        reason,
       });
     }, this.timeoutMs);
     // Don't keep the event loop alive just for the approval timer.

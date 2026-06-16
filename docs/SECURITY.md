@@ -11,6 +11,7 @@ Agentix assumes the local workspace may contain untrusted inputs, scripts, and t
 - `agentix setup` and `agentix model` sync only non-secret provider/model defaults into Agentix backend config
 - Session tokens should be scoped to the current workspace or deployment
 - When `AGENTIX_SESSION_TOKEN` is set, inbox/dashboard control APIs, bridge control APIs, and event streams require `Authorization: Bearer <token>` or `?token=<token>` for SSE
+- Non-loopback API binds such as `0.0.0.0` are refused unless `AGENTIX_SESSION_TOKEN` is configured or `AGENTIX_ALLOW_UNAUTHENTICATED=1` is explicitly set for development
 
 ## Execution Boundaries
 
@@ -19,8 +20,9 @@ Agentix assumes the local workspace may contain untrusted inputs, scripts, and t
 - Shell/UI layers must not become a second source of truth for task state
 - `bash`, `code-edit`, and `sandbox-run` task kinds are approval-gated by default
 - `code-edit` task paths are restricted to the configured project root
-- `sandbox-run` task files are restricted to the task sandbox directory
-- The sandbox is a local filesystem boundary, not container or kernel-level isolation
+- `sandbox-run` task files are restricted to the task sandbox directory, commands are limited to an allowlist, and child process environment is stripped
+- The sandbox is a local filesystem/process boundary, not container or kernel-level isolation
+- Scheduled script jobs are restricted to configured script directories and run with a reduced environment; treat them as trusted automation, not untrusted code execution
 
 ## Validation
 

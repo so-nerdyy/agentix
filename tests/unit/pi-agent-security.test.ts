@@ -113,6 +113,20 @@ describe("Pi agent safety guards", () => {
 
     expect(agent.list()).toEqual([]);
   });
+
+  it("rejects sandbox commands outside the explicit allowlist", async () => {
+    const rootDir = tempDir("agentix-sandbox-root-");
+    const agent = new SandboxAgent({ rootDir });
+
+    const result = await agent.execute(makeTask("sandbox-run", {
+      code: "echo nope",
+      filename: "snippet.sh",
+      command: ["bash", "snippet.sh"],
+    }));
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("not allowed");
+  });
 });
 
 describe("approval defaults", () => {

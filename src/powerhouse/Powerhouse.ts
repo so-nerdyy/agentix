@@ -67,6 +67,9 @@ export class Powerhouse {
     this.planStore = opts.planStore ?? new PlanStore();
     this.taskStore = opts.taskStore ?? new TaskStore();
     this.audit = opts.audit ?? new AuditLog();
+    this.approvals.setTimeoutHandler((task, reason) => {
+      this.rejectExpiredApproval(task.id, reason);
+    });
   }
 
   start(): void {
@@ -190,6 +193,27 @@ export class Powerhouse {
       });
     }
     return rejected;
+  }
+
+  private rejectExpiredApproval(taskId: string, reason: string): boolean {
+    const task = this.queue.get(taskId);
+    if (!task || task.status !== "awaiting-approval") return false;
+    this.queue.transition(task, "rejected");
+    task.error = reason;
+    this.taskStore.upsert(task);
+    this.sessions.removePendingTask(task.sessionId, task.id);
+    this.audit.record({
+      type: "approval.timeout_rejected",
+      actor: "system",
+      subjectId: task.id,
+      data: { sessionId: task.sessionId, kind: task.kind, reason },
+    });
+    EventBus.emit("task:failed", {
+      taskId: task.id,
+      sessionId: task.sessionId,
+      error: reason,
+    });
+    return true;
   }
 
   async controlTask(taskId: string, action: TaskAction): Promise<TaskResult> {

@@ -22,7 +22,8 @@ import {
 import { EventBus } from "./EventBus.js";
 import { ensureDataDirs, PATHS } from "./paths.js";
 import { getBackendRuntime } from "../runtime/backend.js";
-import { requireSessionToken } from "./HttpAuth.js";
+import { assertSafeListenHost, requireSessionToken } from "./HttpAuth.js";
+import { openApiSpec } from "./openapi.js";
 
 const VERSION = "2.1.0";
 
@@ -36,6 +37,7 @@ export async function startInboxServer(opts: { port?: number; host?: string } = 
   const cfg = loadConfig();
   const port = opts.port ?? cfg.inboxPort;
   const host = opts.host ?? "127.0.0.1";
+  assertSafeListenHost(host, cfg.sessionToken);
 
   const server = Fastify({ logger: false });
   const runtime = getBackendRuntime();
@@ -53,6 +55,7 @@ export async function startInboxServer(opts: { port?: number; host?: string } = 
     const isPublic =
       pathname === "/" ||
       pathname === "/health" ||
+      pathname === "/openapi.json" ||
       pathname === "/ui" ||
       pathname === "/ui/" ||
       pathname.startsWith("/ui/");
@@ -66,6 +69,7 @@ export async function startInboxServer(opts: { port?: number; host?: string } = 
     version: VERSION,
     sseClients: subscriberCount(),
   }));
+  server.get("/openapi.json", async () => openApiSpec);
   server.get("/doctor", async () => runtime.doctor());
   server.get("/usage", async () => runtime.usage());
   server.get("/config", async () => runtime.config());

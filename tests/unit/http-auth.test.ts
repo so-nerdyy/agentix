@@ -15,11 +15,13 @@ describe("HTTP session token auth", () => {
   const envBackup = {
     AGENTIX_DATA_DIR: process.env.AGENTIX_DATA_DIR,
     AGENTIX_SESSION_TOKEN: process.env.AGENTIX_SESSION_TOKEN,
+    AGENTIX_ALLOW_UNAUTHENTICATED: process.env.AGENTIX_ALLOW_UNAUTHENTICATED,
   };
 
   afterEach(async () => {
     process.env.AGENTIX_DATA_DIR = envBackup.AGENTIX_DATA_DIR;
     process.env.AGENTIX_SESSION_TOKEN = envBackup.AGENTIX_SESSION_TOKEN;
+    process.env.AGENTIX_ALLOW_UNAUTHENTICATED = envBackup.AGENTIX_ALLOW_UNAUTHENTICATED;
     vi.resetModules();
     while (dirs.length > 0) {
       rmSync(dirs.pop()!, { recursive: true, force: true });
@@ -35,6 +37,9 @@ describe("HTTP session token auth", () => {
 
     try {
       expect((await fetch(`${base}/health`)).status).toBe(200);
+      const openapi = await fetch(`${base}/openapi.json`);
+      expect(openapi.status).toBe(200);
+      expect((await openapi.json()) as Record<string, unknown>).toMatchObject({ openapi: "3.1.0" });
       expect((await fetch(`${base}/sessions`)).status).toBe(401);
       expect((await fetch(`${base}/sessions`, {
         headers: { Authorization: "Bearer secret-token" },
@@ -94,6 +99,9 @@ describe("HTTP session token auth", () => {
 
     try {
       expect((await fetch(`${base}/health`)).status).toBe(200);
+      const openapi = await fetch(`${base}/openapi.json`);
+      expect(openapi.status).toBe(200);
+      expect((await openapi.json()) as Record<string, unknown>).toMatchObject({ openapi: "3.1.0" });
       expect((await fetch(`${base}/sessions`)).status).toBe(401);
       expect((await fetch(`${base}/sessions`, {
         headers: { Authorization: "Bearer bridge-token" },
@@ -105,4 +113,15 @@ describe("HTTP session token auth", () => {
       await server.close();
     }
   }, 30_000);
+
+  it("refuses non-loopback control API binds without a session token", async () => {
+    process.env.AGENTIX_DATA_DIR = tempDir();
+    delete process.env.AGENTIX_SESSION_TOKEN;
+    delete process.env.AGENTIX_ALLOW_UNAUTHENTICATED;
+    const { startInboxServer } = await import("../../src/config/InboxServer.js");
+    const { startBridge } = await import("../../src/bridge/server.js");
+
+    await expect(startInboxServer({ port: 0, host: "0.0.0.0" })).rejects.toThrow("AGENTIX_SESSION_TOKEN");
+    await expect(startBridge({ port: 0, host: "0.0.0.0" })).rejects.toThrow("AGENTIX_SESSION_TOKEN");
+  });
 });

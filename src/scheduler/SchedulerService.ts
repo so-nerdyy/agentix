@@ -308,9 +308,14 @@ export class SchedulerService {
       const child = spawn(command, args, {
         cwd: this.resolveWorkdir(job.workdir),
         env: {
-          ...process.env,
+          PATH: process.env.PATH ?? "",
+          HOME: process.env.HOME ?? process.env.USERPROFILE ?? "",
+          USERPROFILE: process.env.USERPROFILE ?? process.env.HOME ?? "",
+          TMP: process.env.TMP ?? process.env.TEMP ?? "",
+          TEMP: process.env.TEMP ?? process.env.TMP ?? "",
           AGENTIX_CRON_JOB_ID: job.id,
           AGENTIX_CRON_JOB_NAME: job.name,
+          AGENTIX_CRON_SCRIPT: "1",
         },
         windowsHide: true,
       });

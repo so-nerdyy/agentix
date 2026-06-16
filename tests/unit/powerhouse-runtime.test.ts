@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -102,6 +102,31 @@ describe("Powerhouse restored runtime", () => {
     expect(powerhouse.listTasks()[0]?.kind).toBe("bash");
 
     powerhouse.stop();
+  });
+
+  it("persists approval timeout as a rejected task", async () => {
+    vi.useFakeTimers();
+    const powerhouse = makePowerhouse();
+    try {
+      const result = await powerhouse.executeStimulus({
+        stimulus: "run: echo timeout-reject",
+      });
+      const taskId = result.taskIds[0]!;
+
+      expect(result.status).toBe("awaiting-approval");
+      expect(powerhouse.listApprovals()).toHaveLength(1);
+
+      await vi.advanceTimersByTimeAsync(10_050);
+
+      const task = powerhouse.listTasks().find((item) => item.id === taskId);
+      expect(powerhouse.listApprovals()).toHaveLength(0);
+      expect(task?.status).toBe("rejected");
+      expect(task?.error).toContain("approval timeout");
+      expect(powerhouse.audit.list().some((entry) => entry.type === "approval.timeout_rejected")).toBe(true);
+    } finally {
+      powerhouse.stop();
+      vi.useRealTimers();
+    }
   });
 
   it("executes approved shell commands through the platform shell", async () => {

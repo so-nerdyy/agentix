@@ -26,3 +26,19 @@ export function requireSessionToken(
   reply.code(401).send({ error: "unauthorized" });
   return false;
 }
+
+export function isLoopbackHost(host: string | undefined): boolean {
+  const normalized = (host || "127.0.0.1").toLowerCase();
+  return normalized === "localhost" ||
+    normalized === "127.0.0.1" ||
+    normalized === "::1";
+}
+
+export function assertSafeListenHost(host: string | undefined, configuredToken: string | null | undefined): void {
+  if (configuredToken || isLoopbackHost(host)) return;
+  if (process.env.AGENTIX_ALLOW_UNAUTHENTICATED === "1") return;
+  throw new Error(
+    "Refusing to expose Agentix control APIs on a non-loopback host without AGENTIX_SESSION_TOKEN. " +
+    "Set AGENTIX_SESSION_TOKEN or set AGENTIX_ALLOW_UNAUTHENTICATED=1 for explicit local/dev override.",
+  );
+}

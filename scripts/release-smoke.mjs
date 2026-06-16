@@ -278,6 +278,31 @@ async function smokeCli() {
     timeoutMs: 60_000,
   });
   assert(healing.stdout.includes("\"failures\""), "installed backend healing command failed");
+  const usage = await run(agentixCommand, ["--agentix-cli", "usage"], {
+    env: backendEnv,
+    timeoutMs: 60_000,
+  });
+  assert(usage.stdout.includes("\"counts\""), "installed backend usage command failed");
+  const config = await run(agentixCommand, ["--agentix-cli", "config", "show"], {
+    env: backendEnv,
+    timeoutMs: 60_000,
+  });
+  assert(config.stdout.includes("\"provider\""), "installed backend config command failed");
+  const memory = await run(agentixCommand, ["--agentix-cli", "memory", "status"], {
+    env: backendEnv,
+    timeoutMs: 60_000,
+  });
+  assert(memory.stdout.includes("\"records\""), "installed backend memory command failed");
+  const sessionCreate = await run(agentixCommand, ["--agentix-cli", "sessions", "create", "smoke-model"], {
+    env: backendEnv,
+    timeoutMs: 60_000,
+  });
+  assert(sessionCreate.stdout.includes("\"id\""), "installed backend sessions create command failed");
+  const cronList = await run(agentixCommand, ["--agentix-cli", "cron", "list"], {
+    env: backendEnv,
+    timeoutMs: 60_000,
+  });
+  assert(cronList.stdout !== undefined, "installed backend cron list command failed");
   await run(agentixCommand, ["--agentix-cli", "approvals"], {
     env: backendEnv,
     timeoutMs: 60_000,
@@ -335,6 +360,9 @@ async function smokeServer() {
     const ui = await fetchText(`${inboxUrl}/ui/`);
     assert(ui.includes("Agentix Control"), "dashboard HTML missing Agentix Control");
     assert(ui.includes("Command palette"), "dashboard HTML missing command palette");
+    const openapi = await fetchJson(`${inboxUrl}/openapi.json`);
+    assert(openapi.openapi === "3.1.0", "inbox OpenAPI contract missing");
+    assert(openapi.paths["/execute/stream"], "OpenAPI contract missing execute stream path");
 
     log("checking installed Hermes Python entrypoints");
     const hermesEnv = {

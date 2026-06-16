@@ -1,6 +1,6 @@
-// SandboxAgent — runs untrusted code in an isolated working directory
-// under <dataDir>/sandboxes/<sessionId>/. No network, no escape outside
-// the sandbox. Used for running generated code, tests, etc.
+// SandboxAgent - runs generated code in a restricted working directory
+// under <dataDir>/sandboxes/<sessionId>/. This is a filesystem boundary with
+// a command allowlist and stripped env, not kernel/container isolation.
 
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -13,16 +13,26 @@ export interface SandboxAgentOpts {
   rootDir?: string;
   /** Wall-clock timeout in ms. Default 30s. */
   timeoutMs?: number;
+  /** Executables allowed inside the lightweight sandbox runner. */
+  allowedCommands?: string[];
 }
 
 export class SandboxAgent extends BasePIAgent {
   private readonly rootDir: string;
   private readonly timeoutMs: number;
+  private readonly allowedCommands: Set<string>;
 
   constructor(opts: SandboxAgentOpts = {}) {
     super("sandbox-run");
     this.rootDir = opts.rootDir ?? PATHS.sandboxesDir;
     this.timeoutMs = opts.timeoutMs ?? 30_000;
+    this.allowedCommands = new Set([
+      ...(opts.allowedCommands ?? ["node"]),
+      ...(process.env.AGENTIX_SANDBOX_ALLOWED_COMMANDS ?? "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ]);
   }
 
   async execute(task: Task): Promise<TaskResult> {
@@ -46,6 +56,7 @@ export class SandboxAgent extends BasePIAgent {
 
     let filePath: string;
     try {
+      this.validateCommand(command);
       filePath = this.resolveSandboxPath(sandbox, filename);
       mkdirSync(dirname(filePath), { recursive: true });
       writeFileSync(filePath, code, "utf-8");
@@ -58,8 +69,13 @@ export class SandboxAgent extends BasePIAgent {
     return new Promise<TaskResult>((resolve) => {
       const child = spawn(command[0], command.slice(1), {
         cwd: sandbox,
-        env: { PATH: process.env.PATH ?? "" },
+        env: {
+          PATH: process.env.PATH ?? "",
+          NODE_ENV: "test",
+          AGENTIX_SANDBOX: "1",
+        },
         stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
       });
 
       let stdout = "";
@@ -136,5 +152,18 @@ export class SandboxAgent extends BasePIAgent {
       throw new Error(`SandboxAgent: filename escapes sandbox: ${filename}`);
     }
     return candidate;
+  }
+
+  private validateCommand(command: string[]): void {
+    const executable = command[0];
+    if (!executable || isAbsolute(executable) || executable.includes("/") || executable.includes("\\")) {
+      throw new Error(`SandboxAgent: executable must be a bare allowed command: ${executable ?? ""}`);
+    }
+    if (!this.allowedCommands.has(executable)) {
+      throw new Error(
+        `SandboxAgent: command "${executable}" is not allowed. ` +
+        `Allowed commands: ${Array.from(this.allowedCommands).sort().join(", ")}`,
+      );
+    }
   }
 }

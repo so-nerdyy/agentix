@@ -63,6 +63,18 @@ function formatDoctorReport(report: Record<string, unknown>): string {
   ].join("\n");
 }
 
+function printJson(value: unknown): void {
+  console.log(JSON.stringify(value, null, 2));
+}
+
+function parseBoolean(value: string | undefined): boolean | undefined {
+  if (value === undefined) return undefined;
+  const normalized = value.toLowerCase();
+  if (["1", "true", "yes", "on", "enable", "enabled"].includes(normalized)) return true;
+  if (["0", "false", "no", "off", "disable", "disabled"].includes(normalized)) return false;
+  return undefined;
+}
+
 async function main() {
   const [cmd, ...args] = process.argv.slice(2);
   const portArg = readFlagValue(args, "--port");
@@ -134,10 +146,200 @@ async function main() {
       {
         const report = getBackendRuntime().doctor();
         if (cleanArgs.includes("--json")) {
-          console.log(JSON.stringify(report, null, 2));
+          printJson(report);
         } else {
           console.log(formatDoctorReport(report));
         }
+      }
+      return;
+    case "usage":
+      ensureDataDirs();
+      printJson(getBackendRuntime().usage());
+      return;
+    case "config":
+      ensureDataDirs();
+      {
+        const [action = "show", key, ...valueParts] = cleanArgs;
+        const runtime = getBackendRuntime();
+        if (action === "show" || action === "check") {
+          printJson(runtime.config());
+          return;
+        }
+        if (action === "path") {
+          const config = runtime.config();
+          console.log(String(config.configFile ?? ""));
+          return;
+        }
+        if (action === "set") {
+          if (!key || valueParts.length === 0) {
+            console.log("Usage: agentix config set <key> <value>");
+            return;
+          }
+          printJson(runtime.setConfigValue(key, valueParts.join(" ")));
+          return;
+        }
+        console.log("Usage: agentix config [show|check|path|set <key> <value>]");
+      }
+      return;
+    case "sessions":
+      ensureDataDirs();
+      {
+        const [action = "list", idOrValue, ...rest] = cleanArgs;
+        const runtime = getBackendRuntime();
+        if (action === "list") {
+          for (const session of runtime.listSessions()) {
+            console.log(`${session.id}: created=${session.createdAt}`);
+          }
+          return;
+        }
+        if (action === "create") {
+          const model = idOrValue || undefined;
+          printJson(runtime.createSession(model ? { model } : undefined));
+          return;
+        }
+        if (action === "inspect") {
+          if (!idOrValue) {
+            console.log("Usage: agentix sessions inspect <session-id>");
+            return;
+          }
+          printJson(runtime.getSession(idOrValue));
+          return;
+        }
+        if (action === "rename") {
+          if (!idOrValue || rest.length === 0) {
+            console.log("Usage: agentix sessions rename <session-id> <title>");
+            return;
+          }
+          printJson(runtime.renameSession(idOrValue, rest.join(" ")));
+          return;
+        }
+        if (action === "delete") {
+          if (!idOrValue) {
+            console.log("Usage: agentix sessions delete <session-id>");
+            return;
+          }
+          runtime.deleteSession(idOrValue);
+          printJson({ ok: true, deleted: idOrValue });
+          return;
+        }
+        if (action === "prune") {
+          printJson(runtime.pruneSessions({ olderThanDays: Number(idOrValue || 90) }));
+          return;
+        }
+        if (action === "optimize") {
+          printJson(runtime.optimizeSessions());
+          return;
+        }
+        console.log("Usage: agentix sessions [list|create [model]|inspect <id>|rename <id> <title>|delete <id>|prune [days]|optimize]");
+      }
+      return;
+    case "memory":
+      ensureDataDirs();
+      {
+        const [action = "status", ...memoryArgs] = cleanArgs;
+        const runtime = getBackendRuntime();
+        if (action === "status") {
+          const records = runtime.listMemory();
+          const byRole = new Map<string, number>();
+          for (const record of records) {
+            const role = String(record.role ?? "unknown");
+            byRole.set(role, (byRole.get(role) ?? 0) + 1);
+          }
+          printJson({ records: records.length, byRole: Object.fromEntries(byRole) });
+          return;
+        }
+        if (action === "list") {
+          printJson(runtime.listMemory(memoryArgs[0]));
+          return;
+        }
+        if (action === "search") {
+          const query = memoryArgs.join(" ").trim();
+          if (!query) {
+            console.log("Usage: agentix memory search <query>");
+            return;
+          }
+          printJson(runtime.memorySearch(query));
+          return;
+        }
+        if (action === "consolidate") {
+          printJson(runtime.consolidateMemory(memoryArgs[0]));
+          return;
+        }
+        if (action === "reset") {
+          const [target = "all", sessionId] = memoryArgs;
+          printJson(runtime.resetMemory({ target: target as "all" | "memory" | "user", sessionId }));
+          return;
+        }
+        console.log("Usage: agentix memory [status|list [session-id]|search <query>|consolidate [session-id]|reset [all|memory|user] [session-id]]");
+      }
+      return;
+    case "cron":
+    case "scheduler":
+      ensureDataDirs();
+      {
+        const [action = "list", idOrName, ...rest] = cleanArgs;
+        const runtime = getBackendRuntime();
+        if (action === "list") {
+          for (const job of runtime.listJobs()) {
+            console.log(`${String(job.id ?? "")}: ${String(job.enabled ?? true)} ${String(job.scheduleDisplay ?? job.schedule ?? "")} ${String(job.name ?? "")}`);
+          }
+          return;
+        }
+        if (action === "inspect") {
+          if (!idOrName) {
+            console.log(`Usage: agentix ${cmd} inspect <job-id>`);
+            return;
+          }
+          printJson(runtime.getJob(idOrName));
+          return;
+        }
+        if (action === "create") {
+          const stimulus = rest.join(" ").trim();
+          if (!idOrName || !stimulus) {
+            console.log(`Usage: agentix ${cmd} create <name> <stimulus>`);
+            return;
+          }
+          printJson(runtime.createJob({ name: idOrName, stimulus, schedule: "every 1m", enabled: true }));
+          return;
+        }
+        if (action === "run") {
+          if (!idOrName) {
+            console.log(`Usage: agentix ${cmd} run <job-id>`);
+            return;
+          }
+          printJson(await runtime.runJob(idOrName));
+          return;
+        }
+        if (action === "run-due") {
+          printJson(await runtime.runDueJobs());
+          return;
+        }
+        if (action === "enable" || action === "disable") {
+          if (!idOrName) {
+            console.log(`Usage: agentix ${cmd} ${action} <job-id>`);
+            return;
+          }
+          printJson(runtime.setJobEnabled(idOrName, action === "enable"));
+          return;
+        }
+        if (action === "delete") {
+          if (!idOrName) {
+            console.log(`Usage: agentix ${cmd} delete <job-id>`);
+            return;
+          }
+          printJson(runtime.removeJob(idOrName));
+          return;
+        }
+        if (action === "set-enabled") {
+          const enabled = parseBoolean(rest[0]);
+          if (!idOrName || enabled === undefined) {
+            console.log(`Usage: agentix ${cmd} set-enabled <job-id> <true|false>`);
+            return;
+          }
+          printJson(runtime.setJobEnabled(idOrName, enabled));
+          return;
+        }
+        console.log(`Usage: agentix ${cmd} [list|inspect <id>|create <name> <stimulus>|run <id>|run-due|enable <id>|disable <id>|delete <id>]`);
       }
       return;
     case "plans":

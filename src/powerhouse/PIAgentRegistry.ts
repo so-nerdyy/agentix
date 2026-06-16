@@ -15,7 +15,8 @@ export class PIAgentRegistry {
   }
 
   forKind(kind: string): BasePIAgent | undefined {
-    return this.byKind.get(kind);
+    const agent = this.byKind.get(kind);
+    return agent?.healthy() ? agent : undefined;
   }
 
   get(id: string): BasePIAgent | undefined {

@@ -90,6 +90,7 @@ npm test
 ## Documentation
 
 - [Install](docs/INSTALL.md)
+- [API](docs/API.md)
 - [Operations](docs/OPERATIONS.md)
 - [Security](docs/SECURITY.md)
 - [Architecture](docs/ARCHITECTURE.md)

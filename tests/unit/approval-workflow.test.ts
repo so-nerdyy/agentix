@@ -21,7 +21,9 @@ describe("ApprovalWorkflow", () => {
   it("auto-rejects when approval times out", () => {
     vi.useFakeTimers();
     try {
+      const timedOut: string[] = [];
       const workflow = new ApprovalWorkflow({ timeoutMs: 100 });
+      workflow.setTimeoutHandler((task, reason) => timedOut.push(`${task.id}:${reason}`));
       const task = makeTask();
 
       workflow.request(task);
@@ -32,6 +34,9 @@ describe("ApprovalWorkflow", () => {
 
       expect(workflow.isPending(task.id)).toBe(false);
       expect(workflow.listPending()).toHaveLength(0);
+      expect(timedOut).toHaveLength(1);
+      expect(timedOut[0]).toContain(task.id);
+      expect(timedOut[0]).toContain("approval timeout");
     } finally {
       vi.useRealTimers();
     }

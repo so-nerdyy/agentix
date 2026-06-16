@@ -1,13 +1,15 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { getBackendRuntime } from "../runtime/backend.js";
-import { requireSessionToken } from "../config/HttpAuth.js";
+import { assertSafeListenHost, requireSessionToken } from "../config/HttpAuth.js";
 import { loadConfig } from "../config/index.js";
+import { openApiSpec } from "../config/openapi.js";
 
 export async function startBridge(opts: { port?: number; host?: string } = {}) {
   const runtime = getBackendRuntime();
   const port = opts.port ?? parseInt(process.env.AGENTIX_BRIDGE_PORT || "3456", 10);
   const host = opts.host ?? "127.0.0.1";
+  assertSafeListenHost(host, loadConfig().sessionToken);
 
   const server = Fastify({ logger: false });
 
@@ -17,11 +19,13 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
   });
 
   server.addHook("preHandler", async (request, reply) => {
-    if (request.method === "OPTIONS" || request.url.split("?")[0] === "/health") return;
+    const pathname = request.url.split("?")[0];
+    if (request.method === "OPTIONS" || pathname === "/health" || pathname === "/openapi.json") return;
     if (!requireSessionToken(request, reply, loadConfig().sessionToken)) return reply;
   });
 
   server.get("/health", async () => ({ status: "ok", backend: "agentix" }));
+  server.get("/openapi.json", async () => openApiSpec);
   server.get("/doctor", async () => runtime.doctor());
   server.get("/usage", async () => runtime.usage());
   server.get("/config", async () => runtime.config());
