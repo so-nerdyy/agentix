@@ -56,6 +56,7 @@ export const openApiSpec = {
     "/approvals/{id}/reject": { post: { summary: "Reject task" } },
     "/plans": { get: { summary: "List Symphony plan executions" } },
     "/plans/{id}": { get: { summary: "Inspect Symphony plan execution" } },
+    "/plans/{id}/action": { post: { summary: "Replay, cancel, or retry failed tasks for a Symphony plan" } },
     "/audit": { get: { summary: "List audit entries" } },
     "/audit/{id}": { get: { summary: "Inspect audit entry" } },
     "/logs": { get: { summary: "List runtime logs" } },

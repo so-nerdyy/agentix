@@ -441,9 +441,14 @@ def handle_chat(args: Any) -> bool:
             _print_plans(list(_iter_entries(backend.list_plans())))
             continue
         if lowered.startswith("/plan"):
-            plan_id = line[len("/plan"):].strip()
+            parts = line[len("/plan"):].strip().split()
+            plan_id = parts[0] if parts else ""
+            action = parts[1] if len(parts) > 1 else ""
             if not plan_id:
-                print("Usage: /plan <plan-id>")
+                print("Usage: /plan <plan-id> [replay|cancel|retry-failed]")
+                continue
+            if action in {"replay", "cancel", "retry-failed"}:
+                _dump(backend.control_plan(plan_id, action))
                 continue
             _print_plan_detail(backend.get_plan(plan_id))
             continue

@@ -353,12 +353,16 @@ async function main() {
     case "plan":
       ensureDataDirs();
       {
-        const [planId] = cleanArgs;
+        const [planId, action] = cleanArgs;
         if (!planId) {
-          console.log("Usage: agentix --agentix-cli plan <plan-id>");
+          console.log("Usage: agentix --agentix-cli plan <plan-id> [replay|cancel|retry-failed]");
           return;
         }
-        console.log(JSON.stringify(getBackendRuntime().getPlan(planId), null, 2));
+        if (action === "replay" || action === "cancel" || action === "retry-failed") {
+          printJson(await getBackendRuntime().controlPlan(planId, action));
+          return;
+        }
+        printJson(getBackendRuntime().getPlan(planId));
       }
       return;
     case "tasks":

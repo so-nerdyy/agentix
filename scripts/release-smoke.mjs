@@ -468,6 +468,14 @@ async function smokeServer() {
     });
     assert(execution.status === "complete", `execute status was ${execution.status}`);
     assert(Array.isArray(execution.taskIds) && execution.taskIds.length > 0, "execute did not return task ids");
+    const plansAfterExecute = await fetchJson(`${inboxUrl}/plans`);
+    assert(Array.isArray(plansAfterExecute) && plansAfterExecute.length > 0, "plans endpoint did not return execution");
+    const planAction = await fetchJson(`${inboxUrl}/plans/${encodeURIComponent(plansAfterExecute[0].id)}/action`, {
+      method: "POST",
+      body: JSON.stringify({ action: "cancel" }),
+      timeoutMs: 60_000,
+    });
+    assert(planAction.ok === true, "plan cancel-open-tasks action did not succeed");
 
     const streamed = await fetchText(`${inboxUrl}/execute/stream`, {
       method: "POST",

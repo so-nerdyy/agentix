@@ -707,6 +707,68 @@ export class LocalAgentixRuntime {
     };
   }
 
+  async controlPlan(planId: string, action: "replay" | "cancel" | "retry-failed"): Promise<Record<string, unknown>> {
+    this.powerhouse.start();
+    const execution = this.powerhouse.planStore.get(planId);
+    if (!execution) return { ok: false, error: `unknown plan: ${planId}` };
+
+    const tasks = this.powerhouse
+      .listTasks(execution.sessionId)
+      .filter((task) => task.planId === planId);
+
+    if (action === "replay") {
+      const result = await this.execute({
+        stimulus: execution.plan.stimulus,
+        sessionId: execution.sessionId,
+      });
+      this.powerhouse.audit.record({
+        type: "plan.replayed",
+        actor: "user",
+        subjectId: planId,
+        data: {
+          sessionId: execution.sessionId,
+          replayTaskIds: result.taskIds,
+          replayStatus: result.status,
+        },
+      });
+      return { ok: result.status !== "failed", action, sourcePlanId: planId, result };
+    }
+
+    if (action === "cancel") {
+      const cancellable = tasks.filter((task) =>
+        ["queued", "running", "awaiting-approval"].includes(task.status),
+      );
+      const results: Array<Record<string, unknown> & { ok?: unknown; taskId: string }> = [];
+      for (const task of cancellable) {
+        results.push({ taskId: task.id, ...(await this.controlTask(task.id, "cancel")) });
+      }
+      this.powerhouse.audit.record({
+        type: "plan.cancelled",
+        actor: "user",
+        subjectId: planId,
+        data: { sessionId: execution.sessionId, taskIds: cancellable.map((task) => task.id) },
+      });
+      return { ok: results.every((item) => item.ok), action, planId, count: results.length, results };
+    }
+
+    if (action === "retry-failed") {
+      const retryable = tasks.filter((task) => ["failed", "rejected"].includes(task.status));
+      const results: Array<Record<string, unknown> & { ok?: unknown; taskId: string }> = [];
+      for (const task of retryable) {
+        results.push({ taskId: task.id, ...(await this.controlTask(task.id, "retry")) });
+      }
+      this.powerhouse.audit.record({
+        type: "plan.retry_failed",
+        actor: "user",
+        subjectId: planId,
+        data: { sessionId: execution.sessionId, taskIds: retryable.map((task) => task.id) },
+      });
+      return { ok: results.every((item) => item.ok), action, planId, count: results.length, results };
+    }
+
+    return { ok: false, error: `unsupported plan action: ${action}` };
+  }
+
   getSession(sessionId: string): RuntimeSessionDetail | null {
     this.powerhouse.start();
     const session = this.powerhouse.listSessions().find((item) => item.id === sessionId);

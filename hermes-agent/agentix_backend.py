@@ -234,6 +234,9 @@ class AgentixBackend:
     def get_plan(self, plan_id: str) -> Any:
         return self._get(f"/plans/{quote(plan_id)}")
 
+    def control_plan(self, plan_id: str, action: str) -> Any:
+        return self._post(f"/plans/{quote(plan_id)}/action", {"action": action})
+
     def list_logs(self, limit: int = 100) -> Any:
         return self._get(f"/logs?limit={int(limit)}")
 

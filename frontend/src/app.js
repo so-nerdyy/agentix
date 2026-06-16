@@ -592,6 +592,9 @@ function planCard(plan) {
       <div class="meta">updated ${fmtTime(plan.updatedAt)}${plan.awaitingApprovals ? ` · approvals ${plan.awaitingApprovals}` : ""}${plan.failedTasks ? ` · failed ${plan.failedTasks}` : ""}</div>
       <div class="row">
         <button class="primary" data-action="inspect-plan" data-id="${escapeHtml(plan.id)}">Inspect</button>
+        <button class="ghost" data-action="replay-plan" data-id="${escapeHtml(plan.id)}">Replay</button>
+        ${plan.failedTasks ? `<button class="ghost" data-action="retry-failed-plan" data-id="${escapeHtml(plan.id)}">Retry failed</button>` : ""}
+        ${plan.awaitingApprovals ? `<button class="ghost" data-action="cancel-plan" data-id="${escapeHtml(plan.id)}">Cancel open</button>` : ""}
       </div>
     </div>
   `;
@@ -616,6 +619,11 @@ function planDetailCard() {
       <div class="muted">${escapeHtml(execution.stimulus)}</div>
       ${execution.reasoning ? `<div class="muted">Reasoning: ${escapeHtml(execution.reasoning)}</div>` : ""}
       ${execution.fallbackReason ? `<div class="muted danger-text">Fallback: ${escapeHtml(execution.fallbackReason)}</div>` : ""}
+      <div class="row">
+        <button class="primary" data-action="replay-plan" data-id="${escapeHtml(execution.id)}">Replay plan</button>
+        <button class="ghost" data-action="retry-failed-plan" data-id="${escapeHtml(execution.id)}">Retry failed tasks</button>
+        <button class="ghost" data-action="cancel-plan" data-id="${escapeHtml(execution.id)}">Cancel open tasks</button>
+      </div>
       <div class="panel-section">
         <div class="eyebrow">Step timeline</div>
         <div class="plan-timeline">
@@ -2612,6 +2620,30 @@ async function clickAction(event) {
       state.selectedPlanId = id;
       saveFilterState();
       setView("plans");
+      await loadPlanDetail(id);
+    } else if (action === "replay-plan") {
+      if (!confirm("Replay this plan stimulus in the same session? This can repeat side effects.")) return;
+      const result = await api(`/plans/${encodeURIComponent(id)}/action`, {
+        method: "POST",
+        body: JSON.stringify({ action: "replay" }),
+      });
+      appendEvent("plan replayed", `${id}: ${result.result?.status || "submitted"}`, result.ok ? "success" : "danger");
+      state.selectedPlanId = result.result?.taskIds?.[0] ? state.selectedPlanId : id;
+      await loadPlanDetail(id);
+    } else if (action === "cancel-plan") {
+      if (!confirm("Cancel open tasks for this plan? Completed tasks remain unchanged.")) return;
+      const result = await api(`/plans/${encodeURIComponent(id)}/action`, {
+        method: "POST",
+        body: JSON.stringify({ action: "cancel" }),
+      });
+      appendEvent("plan open tasks cancelled", `${id}: ${result.count || 0} task(s)`, result.ok ? "success" : "warn");
+      await loadPlanDetail(id);
+    } else if (action === "retry-failed-plan") {
+      const result = await api(`/plans/${encodeURIComponent(id)}/action`, {
+        method: "POST",
+        body: JSON.stringify({ action: "retry-failed" }),
+      });
+      appendEvent("plan failed tasks retried", `${id}: ${result.count || 0} task(s)`, result.ok ? "success" : "warn");
       await loadPlanDetail(id);
     } else if (action === "search-open-session") {
       setSessionId(id);

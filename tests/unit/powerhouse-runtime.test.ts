@@ -161,6 +161,11 @@ describe("Powerhouse restored runtime", () => {
     const sessionPlans = runtime.listPlans().filter((plan) => plan.sessionId === session.id);
     expect(sessionPlans).toHaveLength(1);
     expect(runtime.getPlan(String(sessionPlans[0]?.id))?.steps).toHaveLength(1);
+    const replayedPlan = await runtime.controlPlan(String(sessionPlans[0]?.id), "replay");
+    expect(replayedPlan.ok).toBe(true);
+    expect(JSON.stringify(replayedPlan)).toContain("sourcePlanId");
+    const cancelledPlan = await runtime.controlPlan(String(sessionPlans[0]?.id), "cancel");
+    expect(cancelledPlan).toMatchObject({ ok: true, action: "cancel" });
     expect(runtime.listMemory(session.id).some((item) => String(item.content).includes("test runtime facade"))).toBe(true);
     expect(runtime.listTools().some((tool) => tool.name === "user-message")).toBe(true);
     expect(Array.isArray(runtime.listApprovals())).toBe(true);

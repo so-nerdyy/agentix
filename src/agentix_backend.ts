@@ -179,6 +179,10 @@ export class AgentixBackend {
     return this.get(`/plans/${encodeURIComponent(planId)}`);
   }
 
+  async controlPlan(planId: string, action: "replay" | "cancel" | "retry-failed"): Promise<Record<string, unknown>> {
+    return this.post(`/plans/${encodeURIComponent(planId)}/action`, { action });
+  }
+
   async listTasks(sessionId?: string): Promise<Array<Record<string, unknown>>> {
     const suffix = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
     return this.get(`/tasks${suffix}`);

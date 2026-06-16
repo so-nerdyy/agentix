@@ -21,7 +21,7 @@ export function buildHelpText(version: string): string {
   "  sessions             list/create/inspect/delete backend sessions",
   "  memory               inspect/search/consolidate/reset backend memory",
   "  cron, scheduler      manage Agentix scheduled jobs",
-  "  plans, plan          inspect Symphony plan executions",
+  "  plans, plan          inspect/replay/cancel/retry Symphony plan executions",
     "  tasks, task          list tasks or inspect/control one task",
     "  approvals, approval  list approvals or approve/reject one task",
     "  search               search tasks, sessions, memory, audit, logs, jobs",

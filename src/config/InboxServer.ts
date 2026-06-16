@@ -181,6 +181,17 @@ export async function startInboxServer(opts: { port?: number; host?: string } = 
     }
     return plan;
   });
+  server.post("/plans/:id/action", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as { action?: string } | undefined;
+    if (!body?.action) {
+      reply.status(400);
+      return { ok: false, error: "missing plan action" };
+    }
+    const result = await runtime.controlPlan(id, body.action as "replay" | "cancel" | "retry-failed");
+    if (result.ok === false) reply.status(400);
+    return result;
+  });
   server.get("/tools", async () => runtime.listTools());
   server.get("/tools/:id", async (request, reply) => {
     const { id } = request.params as { id: string };

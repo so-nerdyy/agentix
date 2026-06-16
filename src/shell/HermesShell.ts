@@ -319,9 +319,13 @@ export class HermesShell {
           break;
         }
         case "plan": {
-          const [planId] = [...subArgs, ...restArgs];
+          const [planId, action] = [...subArgs, ...restArgs];
           if (!planId) {
-            console.log("Usage: /plan <plan-id>\n");
+            console.log("Usage: /plan <plan-id> [replay|cancel|retry-failed]\n");
+            break;
+          }
+          if (action === "replay" || action === "cancel" || action === "retry-failed") {
+            console.log(JSON.stringify(await this.backend.controlPlan(planId, action), null, 2));
             break;
           }
           console.log(this.formatPlan(await this.backend.getPlan(planId)));

@@ -175,9 +175,12 @@ function buildCommandHelp(command) {
       ].join("\n");
     case "plan":
       return [
-        "Usage: agentix --agentix-cli plan <plan-id>",
+        "Usage: agentix --agentix-cli plan <plan-id> [replay|cancel|retry-failed]",
         "",
-        "Prints the full Symphony plan execution record as JSON.",
+        "Prints the full Symphony plan execution record as JSON, or controls execution:",
+        "  replay       run the original stimulus again in the same session",
+        "  cancel       cancel open child tasks for the plan",
+        "  retry-failed retry failed/rejected child tasks",
       ].join("\n");
     case "tasks":
       return [

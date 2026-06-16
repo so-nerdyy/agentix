@@ -54,6 +54,9 @@ describe("frontend dashboard build surface", () => {
     expect(app).toContain("diagnosticsCards");
     expect(app).toContain("data-action=\"approve");
     expect(app).toContain("data-action=\"restart-task-detail");
+    expect(app).toContain("data-action=\"replay-plan");
+    expect(app).toContain("data-action=\"cancel-plan");
+    expect(app).toContain("data-action=\"retry-failed-plan");
   });
 
   it("executes dashboard quick actions through the slash command handler", () => {
@@ -104,6 +107,17 @@ describe("frontend dashboard build surface", () => {
     expect(app).toContain('body: JSON.stringify({ key, value })');
     expect(styles).toContain(".config-form");
     expect(styles).toContain(".config-grid");
+  });
+
+  it("exposes real plan execution controls without inventing plan states", () => {
+    const app = readFrontendFile("src", "app.js");
+
+    expect(app).toContain('body: JSON.stringify({ action: "replay" })');
+    expect(app).toContain('body: JSON.stringify({ action: "cancel" })');
+    expect(app).toContain('body: JSON.stringify({ action: "retry-failed" })');
+    expect(app).toContain("This can repeat side effects");
+    expect(app).not.toContain("pause-plan");
+    expect(app).not.toContain("complete-plan");
   });
 
   it("opens task details from approval details", () => {
