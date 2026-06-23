@@ -114,6 +114,76 @@ describe("HTTP session token auth", () => {
     }
   }, 30_000);
 
+  it("supports workspace API tokens with roles", async () => {
+    process.env.AGENTIX_DATA_DIR = tempDir();
+    process.env.AGENTIX_SESSION_TOKEN = "admin-token";
+    const { startBridge } = await import("../../src/bridge/server.js");
+    const server = await startBridge({ port: 0, host: "127.0.0.1" });
+    const base = `http://127.0.0.1:${server.port}`;
+
+    try {
+      const createViewer = await fetch(`${base}/auth/tokens`, {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer admin-token",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ role: "viewer", label: "viewer smoke" }),
+      });
+      expect(createViewer.status).toBe(200);
+      const viewer = await createViewer.json() as { token: string; record: { id: string; role: string } };
+      expect(viewer.token).toMatch(/^agx_/);
+      expect(viewer.record.role).toBe("viewer");
+
+      expect((await fetch(`${base}/sessions`, {
+        headers: { Authorization: `Bearer ${viewer.token}` },
+      })).status).toBe(200);
+      expect((await fetch(`${base}/execute`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${viewer.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ stimulus: "viewer cannot mutate" }),
+      })).status).toBe(403);
+
+      const createOperator = await fetch(`${base}/auth/tokens`, {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer admin-token",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ role: "operator", label: "operator smoke" }),
+      });
+      const operator = await createOperator.json() as { token: string; record: { id: string } };
+      expect((await fetch(`${base}/execute`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${operator.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ stimulus: "operator can mutate" }),
+      })).status).toBe(200);
+      expect((await fetch(`${base}/config`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${operator.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ key: "provider", value: "openai" }),
+      })).status).toBe(403);
+
+      const revoked = await fetch(`${base}/auth/tokens/${encodeURIComponent(operator.record.id)}`, {
+        method: "DELETE",
+        headers: { Authorization: "Bearer admin-token" },
+      });
+      expect(revoked.status).toBe(200);
+      expect((await revoked.json()) as { ok: boolean }).toMatchObject({ ok: true });
+    } finally {
+      await server.close();
+    }
+  }, 30_000);
+
   it("refuses non-loopback control API binds without a session token", async () => {
     process.env.AGENTIX_DATA_DIR = tempDir();
     delete process.env.AGENTIX_SESSION_TOKEN;
@@ -123,5 +193,15 @@ describe("HTTP session token auth", () => {
 
     await expect(startInboxServer({ port: 0, host: "0.0.0.0" })).rejects.toThrow("AGENTIX_SESSION_TOKEN");
     await expect(startBridge({ port: 0, host: "0.0.0.0" })).rejects.toThrow("AGENTIX_SESSION_TOKEN");
+  });
+
+  it("allows non-loopback bind when a stored workspace token exists", async () => {
+    process.env.AGENTIX_DATA_DIR = tempDir();
+    delete process.env.AGENTIX_SESSION_TOKEN;
+    const { defaultAuthTokenStore } = await import("../../src/config/AuthTokenStore.js");
+    defaultAuthTokenStore.create({ role: "admin", label: "bind token" });
+    const { startBridge } = await import("../../src/bridge/server.js");
+    const server = await startBridge({ port: 0, host: "0.0.0.0" });
+    await server.close();
   });
 });

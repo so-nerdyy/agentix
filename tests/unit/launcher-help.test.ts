@@ -82,6 +82,7 @@ describe("launcher help", () => {
   it("routes Hermes-owned UX commands through Hermes before backend CLI", () => {
     const backendCommands = commandSet("BACKEND_COMMANDS");
     const hermesCommands = commandSet("HERMES_COMMANDS");
+    const bridgelessCommands = commandSet("BRIDGELESS_HERMES_COMMANDS");
 
     expect(hermesCommands).toContain("gateway");
     expect(hermesCommands).toContain("logs");
@@ -92,6 +93,9 @@ describe("launcher help", () => {
     expect(backendCommands).toContain("search");
     expect(backendCommands).toContain("audit");
     expect(backendCommands).toContain("healing");
+    expect(backendCommands).toContain("auth");
+    expect(hermesCommands).not.toContain("auth");
+    expect(bridgelessCommands).not.toContain("auth");
   });
 
   it("does not start the bridge for setup/model before configuration exists", () => {

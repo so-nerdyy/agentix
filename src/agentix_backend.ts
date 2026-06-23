@@ -167,6 +167,27 @@ export class AgentixBackend {
     return this.get("/config");
   }
 
+  async authStatus(): Promise<Record<string, unknown>> {
+    return this.get("/auth/status");
+  }
+
+  async listAuthTokens(): Promise<Record<string, unknown>> {
+    return this.get("/auth/tokens");
+  }
+
+  async createAuthToken(input: { label?: string; role?: "viewer" | "operator" | "admin" }): Promise<Record<string, unknown>> {
+    return this.post("/auth/tokens", input);
+  }
+
+  async revokeAuthToken(id: string): Promise<Record<string, unknown>> {
+    const res = await fetch(`${this.baseUrl}/auth/tokens/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: this.headers(),
+    });
+    if (!res.ok) throw new Error(`Bridge ${res.status}: ${await res.text()}`);
+    return res.json() as Promise<Record<string, unknown>>;
+  }
+
   async setConfig(key: string, value: unknown): Promise<Record<string, unknown>> {
     return this.post("/config", { key, value });
   }

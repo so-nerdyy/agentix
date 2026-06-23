@@ -11,7 +11,9 @@ Agentix assumes the local workspace may contain untrusted inputs, scripts, and t
 - `agentix setup` and `agentix model` sync only non-secret provider/model defaults into Agentix backend config
 - Session tokens should be scoped to the current workspace or deployment
 - When `AGENTIX_SESSION_TOKEN` is set, inbox/dashboard control APIs, bridge control APIs, and event streams require `Authorization: Bearer <token>` or `?token=<token>` for SSE
-- Non-loopback API binds such as `0.0.0.0` are refused unless `AGENTIX_SESSION_TOKEN` is configured or `AGENTIX_ALLOW_UNAUTHENTICATED=1` is explicitly set for development
+- Workspace API tokens support `viewer`, `operator`, and `admin` roles; token hashes are stored under `data/auth/tokens.json`, and plaintext tokens are shown only once at creation
+- Non-loopback API binds such as `0.0.0.0` are refused unless `AGENTIX_SESSION_TOKEN`, an active workspace token, or `AGENTIX_ALLOW_UNAUTHENTICATED=1` is explicitly configured
+- Use `agentix --agentix-cli auth create admin <label>` before exposing the API to another machine, then use that bearer token from dashboard/API clients
 
 ## Execution Boundaries
 
@@ -35,4 +37,5 @@ Agentix assumes the local workspace may contain untrusted inputs, scripts, and t
 - Keep Node and Python dependencies current
 - Review gateway credentials before enabling integrations
 - Rotate session tokens if dashboard, bridge, or event stream access is suspected to be exposed
+- Revoke workspace tokens with `agentix --agentix-cli auth revoke <token-id>`
 

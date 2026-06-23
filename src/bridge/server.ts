@@ -1,7 +1,7 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { getBackendRuntime } from "../runtime/backend.js";
-import { assertSafeListenHost, requireSessionToken } from "../config/HttpAuth.js";
+import { assertSafeListenHost, requireSessionToken, requiredRoleForRequest } from "../config/HttpAuth.js";
 import { loadConfig } from "../config/index.js";
 import { openApiSpec } from "../config/openapi.js";
 
@@ -21,7 +21,7 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
   server.addHook("preHandler", async (request, reply) => {
     const pathname = request.url.split("?")[0];
     if (request.method === "OPTIONS" || pathname === "/health" || pathname === "/openapi.json") return;
-    if (!requireSessionToken(request, reply, loadConfig().sessionToken)) return reply;
+    if (!requireSessionToken(request, reply, loadConfig().sessionToken, requiredRoleForRequest(request.method, pathname))) return reply;
   });
 
   server.get("/health", async () => ({ status: "ok", backend: "agentix" }));
@@ -29,6 +29,19 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
   server.get("/doctor", async () => runtime.doctor());
   server.get("/usage", async () => runtime.usage());
   server.get("/config", async () => runtime.config());
+  server.get("/auth/status", async () => runtime.authStatus());
+  server.get("/auth/tokens", async () => runtime.listAuthTokens());
+  server.post("/auth/tokens", async (request) => {
+    const body = request.body as Record<string, unknown> | undefined;
+    return runtime.createAuthToken({
+      label: body?.label as string | undefined,
+      role: body?.role as "viewer" | "operator" | "admin" | undefined,
+    });
+  });
+  server.delete("/auth/tokens/:id", async (request) => {
+    const { id } = request.params as { id: string };
+    return runtime.revokeAuthToken(id);
+  });
   server.post("/config", async (request, reply) => {
     const body = request.body as Record<string, unknown> | undefined;
     if (!body?.key) {

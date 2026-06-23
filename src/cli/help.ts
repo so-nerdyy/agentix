@@ -18,6 +18,7 @@ export function buildHelpText(version: string): string {
   "  doctor               run backend diagnostics",
   "  usage                print backend runtime usage counts",
   "  config               inspect or set backend runtime config",
+  "  auth                 manage backend workspace API tokens",
   "  sessions             list/create/inspect/delete backend sessions",
   "  memory               inspect/search/consolidate/reset backend memory",
   "  cron, scheduler      manage Agentix scheduled jobs",

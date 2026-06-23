@@ -28,6 +28,12 @@ export const openApiSpec = {
       get: { summary: "Read redacted runtime config" },
       post: { summary: "Update allowed non-secret runtime config values" },
     },
+    "/auth/status": { get: { summary: "Inspect authentication mode and token counts" } },
+    "/auth/tokens": {
+      get: { summary: "List workspace API tokens without secrets" },
+      post: { summary: "Create a workspace API token; plaintext returned once" },
+    },
+    "/auth/tokens/{id}": { delete: { summary: "Revoke a workspace API token" } },
     "/execute": { post: { summary: "Execute a stimulus through Powerhouse/Symphony/Pi agents" } },
     "/execute/stream": { post: { summary: "Execute a stimulus with server-sent event streaming" } },
     "/sessions": {

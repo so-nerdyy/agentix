@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { PATHS } from "../config/paths.js";
 import { EventBus } from "../config/EventBus.js";
 import { loadConfig, saveConfig, type AgentixConfig } from "../config/index.js";
+import { defaultAuthTokenStore, type AuthRole } from "../config/AuthTokenStore.js";
 import { randomUUID } from "node:crypto";
 import { RuntimeLogStore } from "../logging/RuntimeLogStore.js";
 import type { TaskAction } from "../powerhouse/types.js";
@@ -1392,7 +1393,55 @@ export class LocalAgentixRuntime {
       configFile: PATHS.configFile,
       llmApiKeyConfigured: Boolean(config.llmApiKey),
       sessionTokenConfigured: Boolean(config.sessionToken),
+      storedAuthTokens: defaultAuthTokenStore.list().length,
     };
+  }
+
+  authStatus(): Record<string, unknown> {
+    const config = loadConfig();
+    const tokens = defaultAuthTokenStore.list();
+    return {
+      envSessionTokenConfigured: Boolean(config.sessionToken),
+      storedTokens: tokens.length,
+      roles: tokens.reduce<Record<string, number>>((acc, token) => {
+        acc[token.role] = (acc[token.role] ?? 0) + 1;
+        return acc;
+      }, {}),
+      mode: config.sessionToken || tokens.length > 0 ? "token-required" : "loopback-dev-open",
+    };
+  }
+
+  listAuthTokens(): Record<string, unknown> {
+    return { tokens: defaultAuthTokenStore.list() };
+  }
+
+  createAuthToken(input: { label?: string; role?: AuthRole } = {}): Record<string, unknown> {
+    const created = defaultAuthTokenStore.create(input);
+    this.powerhouse.audit.record({
+      type: "auth.token_created",
+      actor: "user",
+      subjectId: created.record.id,
+      data: { label: created.record.label, role: created.record.role },
+    });
+    return {
+      ok: true,
+      token: created.token,
+      record: created.record,
+      warning: "Copy this token now. Agentix stores only its hash and cannot show it again.",
+    };
+  }
+
+  revokeAuthToken(id: string): Record<string, unknown> {
+    const revoked = defaultAuthTokenStore.revoke(id);
+    if (revoked) {
+      this.powerhouse.audit.record({
+        type: "auth.token_revoked",
+        actor: "user",
+        subjectId: id,
+        data: {},
+      });
+    }
+    return { ok: revoked, id };
   }
 
   setConfigValue(key: string, value: unknown): Record<string, unknown> {

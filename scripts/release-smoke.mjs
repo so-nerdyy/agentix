@@ -288,6 +288,12 @@ async function smokeCli() {
     timeoutMs: 60_000,
   });
   assert(config.stdout.includes("\"provider\""), "installed backend config command failed");
+  const authToken = await run(agentixCommand, ["--agentix-cli", "auth", "create", "viewer", "release-smoke"], {
+    env: backendEnv,
+    timeoutMs: 60_000,
+  });
+  assert(authToken.stdout.includes("\"token\""), "installed backend auth token create command failed");
+  assert(authToken.stdout.includes("\"role\": \"viewer\""), "installed backend auth token role missing");
   const memory = await run(agentixCommand, ["--agentix-cli", "memory", "status"], {
     env: backendEnv,
     timeoutMs: 60_000,
@@ -513,6 +519,13 @@ async function smokeServer() {
     });
     assert(support.ok === true, "support bundle endpoint did not succeed");
     assert(Array.isArray(support.files) && support.files.includes("manifest.json"), "support bundle manifest missing");
+
+    const createdToken = await fetchJson(`${inboxUrl}/auth/tokens`, {
+      method: "POST",
+      body: JSON.stringify({ role: "viewer", label: "server smoke viewer" }),
+      timeoutMs: 60_000,
+    });
+    assert(createdToken.ok === true && String(createdToken.token).startsWith("agx_"), "auth token endpoint did not create a workspace token");
   } finally {
     await stopProcess(server);
   }

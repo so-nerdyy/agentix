@@ -42,6 +42,9 @@ const state = {
   config: null,
   configLoading: false,
   configFeedback: "",
+  authStatus: null,
+  authTokens: [],
+  authTokenSecret: "",
   events: [],
   health: null,
   taskDetail: null,
@@ -107,6 +110,10 @@ const refs = {
   configSummary: el("configSummary"),
   configForm: el("configForm"),
   configFeedback: el("configFeedback"),
+  reloadAuthButton: el("reloadAuthButton"),
+  authTokenForm: el("authTokenForm"),
+  authTokenSecret: el("authTokenSecret"),
+  authTokenList: el("authTokenList"),
   createSupportButton: el("createSupportButton"),
   reloadDiagnosticsButton: el("reloadDiagnosticsButton"),
   diagnosticsSummary: el("diagnosticsSummary"),
@@ -555,6 +562,28 @@ function renderConfigPanel() {
       <div>Data: ${escapeHtml(state.config.dataDir || "n/a")}</div>
       <div>Config: ${escapeHtml(state.config.configFile || "n/a")}</div>
       <div>Base URL: ${escapeHtml(state.config.baseUrl || "(provider default)")}</div>
+    </div>
+  `;
+  refs.authTokenSecret.textContent = state.authTokenSecret
+    ? `New token: ${state.authTokenSecret}`
+    : "New tokens appear here once. Store them securely.";
+  refs.authTokenList.innerHTML = state.authTokens.length
+    ? state.authTokens.map(authTokenCard).join("")
+    : '<div class="card muted">No workspace API tokens created yet. Env session token still works as admin when configured.</div>';
+}
+
+function authTokenCard(token) {
+  const roleTone = token.role === "admin" ? "danger" : token.role === "operator" ? "warn" : "success";
+  return `
+    <div class="card">
+      <div class="row">
+        <h4>${escapeHtml(token.label || token.id)}</h4>
+        <span class="pill ${roleTone}">${escapeHtml(token.role)}</span>
+      </div>
+      <div class="meta">${escapeHtml(token.id)} - prefix ${escapeHtml(token.prefix)} - created ${fmtTime(token.createdAt)} - last used ${fmtTime(token.lastUsedAt)}</div>
+      <div class="row">
+        <button class="ghost" data-action="revoke-auth-token" data-id="${escapeHtml(token.id)}">Revoke</button>
+      </div>
     </div>
   `;
 }
@@ -1932,7 +1961,14 @@ async function loadConfigPanel() {
   state.configFeedback = "";
   renderConfigPanel();
   try {
-    state.config = await api("/config");
+    const [config, authStatus, tokenList] = await Promise.all([
+      api("/config"),
+      api("/auth/status").catch(() => null),
+      api("/auth/tokens").catch(() => ({ tokens: [] })),
+    ]);
+    state.config = config;
+    state.authStatus = authStatus;
+    state.authTokens = tokenList.tokens || [];
     state.configFeedback = "Backend config loaded.";
     appendEvent("config", "Loaded backend config.", "success");
   } catch (err) {
@@ -1942,6 +1978,37 @@ async function loadConfigPanel() {
     state.configLoading = false;
     renderConfigPanel();
   }
+}
+
+async function loadAuthTokens() {
+  try {
+    const [authStatus, tokenList] = await Promise.all([
+      api("/auth/status"),
+      api("/auth/tokens"),
+    ]);
+    state.authStatus = authStatus;
+    state.authTokens = tokenList.tokens || [];
+    appendEvent("auth tokens", `Loaded ${state.authTokens.length} token(s).`, "success");
+  } catch (err) {
+    appendEvent("auth tokens failed", err instanceof Error ? err.message : String(err), "danger");
+  }
+  renderConfigPanel();
+}
+
+async function createAuthToken(event) {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  const result = await api("/auth/tokens", {
+    method: "POST",
+    body: JSON.stringify({
+      label: String(form.get("label") || "").trim(),
+      role: String(form.get("role") || "operator"),
+    }),
+  });
+  state.authTokenSecret = result.token || "";
+  event.currentTarget.reset();
+  await loadAuthTokens();
+  appendEvent("auth token created", `${result.record?.id || "token"} (${result.record?.role || "operator"})`, "success");
 }
 
 async function saveConfigPanel(event) {
@@ -2694,6 +2761,11 @@ async function clickAction(event) {
         await navigator.clipboard.writeText(JSON.stringify(task, null, 2));
         appendEvent("task copied", `Copied ${id} JSON to clipboard`, "success");
       }
+    } else if (action === "revoke-auth-token") {
+      if (!confirm("Revoke this workspace API token?")) return;
+      const result = await api(`/auth/tokens/${encodeURIComponent(id)}`, { method: "DELETE" });
+      appendEvent("auth token revoked", `${id}: ${result.ok ? "revoked" : "not found"}`, result.ok ? "success" : "warn");
+      await loadAuthTokens();
     } else if (action === "rename-session") {
       const current = state.sessions.find((session) => session.id === id) || state.sessionDetail?.session;
       const previous = current?.metadata?.title || "";
@@ -2754,7 +2826,7 @@ function boot() {
   refs.saveTokenButton.addEventListener("click", async () => {
     state.sessionToken = refs.tokenInput.value.trim();
     saveToken();
-    appendEvent("token saved", state.sessionToken ? "Stored event token locally." : "Cleared event token.", "success");
+    appendEvent("token saved", state.sessionToken ? "Stored bearer API token locally." : "Cleared bearer API token.", "success");
     await refreshAll();
     connectEvents();
   });
@@ -2779,6 +2851,8 @@ function boot() {
   refs.reloadUsageButton.addEventListener("click", loadUsage);
   refs.reloadConfigButton.addEventListener("click", loadConfigPanel);
   refs.configForm.addEventListener("submit", saveConfigPanel);
+  refs.reloadAuthButton.addEventListener("click", loadAuthTokens);
+  refs.authTokenForm.addEventListener("submit", createAuthToken);
   refs.reloadDiagnosticsButton.addEventListener("click", loadDiagnostics);
   refs.pruneSessionsButton.addEventListener("click", async () => {
     const daysText = prompt("Prune sessions older than how many days?", "90");

@@ -30,6 +30,7 @@ const BACKEND_COMMANDS = new Set([
   "search",
   "audit",
   "healing",
+  "auth",
   "mods",
   "plugin",
   "extension",
@@ -54,7 +55,6 @@ const HERMES_COMMANDS = new Set([
   "tools",
   "memory",
   "logs",
-  "auth",
   "config",
   "plugins",
   "fortune",
@@ -66,7 +66,6 @@ const BRIDGELESS_HERMES_COMMANDS = new Set([
   "setup",
   "model",
   "update",
-  "auth",
   "plugins",
   "skills",
   "fortune",
@@ -101,7 +100,7 @@ function buildLauncherHelp() {
     "  tools                   manage tools",
     "  memory                  inspect memory",
     "  logs                    inspect Agentix runtime logs",
-    "  auth                    manage auth/session access",
+    "  auth                    manage Agentix workspace API tokens",
     "  config                  inspect workspace config",
     "  plugins                 list installed plugins",
     "  fortune                 show a status/summary message",
@@ -223,6 +222,14 @@ function buildCommandHelp(command) {
         "Usage: agentix healing [fingerprint|procedure-id] [inspect|promote|deprecate]",
         "",
         "Inspects healing state and manages learned recovery procedures.",
+      ].join("\n");
+    case "auth":
+      return [
+        "Usage: agentix auth [status|list|create [viewer|operator|admin] [label]|revoke <token-id>]",
+        "",
+        "Manages Agentix workspace API tokens.",
+        "Env AGENTIX_SESSION_TOKEN remains an admin compatibility token.",
+        "Created workspace tokens are shown once and stored hashed under data/auth/.",
       ].join("\n");
     case "mods":
     case "plugin":

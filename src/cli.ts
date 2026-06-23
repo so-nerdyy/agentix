@@ -181,6 +181,43 @@ async function main() {
         console.log("Usage: agentix config [show|check|path|set <key> <value>]");
       }
       return;
+    case "auth":
+      ensureDataDirs();
+      {
+        const [action = "status", ...authArgs] = cleanArgs;
+        const runtime = getBackendRuntime();
+        if (action === "status") {
+          printJson(runtime.authStatus());
+          return;
+        }
+        if (action === "list") {
+          printJson(runtime.listAuthTokens());
+          return;
+        }
+        if (action === "create") {
+          const [role = "operator", ...labelParts] = authArgs;
+          if (!["viewer", "operator", "admin"].includes(role)) {
+            console.log("Usage: agentix --agentix-cli auth create [viewer|operator|admin] [label]");
+            return;
+          }
+          printJson(runtime.createAuthToken({
+            role: role as "viewer" | "operator" | "admin",
+            label: labelParts.join(" ").trim() || undefined,
+          }));
+          return;
+        }
+        if (action === "revoke") {
+          const [tokenId] = authArgs;
+          if (!tokenId) {
+            console.log("Usage: agentix --agentix-cli auth revoke <token-id>");
+            return;
+          }
+          printJson(runtime.revokeAuthToken(tokenId));
+          return;
+        }
+        console.log("Usage: agentix --agentix-cli auth [status|list|create [viewer|operator|admin] [label]|revoke <token-id>]");
+      }
+      return;
     case "sessions":
       ensureDataDirs();
       {

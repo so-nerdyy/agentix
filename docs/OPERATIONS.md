@@ -51,7 +51,10 @@ Repeated task failures create candidate healing procedures. Promoted procedures 
 - `GET /health` on the inbox server
 - `GET /health` on the bridge server
 - `agentix doctor` for Hermes diagnostics; `agentix --agentix-cli doctor` or `GET /doctor` for Agentix backend diagnostics
-- If `AGENTIX_SESSION_TOKEN` is configured, all non-health control endpoints require `Authorization: Bearer <token>`
+- If `AGENTIX_SESSION_TOKEN` is configured, it acts as an admin bearer token for all non-health control endpoints
+- Workspace API tokens can be created with `agentix --agentix-cli auth create [viewer|operator|admin] [label]`; plaintext is printed once and hashes persist under `data/auth/tokens.json`
+- Role policy: `viewer` can read, `operator` can mutate runtime resources, `admin` can manage config/auth and memory reset
+- If neither env token nor workspace token exists, loopback servers run in local dev-open mode; non-loopback binds require a token or explicit `AGENTIX_ALLOW_UNAUTHENTICATED=1`
 
 ## Release Smoke
 

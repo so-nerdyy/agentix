@@ -14,12 +14,17 @@ GET /openapi.json
 Authentication:
 
 - `GET /health` and `GET /openapi.json` are public.
-- All other control endpoints require `Authorization: Bearer <AGENTIX_SESSION_TOKEN>` when a session token is configured.
-- Non-loopback binds such as `0.0.0.0` require `AGENTIX_SESSION_TOKEN` unless `AGENTIX_ALLOW_UNAUTHENTICATED=1` is explicitly set for development.
+- Env `AGENTIX_SESSION_TOKEN` works as an admin bearer token.
+- Workspace API tokens can be created with `agentix --agentix-cli auth create [viewer|operator|admin] [label]`.
+- Stored workspace tokens are hashed under `data/auth/tokens.json`; plaintext is returned once at creation.
+- Role policy: `viewer` can read, `operator` can mutate runtime resources, `admin` can manage config/auth and reset memory.
+- If no env token or workspace token exists, loopback-only servers run in local dev-open mode.
+- Non-loopback binds such as `0.0.0.0` require `AGENTIX_SESSION_TOKEN`, an active workspace token, or `AGENTIX_ALLOW_UNAUTHENTICATED=1` for explicit development override.
 
 Core endpoint groups:
 
 - Powerhouse execution: `/execute`, `/execute/stream`
+- Auth: `/auth/status`, `/auth/tokens`
 - Symphony plans: `/plans`, `/plans/{id}`
 - Pi agents/tools: `/tools`, `/tools/{id}`
 - Tasks and approvals: `/tasks`, `/approvals`

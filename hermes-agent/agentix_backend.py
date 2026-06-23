@@ -169,6 +169,18 @@ class AgentixBackend:
     def config(self) -> Any:
         return self._get("/config")
 
+    def auth_status(self) -> Any:
+        return self._get("/auth/status")
+
+    def list_auth_tokens(self) -> Any:
+        return self._get("/auth/tokens")
+
+    def create_auth_token(self, label: str | None = None, role: str | None = None) -> Any:
+        return self._post("/auth/tokens", {"label": label, "role": role})
+
+    def revoke_auth_token(self, token_id: str) -> Any:
+        return self._delete(f"/auth/tokens/{quote(token_id)}")
+
     def set_config(self, key: str, value: Any) -> Any:
         return self._post("/config", {"key": key, "value": value})
 

@@ -25,6 +25,8 @@ describe("frontend dashboard build surface", () => {
     const app = readFrontendFile("src", "app.js");
 
     expect(html).toContain("Command palette");
+    expect(html).toContain("API token");
+    expect(html).not.toContain("Event token");
     expect(html).toContain('data-view="scheduler"');
     expect(html).toContain('data-view="plans"');
     expect(html).toContain('data-view="gateway"');
@@ -36,6 +38,7 @@ describe("frontend dashboard build surface", () => {
     expect(html).toContain('data-panel="config"');
     expect(html).toContain('id="reloadUsageButton"');
     expect(html).toContain('id="configForm"');
+    expect(html).toContain('id="authTokenForm"');
     expect(html).toContain('id="composeForm"');
     expect(app).toContain("new EventSource");
     expect(app).toContain("Authorization: `Bearer ${state.sessionToken}`");
@@ -48,6 +51,7 @@ describe("frontend dashboard build surface", () => {
     expect(app).toContain("/doctor");
     expect(app).toContain('api("/usage")');
     expect(app).toContain('api("/config")');
+    expect(app).toContain('api("/auth/tokens")');
     expect(app).toContain("/sessions/prune");
     expect(app).toContain("/sessions/optimize");
     expect(app).toContain("data-action=\"rename-session");
@@ -101,10 +105,15 @@ describe("frontend dashboard build surface", () => {
     expect(html).toContain('name="model"');
     expect(html).toContain('name="baseUrl"');
     expect(html).toContain('name="approvalTimeoutMs"');
+    expect(html).toContain('id="authTokenList"');
+    expect(html).toContain('value="admin"');
     expect(app).toContain("function renderConfigPanel()");
     expect(app).toContain("function saveConfigPanel(event)");
+    expect(app).toContain("function createAuthToken(event)");
+    expect(app).toContain('data-action="revoke-auth-token"');
     expect(app).toContain('case "config":');
     expect(app).toContain('body: JSON.stringify({ key, value })');
+    expect(app).toContain('/auth/tokens/${encodeURIComponent(id)}');
     expect(styles).toContain(".config-form");
     expect(styles).toContain(".config-grid");
   });

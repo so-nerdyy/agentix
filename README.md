@@ -45,6 +45,7 @@ From any project folder, `agentix` opens the interactive shell. Use `agentix das
 - `agentix memory search <query>` - search Agentix memory
 - `agentix sessions list` - inspect Agentix sessions
 - `agentix --agentix-cli plans` - inspect Symphony plan executions
+- `agentix --agentix-cli auth create admin <label>` - create workspace API token
 - `agentix logs` - inspect Agentix runtime logs
 - `agentix dashboard` - start the web control surface
 - `agentix server` - start the Agentix backend bridge/API
@@ -63,7 +64,7 @@ Agentix uses workspace-scoped configuration and environment variables:
 - `AGENTIX_MODEL` - default model
 - `AGENTIX_BASE_URL` - optional OpenAI-compatible or provider-specific base URL
 - `AGENTIX_LLM_API_KEY` - runtime API key
-- `AGENTIX_SESSION_TOKEN` - optional Bearer token for dashboard/API/event access
+- `AGENTIX_SESSION_TOKEN` - optional admin Bearer token for dashboard/API/event access; workspace role tokens can also be created with the backend auth CLI
 - `AGENTIX_SESSION_TTL` - session retention
 - `AGENTIX_APPROVAL_TIMEOUT` - approval timeout
 - `AGENTIX_HERMES_VENV` - optional Python venv location for the bundled Hermes frontend

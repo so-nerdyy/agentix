@@ -21,7 +21,7 @@
           <span class="chip" id="backendChip">Backend</span>
           <span class="chip" id="sessionChip">Session</span>
           <label class="token-field">
-            <span>Event token</span>
+            <span>API token</span>
             <input id="tokenInput" type="password" placeholder="optional" />
           </label>
           <button class="ghost" id="saveTokenButton" type="button">Save</button>
@@ -339,6 +339,26 @@
                 </div>
               </div>
               <div class="config-summary" id="configSummary"></div>
+              <div class="panel-section">
+                <div class="panel-head compact">
+                  <div>
+                    <div class="eyebrow">Workspace API tokens</div>
+                    <div class="muted">Create viewer/operator/admin tokens for dashboard, bridge, and automation access.</div>
+                  </div>
+                  <button class="ghost" id="reloadAuthButton" type="button">Reload tokens</button>
+                </div>
+                <form class="inline-form" id="authTokenForm">
+                  <input name="label" placeholder="Token label" />
+                  <select name="role">
+                    <option value="operator">operator</option>
+                    <option value="viewer">viewer</option>
+                    <option value="admin">admin</option>
+                  </select>
+                  <button class="primary" type="submit">Create token</button>
+                </form>
+                <div class="card muted" id="authTokenSecret">New tokens appear here once. Store them securely.</div>
+                <div class="list" id="authTokenList"></div>
+              </div>
               <form class="config-form" id="configForm">
                 <label>
                   <span>Provider</span>
