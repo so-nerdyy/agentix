@@ -18,7 +18,7 @@
 - Memory and sandbox artifacts are stored under the data directory
 - By default, `agentix` treats the current working directory as the workspace and stores state in `./data`
 - By default, Hermes frontend config for that workspace is stored in `.agentix/hermes/`
-- Set `AGENTIX_DATA_DIR` to move persistent state, or `AGENTIX_HERMES_VENV` to move the bundled Hermes Python environment
+- Set `AGENTIX_DATA_DIR` to move persistent state, `AGENTIX_HERMES_VENV` to move the bundled Hermes Python environment, or `AGENTIX_PYTHON` to force a specific Python 3 executable
 
 ## Hermes Command Delegation
 

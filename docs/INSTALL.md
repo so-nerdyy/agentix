@@ -3,7 +3,8 @@
 ## Requirements
 
 - Node.js 18 or newer
-- Python 3 available on `PATH` for the Hermes frontend launcher
+- Python 3 available on `PATH` for the Hermes frontend launcher. Agentix checks
+  `AGENTIX_PYTHON`, `PYTHON`, Windows `py -3`, `python3`, then `python`.
 - A valid model provider and API key for interactive use
 
 ## Global Install
@@ -41,6 +42,9 @@ irm https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.ps1 | iex
 ```sh
 AGENTIX_PACKAGE=agentix@2.1.0 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
 ```
+
+If Python is not discoverable under the default command names, set
+`AGENTIX_PYTHON` to an absolute Python 3 executable before running `agentix`.
 
 ## Local Development
 

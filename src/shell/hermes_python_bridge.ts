@@ -1,7 +1,33 @@
-import { spawn } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import { PATHS } from "../config/paths.js";
 
-const PYTHON_CMD = "python";
+export interface PythonCommand {
+  command: string;
+  args: string[];
+}
+
+function pythonCandidates(): PythonCommand[] {
+  const configured = process.env.AGENTIX_PYTHON || process.env.PYTHON;
+  const candidates: PythonCommand[] = [];
+  if (configured) candidates.push({ command: configured, args: [] });
+  if (process.platform === "win32") candidates.push({ command: "py", args: ["-3"] });
+  candidates.push({ command: "python3", args: [] });
+  candidates.push({ command: "python", args: [] });
+  return candidates;
+}
+
+export function resolvePythonCommand(): PythonCommand {
+  for (const candidate of pythonCandidates()) {
+    const check = spawnSync(candidate.command, [...candidate.args, "--version"], {
+      cwd: PATHS.workspaceRoot,
+      stdio: "ignore",
+    });
+    if (check.status === 0) return candidate;
+  }
+  throw new Error(
+    "Python 3 is required for the Hermes frontend. Set AGENTIX_PYTHON to a Python 3 executable if auto-detection fails.",
+  );
+}
 
 export async function runHermesSubcommand(
   args: string[],
@@ -9,7 +35,8 @@ export async function runHermesSubcommand(
 ): Promise<string> {
   const timeoutMs = opts.timeoutMs ?? 30_000;
 
-  const child = spawn(PYTHON_CMD, ["-m", "hermes_cli.main", ...args], {
+  const python = resolvePythonCommand();
+  const child = spawn(python.command, [...python.args, "-m", "hermes_cli.main", ...args], {
     cwd: PATHS.workspaceRoot,
     env: {
       ...process.env,

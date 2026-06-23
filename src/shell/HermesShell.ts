@@ -1,7 +1,7 @@
 import * as readline from "readline";
 import { spawn } from "child_process";
 import { AgentixBackend } from "../agentix_backend.js";
-import { hermesCommand } from "./hermes_python_bridge.js";
+import { hermesCommand, resolvePythonCommand } from "./hermes_python_bridge.js";
 import { PATHS } from "../config/paths.js";
 
 function hermesEnv(): NodeJS.ProcessEnv {
@@ -50,7 +50,8 @@ export class HermesShell {
   }
 
   private async runHermesInteractive(subcommand: string): Promise<void> {
-    const child = spawn("python", ["-m", "hermes_cli.main", subcommand], {
+    const python = resolvePythonCommand();
+    const child = spawn(python.command, [...python.args, "-m", "hermes_cli.main", subcommand], {
       cwd: PATHS.workspaceRoot,
       stdio: "inherit",
       env: hermesEnv(),

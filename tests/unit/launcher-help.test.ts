@@ -108,4 +108,13 @@ describe("launcher help", () => {
     expect(launcher).toContain("parseHermesModelConfig");
     expect(launcher).toContain("AGENTIX_LLM_API_KEY");
   });
+
+  it("detects Python instead of requiring a literal python command", () => {
+    const launcher = readFileSync(join(process.cwd(), "bin", "agentix.js"), "utf8");
+
+    expect(launcher).toContain("AGENTIX_PYTHON");
+    expect(launcher).toContain("python3");
+    expect(launcher).toContain("py\", args: [\"-3\"]");
+    expect(launcher).not.toContain('spawnSync("python", ["-m", "venv"');
+  });
 });

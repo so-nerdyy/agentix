@@ -486,13 +486,37 @@ function venvPython() {
     : resolve(VENV_ROOT, "bin", "python");
 }
 
+function pythonCandidates() {
+  const configured = process.env.AGENTIX_PYTHON || process.env.PYTHON;
+  const candidates = [];
+  if (configured) candidates.push({ command: configured, args: [] });
+  if (process.platform === "win32") candidates.push({ command: "py", args: ["-3"] });
+  candidates.push({ command: "python3", args: [] });
+  candidates.push({ command: "python", args: [] });
+  return candidates;
+}
+
+function resolveSystemPython() {
+  for (const candidate of pythonCandidates()) {
+    const check = spawnSync(candidate.command, [...candidate.args, "--version"], {
+      cwd: PROJECT_ROOT,
+      stdio: "ignore",
+    });
+    if (check.status === 0) return candidate;
+  }
+  throw new Error(
+    "Python 3 is required for the Hermes frontend. Set AGENTIX_PYTHON to a Python 3 executable if auto-detection fails.",
+  );
+}
+
 function ensureVenv() {
   if (existsSync(venvPython())) {
     return venvPython();
   }
 
   mkdirSync(VENV_ROOT, { recursive: true });
-  const created = spawnSync("python", ["-m", "venv", VENV_ROOT], {
+  const python = resolveSystemPython();
+  const created = spawnSync(python.command, [...python.args, "-m", "venv", VENV_ROOT], {
     cwd: PROJECT_ROOT,
     stdio: "inherit",
   });

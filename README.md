@@ -68,6 +68,7 @@ Agentix uses workspace-scoped configuration and environment variables:
 - `AGENTIX_SESSION_TTL` - session retention
 - `AGENTIX_APPROVAL_TIMEOUT` - approval timeout
 - `AGENTIX_HERMES_VENV` - optional Python venv location for the bundled Hermes frontend
+- `AGENTIX_PYTHON` - optional Python 3 executable override for the bundled Hermes frontend
 
 By default, Agentix stores Hermes frontend state under `.agentix/hermes/` in the current workspace and backend runtime state under `data/`. `agentix setup` and `agentix model` use the Hermes provider/model picker, then sync non-secret defaults into `data/config.json`. Provider API keys stay in Hermes' `.env` or your process environment and are injected into the backend at launch.
 
