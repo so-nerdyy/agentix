@@ -14,6 +14,33 @@ export interface MemoryRecord {
   tags: string[];
 }
 
+export interface MemorySearchResult {
+  id: string;
+  sessionId: string;
+  taskId: string | null;
+  role: MemoryRole;
+  content: string;
+  score: number;
+  tags: string[];
+  createdAt: number;
+}
+
+const SYNONYMS: Record<string, string[]> = {
+  car: ["vehicle", "auto", "automobile"],
+  vehicle: ["car", "auto", "automobile"],
+  price: ["cost", "pricing", "fee", "rate"],
+  pricing: ["price", "cost", "fee", "rate"],
+  cost: ["price", "pricing", "fee", "rate"],
+  error: ["failure", "bug", "exception", "crash"],
+  failure: ["error", "bug", "exception", "crash"],
+  task: ["job", "work", "step"],
+  job: ["task", "work", "step"],
+  schedule: ["cron", "timer", "interval"],
+  cron: ["schedule", "timer", "interval"],
+  auth: ["authentication", "token", "credential"],
+  token: ["auth", "authentication", "credential"],
+};
+
 export class MemoryStore {
   private readonly file: string;
   private loaded = false;
@@ -37,19 +64,25 @@ export class MemoryStore {
     return next;
   }
 
-  search(query: string, limit = 10): Array<{ content: string; score: number }> {
+  search(query: string, limit = 10): MemorySearchResult[] {
     this.ensureLoaded();
-    const needle = query.trim().toLowerCase();
-    if (!needle) return [];
+    const queryProfile = textProfile(query);
+    if (queryProfile.tokens.size === 0) return [];
 
     return this.records
-      .map((record) => ({ record, score: this.score(record, needle) }))
+      .map((record) => ({ record, score: this.score(record, query, queryProfile) }))
       .filter((item) => item.score > 0)
       .sort((a, b) => b.score - a.score || b.record.createdAt - a.record.createdAt)
       .slice(0, limit)
       .map(({ record, score }) => ({
+        id: record.id,
+        sessionId: record.sessionId,
+        taskId: record.taskId ?? null,
+        role: record.role,
         content: `[${record.role}] ${record.content}`,
-        score,
+        score: Number(score.toFixed(4)),
+        tags: record.tags,
+        createdAt: record.createdAt,
       }));
   }
 
@@ -115,12 +148,60 @@ export class MemoryStore {
     }
   }
 
-  private score(record: MemoryRecord, needle: string): number {
+  private score(record: MemoryRecord, query: string, queryProfile: TextProfile): number {
     const content = record.content.toLowerCase();
-    if (content.includes(needle)) return 1;
-    const terms = needle.split(/\s+/).filter(Boolean);
-    if (terms.length === 0) return 0;
-    const hits = terms.filter((term) => content.includes(term)).length;
-    return hits / terms.length;
+    const needle = query.trim().toLowerCase();
+    const profile = textProfile(`${record.content} ${record.tags.join(" ")}`);
+    let score = content.includes(needle) ? 1 : 0;
+
+    const overlap = intersectionSize(queryProfile.expanded, profile.expanded);
+    const union = new Set([...queryProfile.expanded, ...profile.expanded]).size || 1;
+    const jaccard = overlap / union;
+    const recall = overlap / queryProfile.expanded.size;
+    score = Math.max(score, (jaccard * 0.7) + (recall * 0.6));
+
+    const tagProfile = textProfile(record.tags.join(" "));
+    const tagHits = intersectionSize(queryProfile.expanded, tagProfile.expanded);
+    if (tagHits > 0) score += Math.min(0.25, tagHits * 0.1);
+
+    if (record.role === "system") score += 0.03;
+    return score;
   }
+}
+
+interface TextProfile {
+  tokens: Set<string>;
+  expanded: Set<string>;
+}
+
+function textProfile(text: string): TextProfile {
+  const tokens = new Set(
+    text
+      .toLowerCase()
+      .match(/[a-z0-9]+/g)
+      ?.map(normalizeToken)
+      .filter((token) => token.length >= 2) ?? [],
+  );
+  const expanded = new Set(tokens);
+  for (const token of tokens) {
+    for (const synonym of SYNONYMS[token] ?? []) {
+      expanded.add(normalizeToken(synonym));
+    }
+  }
+  return { tokens, expanded };
+}
+
+function normalizeToken(token: string): string {
+  return token
+    .replace(/(?:ing|tion|ions|ed|es|s)$/i, "")
+    .replace(/^authenticat$/i, "auth")
+    .replace(/^automobile$/i, "auto");
+}
+
+function intersectionSize(a: Set<string>, b: Set<string>): number {
+  let count = 0;
+  for (const item of a) {
+    if (b.has(item)) count++;
+  }
+  return count;
 }

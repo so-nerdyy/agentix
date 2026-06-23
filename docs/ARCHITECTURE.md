@@ -43,6 +43,7 @@ Standalone upstream Hermes still uses its native local stores when those Agentix
 - `ApprovalWorkflow` gates approval-required work
 - `PIAgentRegistry` binds task kinds to worker implementations, including dynamic command-backed Pi profiles stored under `data/agents/profiles.json`
 - `ConversationAgent` calls the configured LLM provider when credentials are available and falls back to deterministic diagnostics when running offline
+- `MemoryStore` persists JSONL records and ranks retrieval with local token normalization, synonym expansion, tag boosts, and recency tie-breaks
 - `HealingEngine` fingerprints repeated failures, proposes procedures, auto-promotes stable repeated failures into advisory procedures, applies promoted procedures as retry guidance, and auto-deprecates procedures that keep failing
 
 ## Data Flow

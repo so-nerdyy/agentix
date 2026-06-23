@@ -714,6 +714,30 @@ describe("Powerhouse restored runtime", () => {
     expect(memory.list()[0]?.sessionId).toBe("session-2");
   });
 
+  it("retrieves memory by semantic-like token expansion and tags", () => {
+    const dir = tempDir("agentix-memory-search-");
+    const memory = new MemoryStore(join(dir, "memory.jsonl"));
+    const target = memory.add({
+      sessionId: "session-1",
+      role: "assistant",
+      content: "The car cost monitor found a lower supplier rate.",
+      tags: ["market-watch"],
+    });
+    memory.add({
+      sessionId: "session-2",
+      role: "assistant",
+      content: "Unrelated scheduler output.",
+      tags: ["cron"],
+    });
+
+    const results = memory.search("vehicle pricing market", 5);
+
+    expect(results[0]?.id).toBe(target.id);
+    expect(results[0]?.score).toBeGreaterThan(0.4);
+    expect(results[0]?.tags).toContain("market-watch");
+    expect(results[0]?.sessionId).toBe("session-1");
+  });
+
   it("runs scheduled jobs through Powerhouse", async () => {
     const powerhouse = makePowerhouse();
     const dir = tempDir("agentix-scheduler-");
