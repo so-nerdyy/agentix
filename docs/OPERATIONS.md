@@ -78,7 +78,7 @@ Use `agentix support` to create a timestamped bundle under `data/support/` with:
 
 - manifest metadata
 - sanitized config
-- sessions, tasks, approvals, jobs, audit, healing, doctor, and memory snapshots
+- sessions, tasks, approvals, jobs, gateways, dynamic agent profiles, audit, healing, doctor, and memory snapshots
 - plan execution snapshots
 
 ## Recovery

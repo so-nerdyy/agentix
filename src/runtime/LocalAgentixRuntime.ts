@@ -1545,6 +1545,7 @@ export class LocalAgentixRuntime {
     const config = loadConfig();
     const tasks = this.powerhouse.listTasks();
     const agents = this.powerhouse.agents.list();
+    const agentProfiles = this.powerhouse.agentProfiles.list();
     const gateways = this.gateways.list();
     const jobs = this.scheduler.list();
     const healing = this.powerhouse.healing.listProcedures();
@@ -1600,6 +1601,13 @@ export class LocalAgentixRuntime {
       missingKinds.length || unhealthyAgents.length ? "fail" : "pass",
       `${agents.length} registered; missing ${missingKinds.join(", ") || "none"}; unhealthy ${unhealthyAgents.map((agent) => agent.id).join(", ") || "none"}`,
       missingKinds.length || unhealthyAgents.length ? "Restart the backend and inspect tool details." : undefined,
+    );
+    const disabledProfiles = agentProfiles.filter((profile) => !profile.enabled);
+    add(
+      "agents.dynamic_profiles",
+      "Dynamic Pi profiles",
+      "pass",
+      `${agentProfiles.length} profile(s), ${disabledProfiles.length} disabled`,
     );
     const pendingApprovals = tasks.filter((task) => task.status === "awaiting-approval");
     add(
@@ -1664,6 +1672,7 @@ export class LocalAgentixRuntime {
         gateways: gateways.length,
         memory: this.powerhouse.memory.list().length,
         healingProcedures: healing.length,
+        agentProfiles: agentProfiles.length,
       },
       config: {
         provider: config.provider,
@@ -1703,6 +1712,7 @@ export class LocalAgentixRuntime {
     const approvals = this.listApprovals();
     const jobs = this.listJobs();
     const gateways = this.listGateways();
+    const agentProfiles = this.listAgentProfiles();
     const plans = this.powerhouse.planStore.list();
     const doctor = this.doctor();
     const audit = this.listAudit();
@@ -1733,6 +1743,9 @@ export class LocalAgentixRuntime {
         healingProcedures: Array.isArray((healing as { procedures?: unknown[] }).procedures)
           ? ((healing as { procedures?: unknown[] }).procedures?.length ?? 0)
           : 0,
+        agentProfiles: Array.isArray((agentProfiles as { profiles?: unknown[] }).profiles)
+          ? ((agentProfiles as { profiles?: unknown[] }).profiles?.length ?? 0)
+          : 0,
       },
     });
     writeJson("config.json", safeConfig);
@@ -1743,6 +1756,7 @@ export class LocalAgentixRuntime {
     writeJson("approvals.json", approvals);
     writeJson("jobs.json", jobs);
     writeJson("gateways.json", gateways);
+    writeJson("agent-profiles.json", agentProfiles);
     writeJson("audit.json", audit);
     writeJson("healing.json", healing);
     writeJson("memory.json", memory);
@@ -1761,6 +1775,7 @@ export class LocalAgentixRuntime {
         "approvals.json",
         "jobs.json",
         "gateways.json",
+        "agent-profiles.json",
         "audit.json",
         "healing.json",
         "memory.json",
