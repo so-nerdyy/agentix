@@ -346,4 +346,12 @@ export class AgentixBackend {
       metadata: input.metadata,
     });
   }
+
+  async receiveGatewayInbound(input: {
+    gatewayId: string;
+    body: Record<string, unknown>;
+    secret?: string;
+  }): Promise<Record<string, unknown>> {
+    return this.post(`/gateway/${encodeURIComponent(input.gatewayId)}/inbound${input.secret ? `?secret=${encodeURIComponent(input.secret)}` : ""}`, input.body);
+  }
 }

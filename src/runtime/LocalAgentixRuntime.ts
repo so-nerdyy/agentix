@@ -10,6 +10,13 @@ import { randomUUID } from "node:crypto";
 import { RuntimeLogStore } from "../logging/RuntimeLogStore.js";
 import type { TaskAction } from "../powerhouse/types.js";
 import { GatewayRegistry } from "../gateway/GatewayRegistry.js";
+import {
+  deliverGatewayResponse,
+  gatewaySecretConfigured,
+  gatewayTokenConfigured,
+  parseGatewayInbound,
+  verifyGatewaySecret,
+} from "../gateway/GatewayConnector.js";
 import type { CommandAgentProfile } from "../pi/AgentProfileStore.js";
 
 export type RuntimeSearchResults = {
@@ -212,6 +219,7 @@ export type RuntimeGatewayDetail = {
     status: string;
     endpoint: string | null;
     tokenConfigured: boolean;
+    inboundSecretConfigured: boolean;
     messageCount: number;
     lastSeenAt: string | null;
     lastError: string | null;
@@ -1101,6 +1109,8 @@ export class LocalAgentixRuntime {
   listGateways(): Array<Record<string, unknown>> {
     return this.gateways.list().map((gateway) => ({
       ...gateway,
+      tokenConfigured: gateway.tokenConfigured || gatewayTokenConfigured(gateway),
+      inboundSecretConfigured: gatewaySecretConfigured(gateway.id),
       createdAt: new Date(gateway.createdAt).toISOString(),
       updatedAt: new Date(gateway.updatedAt).toISOString(),
       lastSeenAt: gateway.lastSeenAt ? new Date(gateway.lastSeenAt).toISOString() : null,
@@ -1152,7 +1162,8 @@ export class LocalAgentixRuntime {
         enabled: gateway.enabled,
         status: gateway.status,
         endpoint: gateway.endpoint,
-        tokenConfigured: gateway.tokenConfigured,
+        tokenConfigured: gateway.tokenConfigured || gatewayTokenConfigured(gateway),
+        inboundSecretConfigured: gatewaySecretConfigured(gateway.id),
         messageCount: gateway.messageCount,
         lastSeenAt: gateway.lastSeenAt ? new Date(gateway.lastSeenAt).toISOString() : null,
         lastError: gateway.lastError,
@@ -1188,6 +1199,7 @@ export class LocalAgentixRuntime {
     stimulus: string;
     sessionId?: string;
     metadata?: Record<string, unknown>;
+    deliver?: boolean;
   }): Promise<Record<string, unknown>> {
     this.powerhouse.start();
     const gateway = this.gateways.get(input.gatewayId);
@@ -1207,6 +1219,16 @@ export class LocalAgentixRuntime {
       sessionId: input.sessionId ?? session.id,
       onDelta: undefined,
     });
+    const delivery = input.deliver === false
+      ? { attempted: false, ok: false, target: null, error: "delivery disabled" }
+      : await deliverGatewayResponse(gateway, result.response, input.metadata);
+    if (delivery.attempted) {
+      this.gateways.touch(gateway.id, {
+        status: delivery.ok ? "connected" : "error",
+        lastSeenAt: Date.now(),
+        lastError: delivery.ok ? null : delivery.error ?? "gateway delivery failed",
+      });
+    }
     this.powerhouse.audit.record({
       type: "gateway.message.received",
       actor: "gateway",
@@ -1216,6 +1238,7 @@ export class LocalAgentixRuntime {
         gatewayPlatform: gateway.platform,
         sessionId: result.sessionId,
         taskIds: result.taskIds,
+        delivery,
       },
     });
     EventBus.emit("gateway:message", {
@@ -1235,7 +1258,33 @@ export class LocalAgentixRuntime {
       status: result.status,
       taskIds: result.taskIds,
       response: result.response,
+      delivery,
     };
+  }
+
+  async receiveGatewayInbound(input: {
+    gatewayId: string;
+    body: Record<string, unknown>;
+    secret?: string;
+  }): Promise<Record<string, unknown>> {
+    this.powerhouse.start();
+    const gateway = this.gateways.get(input.gatewayId);
+    if (!gateway) return { ok: false, error: `unknown gateway: ${input.gatewayId}` };
+    if (!gateway.enabled) return { ok: false, error: `gateway disabled: ${input.gatewayId}` };
+    if (!verifyGatewaySecret(gateway.id, input.secret)) {
+      this.gateways.touch(gateway.id, { status: "error", lastError: "invalid gateway secret" });
+      return { ok: false, error: "invalid gateway secret" };
+    }
+    const inbound = parseGatewayInbound(gateway, input.body);
+    if (inbound.challenge) return { ok: true, challenge: inbound.challenge };
+    if (!inbound.stimulus.trim()) return { ok: false, error: "empty gateway message" };
+    return this.receiveGatewayMessage({
+      gatewayId: gateway.id,
+      stimulus: inbound.stimulus,
+      sessionId: inbound.sessionId,
+      metadata: inbound.metadata,
+      deliver: true,
+    });
   }
 
   getHealingDetail(id: string): RuntimeHealingDetail | null {

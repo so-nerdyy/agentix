@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { existsSync, readFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BasePIAgent } from "../../src/pi/BasePIAgent.js";
@@ -892,29 +893,66 @@ describe("Powerhouse restored runtime", () => {
   });
 
   it("exposes gateway registry details and accepts inbound gateway messages", async () => {
+    const previousWebhookUrl = process.env.AGENTIX_GATEWAY_WEBHOOK_URL;
+    let delivered: Record<string, unknown> | null = null;
+    const receiver = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk.toString();
+      });
+      req.on("end", () => {
+        delivered = JSON.parse(body) as Record<string, unknown>;
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      });
+    });
+    await new Promise<void>((resolve) => receiver.listen(0, "127.0.0.1", () => resolve()));
+    const address = receiver.address();
+    const port = typeof address === "object" && address ? address.port : 0;
+    process.env.AGENTIX_GATEWAY_WEBHOOK_URL = `http://127.0.0.1:${port}/hook`;
     const runtime = new LocalAgentixRuntime();
 
-    const gateways = runtime.listGateways();
-    expect(gateways.length).toBeGreaterThan(0);
-    const detail = runtime.getGateway("webhook");
+    try {
+      const gateways = runtime.listGateways();
+      expect(gateways.length).toBeGreaterThan(0);
+      expect(gateways.find((gateway) => gateway.id === "webhook")?.tokenConfigured).toBe(true);
+      const detail = runtime.getGateway("webhook");
 
-    expect(detail).not.toBeNull();
-    expect(detail?.gateway.id).toBe("webhook");
-    expect(Array.isArray(detail?.relatedSessions)).toBe(true);
-    expect(Array.isArray(detail?.relatedTasks)).toBe(true);
+      expect(detail).not.toBeNull();
+      expect(detail?.gateway.id).toBe("webhook");
+      expect(Array.isArray(detail?.relatedSessions)).toBe(true);
+      expect(Array.isArray(detail?.relatedTasks)).toBe(true);
 
-    const enabled = runtime.setGatewayEnabled("webhook", true);
-    expect(enabled.ok).toBe(true);
+      const enabled = runtime.setGatewayEnabled("webhook", true);
+      expect(enabled.ok).toBe(true);
 
-    const message = await runtime.receiveGatewayMessage({
-      gatewayId: "webhook",
-      stimulus: "gateway smoke",
-    });
-    expect(message.ok).toBe(true);
-    expect(message.response).toContain("Powerhouse accepted the task");
+      const message = await runtime.receiveGatewayMessage({
+        gatewayId: "webhook",
+        stimulus: "gateway smoke",
+      });
+      expect(message.ok).toBe(true);
+      expect(message.response).toContain("Powerhouse accepted the task");
+      expect(message.delivery).toMatchObject({ attempted: true, ok: true });
+      expect(delivered?.gatewayId).toBe("webhook");
+      expect(String(delivered?.response)).toContain("Powerhouse accepted the task");
 
-    runtime.shutdown();
-  });
+      const inbound = await runtime.receiveGatewayInbound({
+        gatewayId: "webhook",
+        body: { text: "inbound gateway smoke" },
+        secret: "",
+      });
+      expect(inbound.ok).toBe(false);
+      expect(inbound.error).toBe("invalid gateway secret");
+    } finally {
+      if (previousWebhookUrl === undefined) {
+        delete process.env.AGENTIX_GATEWAY_WEBHOOK_URL;
+      } else {
+        process.env.AGENTIX_GATEWAY_WEBHOOK_URL = previousWebhookUrl;
+      }
+      runtime.shutdown();
+      await new Promise<void>((resolve) => receiver.close(() => resolve()));
+    }
+  }, 30_000);
 
   it("returns detailed scheduled job information", async () => {
     const runtime = new LocalAgentixRuntime();

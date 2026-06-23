@@ -52,10 +52,12 @@ export async function startInboxServer(opts: { port?: number; host?: string } = 
   server.addHook("preHandler", async (request, reply) => {
     if (request.method === "OPTIONS") return;
     const pathname = request.url.split("?")[0] ?? "/";
+    const isGatewayInbound = /^\/gateway\/[^/]+\/inbound$/.test(pathname);
     const isPublic =
       pathname === "/" ||
       pathname === "/health" ||
       pathname === "/openapi.json" ||
+      isGatewayInbound ||
       pathname === "/ui" ||
       pathname === "/ui/" ||
       pathname.startsWith("/ui/");
@@ -266,6 +268,19 @@ export async function startInboxServer(opts: { port?: number; host?: string } = 
       sessionId: body?.sessionId as string | undefined,
       metadata: (body?.metadata as Record<string, unknown> | undefined) ?? undefined,
     });
+  });
+  server.post("/gateway/:id/inbound", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const query = request.query as Record<string, string | undefined>;
+    const body = request.body as Record<string, unknown> | undefined;
+    const secret = request.headers["x-agentix-gateway-secret"];
+    const result = await runtime.receiveGatewayInbound({
+      gatewayId: id,
+      body: body ?? {},
+      secret: Array.isArray(secret) ? secret[0] : secret ?? query.secret,
+    });
+    if (result.ok === false) reply.status(result.error === "invalid gateway secret" ? 403 : 400);
+    return result;
   });
   server.get("/approvals", async () => runtime.listApprovals());
   server.get("/approvals/:id", async (request, reply) => {

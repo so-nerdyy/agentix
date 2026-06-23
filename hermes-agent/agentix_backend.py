@@ -320,6 +320,15 @@ class AgentixBackend:
             body["metadata"] = metadata
         return self._post(f"/gateway/{quote(gateway_id)}/message", body)
 
+    def receive_gateway_inbound(
+        self,
+        gateway_id: str,
+        body: Dict[str, Any],
+        secret: Optional[str] = None,
+    ) -> Any:
+        suffix = f"?secret={quote(secret)}" if secret else ""
+        return self._post(f"/gateway/{quote(gateway_id)}/inbound{suffix}", body)
+
     def list_scheduled_jobs(self) -> Any:
         return self._get("/scheduler/jobs")
 

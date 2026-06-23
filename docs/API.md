@@ -30,7 +30,7 @@ Core endpoint groups:
 - Tasks and approvals: `/tasks`, `/approvals`
 - Memory: `/memory`, `/memory/search`, `/memory/consolidate`, `/memory/reset`
 - Scheduler/cron: `/scheduler/jobs`, `/scheduler/run-due`
-- Gateways: `/gateway`
+- Gateways: `/gateway`, `/gateway/{id}`, `/gateway/{id}/message`, `/gateway/{id}/inbound`. Inbound webhooks are public HTTP endpoints but require `X-Agentix-Gateway-Secret` or `?secret=` matching `AGENTIX_GATEWAY_<ID>_SECRET` or `AGENTIX_GATEWAY_SECRET` unless `AGENTIX_ALLOW_UNAUTHENTICATED_GATEWAY=1` is explicitly set for local development. Outbound delivery uses platform env vars such as `SLACK_BOT_TOKEN`, `DISCORD_WEBHOOK_URL`, `TEAMS_WEBHOOK_URL`, `TELEGRAM_BOT_TOKEN`, or `AGENTIX_GATEWAY_WEBHOOK_URL`.
 - Healing: `/healing/stats`, `/healing/detail/{id}`, `/healing/procedures/{id}/promote`, `/healing/procedures/{id}/deprecate`. Procedure detail includes use/success/failure counters, auto-promotion time, and deprecation reason.
 - Pi agent profiles: `/agents/profiles`, `/agents/profiles/{id}/enable`, `/agents/profiles/{id}/disable`. Dynamic profiles run configured commands as approval-gated Pi agents and receive task JSON on stdin.
 - Runtime support: `/doctor`, `/usage`, `/logs`, `/audit`, `/support/bundle`, `/events`

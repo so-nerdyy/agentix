@@ -95,6 +95,7 @@ export const openApiSpec = {
     "/gateway/{id}/enable": { post: { summary: "Enable gateway" } },
     "/gateway/{id}/disable": { post: { summary: "Disable gateway" } },
     "/gateway/{id}/message": { post: { summary: "Inject gateway message" } },
+    "/gateway/{id}/inbound": { post: { security: [], summary: "Receive signed inbound gateway webhook" } },
     "/search": { get: { summary: "Search runtime records" } },
     "/support/bundle": { post: { summary: "Create support bundle" } },
     "/events": { get: { summary: "Runtime event stream" } },

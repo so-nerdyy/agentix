@@ -11,17 +11,29 @@ function tempDir(): string {
   return dir;
 }
 
+function restoreEnv(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = value;
+  }
+}
+
 describe("HTTP session token auth", () => {
   const envBackup = {
     AGENTIX_DATA_DIR: process.env.AGENTIX_DATA_DIR,
     AGENTIX_SESSION_TOKEN: process.env.AGENTIX_SESSION_TOKEN,
     AGENTIX_ALLOW_UNAUTHENTICATED: process.env.AGENTIX_ALLOW_UNAUTHENTICATED,
+    AGENTIX_GATEWAY_SECRET: process.env.AGENTIX_GATEWAY_SECRET,
+    AGENTIX_ALLOW_UNAUTHENTICATED_GATEWAY: process.env.AGENTIX_ALLOW_UNAUTHENTICATED_GATEWAY,
   };
 
   afterEach(async () => {
-    process.env.AGENTIX_DATA_DIR = envBackup.AGENTIX_DATA_DIR;
-    process.env.AGENTIX_SESSION_TOKEN = envBackup.AGENTIX_SESSION_TOKEN;
-    process.env.AGENTIX_ALLOW_UNAUTHENTICATED = envBackup.AGENTIX_ALLOW_UNAUTHENTICATED;
+    restoreEnv("AGENTIX_DATA_DIR", envBackup.AGENTIX_DATA_DIR);
+    restoreEnv("AGENTIX_SESSION_TOKEN", envBackup.AGENTIX_SESSION_TOKEN);
+    restoreEnv("AGENTIX_ALLOW_UNAUTHENTICATED", envBackup.AGENTIX_ALLOW_UNAUTHENTICATED);
+    restoreEnv("AGENTIX_GATEWAY_SECRET", envBackup.AGENTIX_GATEWAY_SECRET);
+    restoreEnv("AGENTIX_ALLOW_UNAUTHENTICATED_GATEWAY", envBackup.AGENTIX_ALLOW_UNAUTHENTICATED_GATEWAY);
     vi.resetModules();
     while (dirs.length > 0) {
       rmSync(dirs.pop()!, { recursive: true, force: true });
@@ -179,6 +191,43 @@ describe("HTTP session token auth", () => {
       });
       expect(revoked.status).toBe(200);
       expect((await revoked.json()) as { ok: boolean }).toMatchObject({ ok: true });
+    } finally {
+      await server.close();
+    }
+  }, 30_000);
+
+  it("accepts signed gateway inbound webhooks without session auth", async () => {
+    process.env.AGENTIX_DATA_DIR = tempDir();
+    process.env.AGENTIX_SESSION_TOKEN = "admin-token";
+    process.env.AGENTIX_GATEWAY_SECRET = "gateway-secret";
+    const { startBridge } = await import("../../src/bridge/server.js");
+    const server = await startBridge({ port: 0, host: "127.0.0.1" });
+    const base = `http://127.0.0.1:${server.port}`;
+
+    try {
+      const enabled = await fetch(`${base}/gateway/webhook/enable`, {
+        method: "POST",
+        headers: { Authorization: "Bearer admin-token" },
+      });
+      expect(enabled.status).toBe(200);
+
+      const rejected = await fetch(`${base}/gateway/webhook/inbound`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "blocked" }),
+      });
+      expect(rejected.status).toBe(403);
+
+      const accepted = await fetch(`${base}/gateway/webhook/inbound`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Agentix-Gateway-Secret": "gateway-secret",
+        },
+        body: JSON.stringify({ text: "signed gateway smoke" }),
+      });
+      expect(accepted.status).toBe(200);
+      expect(await accepted.json()).toMatchObject({ ok: true, status: "complete" });
     } finally {
       await server.close();
     }
