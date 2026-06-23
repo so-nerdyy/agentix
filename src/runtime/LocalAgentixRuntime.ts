@@ -129,6 +129,11 @@ export type RuntimeHealingDetail = {
     createdAt: string;
     updatedAt: string;
     uses: number;
+    successes: number;
+    failures: number;
+    lastUsedAt: string | null;
+    autoPromotedAt: string | null;
+    deprecatedReason: string | null;
   } | null;
   relatedTasks: Array<{
     id: string;
@@ -1235,6 +1240,11 @@ export class LocalAgentixRuntime {
             createdAt: new Date(procedure.createdAt).toISOString(),
             updatedAt: new Date(procedure.updatedAt).toISOString(),
             uses: procedure.uses,
+            successes: procedure.successes ?? 0,
+            failures: procedure.failures ?? 0,
+            lastUsedAt: procedure.lastUsedAt ? new Date(procedure.lastUsedAt).toISOString() : null,
+            autoPromotedAt: procedure.autoPromotedAt ? new Date(procedure.autoPromotedAt).toISOString() : null,
+            deprecatedReason: procedure.deprecatedReason ?? null,
           }
         : null,
       relatedTasks,

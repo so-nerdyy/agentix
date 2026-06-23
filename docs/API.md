@@ -31,7 +31,7 @@ Core endpoint groups:
 - Memory: `/memory`, `/memory/search`, `/memory/consolidate`, `/memory/reset`
 - Scheduler/cron: `/scheduler/jobs`, `/scheduler/run-due`
 - Gateways: `/gateway`
-- Healing: `/healing/stats`, `/healing/detail/{id}`, `/healing/procedures/{id}/promote`
+- Healing: `/healing/stats`, `/healing/detail/{id}`, `/healing/procedures/{id}/promote`, `/healing/procedures/{id}/deprecate`. Procedure detail includes use/success/failure counters, auto-promotion time, and deprecation reason.
 - Runtime support: `/doctor`, `/usage`, `/logs`, `/audit`, `/support/bundle`, `/events`
 
 Use `agentix server` for the full dashboard/API runtime, or `agentix --agentix-cli server` when bypassing the Hermes frontend wrapper.

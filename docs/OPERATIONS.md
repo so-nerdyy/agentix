@@ -44,7 +44,7 @@ Approval-gated plans are persisted in `PlanStore`. When an approval is granted, 
 
 ## Healing
 
-Repeated task failures create candidate healing procedures. Promoted procedures are applied during retryable Symphony steps by injecting procedure guidance into the next Pi-agent attempt and recording `healing.procedure_applied` in the audit log. This does not bypass approval gates; shell, code-edit, and sandbox steps still require approval before execution.
+Repeated task failures create candidate healing procedures. After the same normalized failure repeats enough times, Agentix can auto-promote the procedure into retry guidance. Promoted procedures are applied during retryable Symphony steps by injecting procedure guidance into the next Pi-agent attempt and recording `healing.procedure_applied` in the audit log. Successful and failed applications update procedure counters; procedures that repeatedly fail without success are auto-deprecated. This does not bypass approval gates; shell, code-edit, and sandbox steps still require approval before execution.
 
 ## Health Checks
 

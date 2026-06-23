@@ -43,7 +43,7 @@ Standalone upstream Hermes still uses its native local stores when those Agentix
 - `ApprovalWorkflow` gates approval-required work
 - `PIAgentRegistry` binds task kinds to worker implementations
 - `ConversationAgent` calls the configured LLM provider when credentials are available and falls back to deterministic diagnostics when running offline
-- `HealingEngine` fingerprints repeated failures, proposes procedures, and applies promoted procedures as retry guidance
+- `HealingEngine` fingerprints repeated failures, proposes procedures, auto-promotes stable repeated failures into advisory procedures, applies promoted procedures as retry guidance, and auto-deprecates procedures that keep failing
 
 ## Data Flow
 
@@ -53,7 +53,7 @@ Standalone upstream Hermes still uses its native local stores when those Agentix
 4. Symphony builds a safe plan, either from the LLM planner or static fallback.
 5. The backend schedules each step, validates it, and routes it to a PI worker.
 6. Approval-gated plans pause safely and resume remaining dependent steps after approval.
-7. Failed retryable steps can receive promoted healing guidance before the next attempt.
+7. Failed retryable steps can receive promoted healing guidance before the next attempt; successful and failed procedure applications are fed back into the healing store.
 8. Results stream back to the shell and are persisted under the workspace data directory.
 
 ## Workspace Layout

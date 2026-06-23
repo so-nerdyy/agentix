@@ -533,6 +533,18 @@ export class Powerhouse {
     task.error = result.error;
 
     if (result.ok) {
+      const procedureId = typeof task.payload.healingProcedureId === "string"
+        ? task.payload.healingProcedureId
+        : null;
+      if (procedureId) {
+        this.healing.recordProcedureOutcome(procedureId, true);
+        this.audit.record({
+          type: "healing.procedure_succeeded",
+          actor: "system",
+          subjectId: procedureId,
+          data: { taskId: task.id, sessionId: task.sessionId, kind: task.kind },
+        });
+      }
       this.queue.transition(task, "complete");
       this.taskStore.upsert(task);
       this.sessions.removePendingTask(task.sessionId, task.id);
@@ -600,6 +612,18 @@ export class Powerhouse {
     this.taskStore.upsert(task);
     this.sessions.removePendingTask(task.sessionId, task.id);
     this.healing.observeFailure(task.id, task.sessionId, error);
+    const procedureId = typeof task.payload.healingProcedureId === "string"
+      ? task.payload.healingProcedureId
+      : null;
+    if (procedureId) {
+      this.healing.recordProcedureOutcome(procedureId, false);
+      this.audit.record({
+        type: "healing.procedure_failed",
+        actor: "system",
+        subjectId: procedureId,
+        data: { taskId: task.id, sessionId: task.sessionId, kind: task.kind, error },
+      });
+    }
     this.audit.record({
       type: "task.failed",
       actor: "system",

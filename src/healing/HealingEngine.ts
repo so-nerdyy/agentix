@@ -19,6 +19,11 @@ export interface HealingProcedure {
   createdAt: number;
   updatedAt: number;
   uses: number;
+  successes?: number;
+  failures?: number;
+  lastUsedAt?: number | null;
+  autoPromotedAt?: number | null;
+  deprecatedReason?: string | null;
 }
 
 export interface HealingDetail {
@@ -52,7 +57,8 @@ export class HealingEngine {
       record,
     ];
     let procedures = current.procedures;
-    if (record.count >= 2 && !procedures.some((item) => item.fingerprint === fingerprint)) {
+    const existingProcedure = procedures.find((item) => item.fingerprint === fingerprint);
+    if (record.count >= 2 && !existingProcedure) {
       procedures = [
         ...procedures,
         {
@@ -63,8 +69,23 @@ export class HealingEngine {
           createdAt: now,
           updatedAt: now,
           uses: 0,
+          successes: 0,
+          failures: 0,
+          lastUsedAt: null,
+          autoPromotedAt: null,
+          deprecatedReason: null,
         },
       ];
+    } else if (record.count >= 3 && existingProcedure?.status === "candidate") {
+      procedures = procedures.map((procedure) => procedure.id === existingProcedure.id
+        ? {
+            ...procedure,
+            status: "promoted",
+            summary: `Auto-learned recovery for repeated failure (${record.count}x): ${record.lastError}`,
+            updatedAt: now,
+            autoPromotedAt: now,
+          }
+        : procedure);
     }
     this.store.write({ failures, procedures });
     EventBus.emit("task:failed", { taskId, sessionId, error });
@@ -115,7 +136,20 @@ export class HealingEngine {
       .read()
       .procedures.find((item) => item.fingerprint === fingerprint && item.status === "promoted");
     if (!procedure) return undefined;
-    return this.updateProcedure(procedure.id, { uses: procedure.uses + 1 });
+    return this.updateProcedure(procedure.id, { uses: procedure.uses + 1, lastUsedAt: Date.now() });
+  }
+
+  recordProcedureOutcome(id: string, ok: boolean): HealingProcedure | undefined {
+    const procedure = this.getProcedure(id);
+    if (!procedure) return undefined;
+    const successes = (procedure.successes ?? 0) + (ok ? 1 : 0);
+    const failures = (procedure.failures ?? 0) + (ok ? 0 : 1);
+    const patch: Partial<HealingProcedure> = { successes, failures };
+    if (!ok && failures >= 3 && successes === 0 && procedure.status === "promoted") {
+      patch.status = "deprecated";
+      patch.deprecatedReason = "auto-deprecated after repeated failed recovery attempts";
+    }
+    return this.updateProcedure(id, patch);
   }
 
   private updateProcedure(

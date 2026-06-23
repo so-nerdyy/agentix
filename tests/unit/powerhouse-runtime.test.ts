@@ -65,6 +65,19 @@ class HealingAwareAgent extends BasePIAgent {
   }
 }
 
+class HealingResistantAgent extends BasePIAgent {
+  constructor() {
+    super("user-message", "pi-healing-resistant");
+  }
+
+  async execute(task: Task): Promise<TaskResult> {
+    this.emitStart(task);
+    const error = "known healing failure 4242";
+    this.emitError(task, error);
+    return { ok: false, error };
+  }
+}
+
 afterEach(() => {
   while (tempDirs.length > 0) {
     rmSync(tempDirs.pop()!, { recursive: true, force: true });
@@ -556,7 +569,58 @@ describe("Powerhouse restored runtime", () => {
     expect(tasks[1]?.status).toBe("complete");
     expect(tasks[1]?.payload.healingProcedureId).toBe(promoted!.id);
     expect(procedure?.uses).toBe(1);
+    expect(procedure?.successes).toBe(1);
+    expect(procedure?.failures ?? 0).toBe(0);
     expect(audit.list().some((entry) => entry.type === "healing.procedure_applied")).toBe(true);
+
+    powerhouse.stop();
+  });
+
+  it("auto-promotes repeated healing procedures and deprecates unsafe ones", async () => {
+    const dir = tempDir("agentix-healing-self-evolve-");
+    const healing = new HealingEngine(join(dir, "healing.json"));
+    healing.observeFailure("seed-1", "seed-session", "known healing failure 4242");
+    healing.observeFailure("seed-2", "seed-session", "known healing failure 4242");
+    healing.observeFailure("seed-3", "seed-session", "known healing failure 4242");
+    const autoPromoted = healing.listProcedures()[0];
+
+    expect(autoPromoted?.status).toBe("promoted");
+    expect(autoPromoted?.autoPromotedAt).toBeGreaterThan(0);
+
+    const registry = new PIAgentRegistry();
+    registry.register(new HealingResistantAgent());
+    const powerhouse = new Powerhouse({
+      sessions: new SessionCoordinator(join(dir, "sessions")),
+      queue: new TaskQueue(),
+      approvals: new ApprovalWorkflow({ timeoutMs: 10_000 }),
+      agents: registry,
+      memory: new MemoryStore(join(dir, "memory.jsonl")),
+      healing,
+      planStore: new PlanStore(join(dir, "plans.json")),
+      taskStore: new TaskStore(join(dir, "tasks.json")),
+      audit: new AuditLog(join(dir, "audit.jsonl")),
+    });
+    const plan = {
+      steps: [
+        {
+          id: "heal",
+          kind: "user-message",
+          payload: { stimulus: "try unsafe promoted procedure" },
+          maxAttempts: 2,
+        },
+      ],
+    };
+
+    await powerhouse.executeStimulus({ stimulus: `plan: ${JSON.stringify(plan)}` });
+    await powerhouse.executeStimulus({ stimulus: `plan: ${JSON.stringify(plan)}` });
+    await powerhouse.executeStimulus({ stimulus: `plan: ${JSON.stringify(plan)}` });
+
+    const deprecated = healing.getProcedure(autoPromoted!.id);
+    expect(deprecated?.uses).toBe(3);
+    expect(deprecated?.successes ?? 0).toBe(0);
+    expect(deprecated?.failures).toBe(3);
+    expect(deprecated?.status).toBe("deprecated");
+    expect(deprecated?.deprecatedReason).toContain("auto-deprecated");
 
     powerhouse.stop();
   });
