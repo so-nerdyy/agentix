@@ -41,6 +41,7 @@ From any project folder, `agentix` opens the interactive shell. Use `agentix das
 - `agentix cron` - manage scheduled jobs
 - `agentix gateway` - manage integrations
 - `agentix skills` - manage skills/plugins
+- `agentix agents` - manage dynamic command-backed Pi agent profiles
 - `agentix tools list` - inspect Agentix Pi agents
 - `agentix memory search <query>` - search Agentix memory
 - `agentix sessions list` - inspect Agentix sessions

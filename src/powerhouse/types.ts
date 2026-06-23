@@ -12,7 +12,8 @@ export type TaskKind =
   | "user-message" // routed to a conversation PI agent
   | "bash" // requires ApprovalWorkflow
   | "code-edit" // requires ApprovalWorkflow
-  | "sandbox-run"; // local sandbox-directory execution; approval-gated by default
+  | "sandbox-run" // local sandbox-directory execution; approval-gated by default
+  | (string & {}); // dynamically registered Pi profile kind
 
 export type TaskPriority = "user" | "background";
 

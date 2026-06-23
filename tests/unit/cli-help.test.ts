@@ -15,6 +15,7 @@ describe("CLI help", () => {
     expect(help).toContain("search");
     expect(help).toContain("audit");
     expect(help).toContain("healing");
+    expect(help).toContain("agents");
     expect(help).toContain("support");
     expect(help).toContain("server");
     expect(help).toContain("plugin, extension");

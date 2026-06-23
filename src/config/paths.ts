@@ -53,6 +53,8 @@ export const PATHS = {
   vaultDir: join(DATA_DIR, "vault"),
   authDir: join(DATA_DIR, "auth"),
   authTokensFile: join(DATA_DIR, "auth", "tokens.json"),
+  agentsDir: join(DATA_DIR, "agents"),
+  agentProfilesFile: join(DATA_DIR, "agents", "profiles.json"),
 } as const;
 
 export function ensureDataDirs(): void {
@@ -64,6 +66,7 @@ export function ensureDataDirs(): void {
     PATHS.logsDir,
     PATHS.vaultDir,
     PATHS.authDir,
+    PATHS.agentsDir,
   ]) {
     try {
       mkdirSync(dir, { recursive: true });

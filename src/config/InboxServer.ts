@@ -73,6 +73,16 @@ export async function startInboxServer(opts: { port?: number; host?: string } = 
   server.get("/doctor", async () => runtime.doctor());
   server.get("/usage", async () => runtime.usage());
   server.get("/config", async () => runtime.config());
+  server.get("/agents/profiles", async () => runtime.listAgentProfiles());
+  server.post("/agents/profiles", async (request) => runtime.upsertAgentProfile(request.body as Record<string, unknown>));
+  server.post("/agents/profiles/:id/enable", async (request) => {
+    const { id } = request.params as { id: string };
+    return runtime.setAgentProfileEnabled(id, true);
+  });
+  server.post("/agents/profiles/:id/disable", async (request) => {
+    const { id } = request.params as { id: string };
+    return runtime.setAgentProfileEnabled(id, false);
+  });
   server.get("/auth/status", async () => runtime.authStatus());
   server.get("/auth/tokens", async () => runtime.listAuthTokens());
   server.post("/auth/tokens", async (request) => {

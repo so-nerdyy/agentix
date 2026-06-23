@@ -32,6 +32,7 @@ Core endpoint groups:
 - Scheduler/cron: `/scheduler/jobs`, `/scheduler/run-due`
 - Gateways: `/gateway`
 - Healing: `/healing/stats`, `/healing/detail/{id}`, `/healing/procedures/{id}/promote`, `/healing/procedures/{id}/deprecate`. Procedure detail includes use/success/failure counters, auto-promotion time, and deprecation reason.
+- Pi agent profiles: `/agents/profiles`, `/agents/profiles/{id}/enable`, `/agents/profiles/{id}/disable`. Dynamic profiles run configured commands as approval-gated Pi agents and receive task JSON on stdin.
 - Runtime support: `/doctor`, `/usage`, `/logs`, `/audit`, `/support/bundle`, `/events`
 
 Use `agentix server` for the full dashboard/API runtime, or `agentix --agentix-cli server` when bypassing the Hermes frontend wrapper.

@@ -27,6 +27,7 @@ describe("launcher help", () => {
     expect(result.stdout).toContain("tasks, task");
     expect(result.stdout).toContain("approvals, approval");
     expect(result.stdout).toContain("healing");
+    expect(result.stdout).toContain("agents");
     expect(result.stdout).toContain("--bridge-port");
   });
 
@@ -93,6 +94,7 @@ describe("launcher help", () => {
     expect(backendCommands).toContain("search");
     expect(backendCommands).toContain("audit");
     expect(backendCommands).toContain("healing");
+    expect(backendCommands).toContain("agents");
     expect(backendCommands).toContain("auth");
     expect(hermesCommands).not.toContain("auth");
     expect(bridgelessCommands).not.toContain("auth");

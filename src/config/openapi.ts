@@ -53,6 +53,12 @@ export const openApiSpec = {
     "/memory/reset": { post: { summary: "Reset memory records" } },
     "/tools": { get: { summary: "List registered Pi agents/tools" } },
     "/tools/{id}": { get: { summary: "Inspect Pi agent/tool" } },
+    "/agents/profiles": {
+      get: { summary: "List dynamic command-backed Pi agent profiles" },
+      post: { summary: "Create or update a dynamic command-backed Pi agent profile" },
+    },
+    "/agents/profiles/{id}/enable": { post: { summary: "Enable a dynamic Pi agent profile" } },
+    "/agents/profiles/{id}/disable": { post: { summary: "Disable a dynamic Pi agent profile" } },
     "/tasks": { get: { summary: "List tasks" } },
     "/tasks/{id}": { get: { summary: "Inspect task" } },
     "/tasks/{id}/action": { post: { summary: "Cancel, retry, or restart task" } },

@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import { RuntimeLogStore } from "../logging/RuntimeLogStore.js";
 import type { TaskAction } from "../powerhouse/types.js";
 import { GatewayRegistry } from "../gateway/GatewayRegistry.js";
+import type { CommandAgentProfile } from "../pi/AgentProfileStore.js";
 
 export type RuntimeSearchResults = {
   query: string;
@@ -431,6 +432,49 @@ export class LocalAgentixRuntime {
       audit,
       logs,
     };
+  }
+
+  listAgentProfiles(): Record<string, unknown> {
+    return {
+      profiles: this.powerhouse.agentProfiles.list(),
+      registeredAgents: this.powerhouse.agents.list().map((agent) => ({
+        id: agent.id,
+        kind: agent.kind,
+        healthy: agent.healthy(),
+      })),
+    };
+  }
+
+  upsertAgentProfile(input: Partial<CommandAgentProfile>): Record<string, unknown> {
+    const profile = this.powerhouse.agentProfiles.upsert({
+      id: String(input.id ?? "").trim(),
+      kind: String(input.kind ?? "").trim(),
+      description: typeof input.description === "string" ? input.description : undefined,
+      enabled: input.enabled !== false,
+      command: Array.isArray(input.command) ? input.command.map((part) => String(part)) : [],
+      cwd: typeof input.cwd === "string" ? input.cwd : undefined,
+      timeoutMs: typeof input.timeoutMs === "number" ? input.timeoutMs : undefined,
+    });
+    this.powerhouse.audit.record({
+      type: "agent.profile_upserted",
+      actor: "user",
+      subjectId: profile.id,
+      data: { kind: profile.kind, enabled: profile.enabled },
+    });
+    return { ok: true, profile };
+  }
+
+  setAgentProfileEnabled(id: string, enabled: boolean): Record<string, unknown> {
+    const profile = this.powerhouse.agentProfiles.setEnabled(id, enabled);
+    if (profile) {
+      this.powerhouse.audit.record({
+        type: enabled ? "agent.profile_enabled" : "agent.profile_disabled",
+        actor: "user",
+        subjectId: id,
+        data: { kind: profile.kind },
+      });
+    }
+    return { ok: Boolean(profile), profile };
   }
 
   search(query: string): RuntimeSearchResults {

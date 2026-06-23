@@ -235,7 +235,7 @@ export class TaskPlanner {
   }
 
   private requiresApprovalByDefault(kind?: string): boolean {
-    return kind === "bash" || kind === "code-edit" || kind === "sandbox-run";
+    return kind !== "user-message";
   }
 
   private extractJson(text: string): string {

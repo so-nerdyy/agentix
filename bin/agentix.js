@@ -30,6 +30,7 @@ const BACKEND_COMMANDS = new Set([
   "search",
   "audit",
   "healing",
+  "agents",
   "auth",
   "mods",
   "plugin",
@@ -117,6 +118,7 @@ function buildLauncherHelp() {
     "  search                   search backend runtime records",
     "  audit                    list or inspect audit entries",
     "  healing                  inspect/manage healing procedures",
+    "  agents                   manage dynamic command-backed Pi profiles",
     "  mods                    list available tools/modules",
     "  plugin, extension       plugin compatibility helpers",
     "  broadcast, eval, shell   backend compatibility entrypoints",
@@ -222,6 +224,13 @@ function buildCommandHelp(command) {
         "Usage: agentix healing [fingerprint|procedure-id] [inspect|promote|deprecate]",
         "",
         "Inspects healing state and manages learned recovery procedures.",
+      ].join("\n");
+    case "agents":
+      return [
+        "Usage: agentix agents [list|create <id> <kind> <command...>|enable <id>|disable <id>]",
+        "",
+        "Manages dynamic command-backed Pi agent profiles.",
+        "Command profiles are approval-gated and receive task JSON on stdin.",
       ].join("\n");
     case "auth":
       return [

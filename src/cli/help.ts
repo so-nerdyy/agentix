@@ -28,6 +28,7 @@ export function buildHelpText(version: string): string {
     "  search               search tasks, sessions, memory, audit, logs, jobs",
     "  audit                list audit entries or inspect one entry",
     "  healing              inspect/promote/deprecate healing procedures",
+    "  agents               manage dynamic command-backed Pi agent profiles",
     "  support              create a support bundle",
     "  mods                 list available tools/modules",
     "  plugin, extension    alias for mods",

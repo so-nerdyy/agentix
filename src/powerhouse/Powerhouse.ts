@@ -4,6 +4,8 @@ import { EventBus } from "../config/EventBus.js";
 import { PATHS } from "../config/paths.js";
 import { BashAgent } from "../pi/BashAgent.js";
 import { CodeAgent } from "../pi/CodeAgent.js";
+import { AgentProfileStore } from "../pi/AgentProfileStore.js";
+import { CommandAgent } from "../pi/CommandAgent.js";
 import { ConversationAgent } from "../pi/ConversationAgent.js";
 import { SandboxAgent } from "../pi/SandboxAgent.js";
 import { HealingEngine } from "../healing/HealingEngine.js";
@@ -42,6 +44,7 @@ export class Powerhouse {
   readonly planStore: PlanStore;
   readonly taskStore: TaskStore;
   readonly audit: AuditLog;
+  readonly agentProfiles: AgentProfileStore;
   private started = false;
   private recoveryScheduled = false;
 
@@ -56,6 +59,7 @@ export class Powerhouse {
     planStore?: PlanStore;
     taskStore?: TaskStore;
     audit?: AuditLog;
+    agentProfiles?: AgentProfileStore;
   } = {}) {
     this.sessions = opts.sessions ?? new SessionCoordinator();
     this.queue = opts.queue ?? new TaskQueue();
@@ -67,6 +71,7 @@ export class Powerhouse {
     this.planStore = opts.planStore ?? new PlanStore();
     this.taskStore = opts.taskStore ?? new TaskStore();
     this.audit = opts.audit ?? new AuditLog();
+    this.agentProfiles = opts.agentProfiles ?? new AgentProfileStore();
     this.approvals.setTimeoutHandler((task, reason) => {
       this.rejectExpiredApproval(task.id, reason);
     });
@@ -642,6 +647,7 @@ export class Powerhouse {
   }
 
   private createTask(sessionId: string, step: PlanStep, planId: string): Task {
+    const agent = this.agents.forKind(step.kind);
     return {
       id: `task-${randomUUID().slice(0, 8)}`,
       sessionId,
@@ -655,7 +661,7 @@ export class Powerhouse {
       createdAt: Date.now(),
       attempts: 0,
       maxAttempts: step.maxAttempts,
-      requiresApproval: step.requiresApproval,
+      requiresApproval: step.requiresApproval || agent instanceof CommandAgent,
     };
   }
 
@@ -671,6 +677,11 @@ export class Powerhouse {
     }
     if (!this.agents.forKind("sandbox-run")) {
       this.agents.register(new SandboxAgent());
+    }
+    for (const profile of this.agentProfiles.enabled()) {
+      if (!this.agents.get(profile.id)) {
+        this.agents.register(new CommandAgent(profile));
+      }
     }
   }
 

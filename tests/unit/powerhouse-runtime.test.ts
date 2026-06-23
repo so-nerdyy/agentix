@@ -4,6 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BasePIAgent } from "../../src/pi/BasePIAgent.js";
+import { AgentProfileStore } from "../../src/pi/AgentProfileStore.js";
 import { ConversationAgent } from "../../src/pi/ConversationAgent.js";
 import { AuditLog } from "../../src/audit/AuditLog.js";
 import { HealingEngine } from "../../src/healing/HealingEngine.js";
@@ -572,6 +573,60 @@ describe("Powerhouse restored runtime", () => {
     expect(procedure?.successes).toBe(1);
     expect(procedure?.failures ?? 0).toBe(0);
     expect(audit.list().some((entry) => entry.type === "healing.procedure_applied")).toBe(true);
+
+    powerhouse.stop();
+  });
+
+  it("loads dynamic command-backed Pi profiles and approval-gates execution", async () => {
+    const dir = tempDir("agentix-dynamic-agent-");
+    const agentProfiles = new AgentProfileStore(join(dir, "profiles.json"));
+    const script = [
+      "let input='';",
+      "process.stdin.on('data', chunk => input += chunk);",
+      "process.stdin.on('end', () => { const task = JSON.parse(input); console.log(`profile ${task.kind} ${task.payload.value}`); });",
+    ].join("");
+    agentProfiles.upsert({
+      id: "profile-echo",
+      kind: "profile-echo",
+      enabled: true,
+      command: [process.execPath, "-e", script],
+      timeoutMs: 10_000,
+    });
+
+    const powerhouse = new Powerhouse({
+      sessions: new SessionCoordinator(join(dir, "sessions")),
+      queue: new TaskQueue(),
+      approvals: new ApprovalWorkflow({ timeoutMs: 10_000 }),
+      agents: new PIAgentRegistry(),
+      memory: new MemoryStore(join(dir, "memory.jsonl")),
+      healing: new HealingEngine(join(dir, "healing.json")),
+      planStore: new PlanStore(join(dir, "plans.json")),
+      taskStore: new TaskStore(join(dir, "tasks.json")),
+      audit: new AuditLog(join(dir, "audit.jsonl")),
+      agentProfiles,
+    });
+    const plan = {
+      steps: [
+        {
+          id: "custom",
+          kind: "profile-echo",
+          payload: { value: "ok" },
+          maxAttempts: 1,
+        },
+      ],
+    };
+
+    const result = await powerhouse.executeStimulus({ stimulus: `plan: ${JSON.stringify(plan)}` });
+    const pending = powerhouse.listApprovals()[0];
+    expect(result.status).toBe("awaiting-approval");
+    expect(pending?.kind).toBe("profile-echo");
+    expect(pending?.requiresApproval).toBe(true);
+
+    const approved = await powerhouse.approve(pending!.id);
+
+    expect(approved.ok).toBe(true);
+    expect(approved.output).toBe("profile profile-echo ok");
+    expect(powerhouse.agents.get("profile-echo")?.healthy()).toBe(true);
 
     powerhouse.stop();
   });

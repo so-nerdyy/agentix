@@ -520,6 +520,41 @@ async function main() {
         console.log(`Unknown healing action: ${action}`);
       }
       return;
+    case "agents":
+      ensureDataDirs();
+      {
+        const [action = "list", ...agentArgs] = cleanArgs;
+        const runtime = getBackendRuntime();
+        if (action === "list") {
+          console.log(JSON.stringify(runtime.listAgentProfiles(), null, 2));
+          return;
+        }
+        if (action === "create") {
+          const [id, kind, ...command] = agentArgs;
+          if (!id || !kind || command.length === 0) {
+            console.log("Usage: agentix agents create <id> <kind> <command...>");
+            return;
+          }
+          console.log(JSON.stringify(runtime.upsertAgentProfile({
+            id,
+            kind,
+            enabled: true,
+            command,
+          }), null, 2));
+          return;
+        }
+        if (action === "enable" || action === "disable") {
+          const [id] = agentArgs;
+          if (!id) {
+            console.log(`Usage: agentix agents ${action} <profile-id>`);
+            return;
+          }
+          console.log(JSON.stringify(runtime.setAgentProfileEnabled(id, action === "enable"), null, 2));
+          return;
+        }
+        console.log("Usage: agentix agents [list|create <id> <kind> <command...>|enable <id>|disable <id>]");
+      }
+      return;
     case "mods":
     case "plugin":
     case "extension":
