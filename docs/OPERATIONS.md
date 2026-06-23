@@ -50,6 +50,10 @@ Repeated task failures create candidate healing procedures. After the same norma
 
 Use `agentix agents` or `/agents/profiles` to manage command-backed Pi agents. Profiles are stored in `data/agents/profiles.json`, are loaded at backend startup, and are approval-gated before execution. The configured command receives task JSON on stdin and should write result text to stdout; non-zero exit codes are treated as task failures.
 
+## Sandbox Isolation
+
+`sandbox-run` uses `AGENTIX_SANDBOX_MODE=auto` by default. When Docker and the configured image are available, Agentix runs sandbox code through `docker run --network none` with CPU, memory, and PID limits. If Docker or the image is not available, `auto` falls back to the local sandbox runner with command allowlisting, stripped env, timeout, and filesystem path guards. Use `AGENTIX_SANDBOX_MODE=docker` for fail-closed container isolation, or `AGENTIX_SANDBOX_MODE=local` when Docker is intentionally unavailable. `AGENTIX_SANDBOX_DOCKER_IMAGE` defaults to `node:22-alpine`.
+
 ## Gateways
 
 Inbound gateway webhooks use `POST /gateway/<id>/inbound` and must include `X-Agentix-Gateway-Secret` or `?secret=` matching `AGENTIX_GATEWAY_<ID>_SECRET` or `AGENTIX_GATEWAY_SECRET`. Outbound replies are delivered when platform credentials are configured: `SLACK_BOT_TOKEN` plus channel, `DISCORD_WEBHOOK_URL`, `TEAMS_WEBHOOK_URL`, `TELEGRAM_BOT_TOKEN` plus chat, or `AGENTIX_GATEWAY_WEBHOOK_URL` for generic webhooks. Missing outbound config does not fail task execution; it is reported in gateway delivery metadata and doctor details.

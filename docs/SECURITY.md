@@ -23,7 +23,8 @@ Agentix assumes the local workspace may contain untrusted inputs, scripts, and t
 - `bash`, `code-edit`, and `sandbox-run` task kinds are approval-gated by default
 - `code-edit` task paths are restricted to the configured project root
 - `sandbox-run` task files are restricted to the task sandbox directory, commands are limited to an allowlist, and child process environment is stripped
-- The sandbox is a local filesystem/process boundary, not container or kernel-level isolation
+- Sandbox isolation mode defaults to `auto`: Agentix uses Docker with `--network none`, CPU/memory/PID limits, and a bind-mounted workspace when Docker and the configured image are available; otherwise it falls back to the local filesystem/process boundary
+- Set `AGENTIX_SANDBOX_MODE=docker` to require Docker isolation and fail closed when Docker is unavailable; set `AGENTIX_SANDBOX_DOCKER_IMAGE` to choose the runtime image
 - Scheduled script jobs are restricted to configured script directories and run with a reduced environment; treat them as trusted automation, not untrusted code execution
 
 ## Validation

@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CodeAgent } from "../../src/pi/CodeAgent.js";
-import { SandboxAgent } from "../../src/pi/SandboxAgent.js";
+import { buildDockerSandboxArgs, SandboxAgent } from "../../src/pi/SandboxAgent.js";
 import { AuditLog } from "../../src/audit/AuditLog.js";
 import { HealingEngine } from "../../src/healing/HealingEngine.js";
 import { MemoryStore } from "../../src/memory/MemoryStore.js";
@@ -126,6 +126,32 @@ describe("Pi agent safety guards", () => {
 
     expect(result.ok).toBe(false);
     expect(result.error).toContain("not allowed");
+  });
+
+  it("builds Docker sandbox args with network disabled and resource limits", () => {
+    const args = buildDockerSandboxArgs("/tmp/agentix-sandbox", "node:22-alpine", ["node", "snippet.js"]);
+
+    expect(args).toContain("--network");
+    expect(args).toContain("none");
+    expect(args).toContain("--memory");
+    expect(args).toContain("256m");
+    expect(args).toContain("--pids-limit");
+    expect(args).toContain("128");
+    expect(args.slice(-3)).toEqual(["node:22-alpine", "node", "snippet.js"]);
+  });
+
+  it("marks local sandbox isolation when Docker is disabled", async () => {
+    const rootDir = tempDir("agentix-sandbox-root-");
+    const agent = new SandboxAgent({ rootDir, isolationMode: "local" });
+
+    const result = await agent.execute(makeTask("sandbox-run", {
+      code: "console.log('local isolation')",
+      filename: "snippet.js",
+      command: ["node", "snippet.js"],
+    }));
+
+    expect(result.ok).toBe(true);
+    expect(result.output).toMatchObject({ isolation: "local" });
   });
 });
 

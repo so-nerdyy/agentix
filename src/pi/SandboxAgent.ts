@@ -4,7 +4,7 @@
 
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { BasePIAgent } from "./BasePIAgent.js";
 import { PATHS } from "../config/paths.js";
 import type { Task, TaskResult } from "../powerhouse/types.js";
@@ -15,17 +15,44 @@ export interface SandboxAgentOpts {
   timeoutMs?: number;
   /** Executables allowed inside the lightweight sandbox runner. */
   allowedCommands?: string[];
+  isolationMode?: "auto" | "local" | "docker";
+  dockerImage?: string;
+}
+
+export function buildDockerSandboxArgs(sandbox: string, image: string, command: string[]): string[] {
+  return [
+    "run",
+    "--rm",
+    "--network",
+    "none",
+    "--cpus",
+    "1",
+    "--memory",
+    "256m",
+    "--pids-limit",
+    "128",
+    "-v",
+    `${sandbox}:/workspace:rw`,
+    "-w",
+    "/workspace",
+    image,
+    ...command,
+  ];
 }
 
 export class SandboxAgent extends BasePIAgent {
   private readonly rootDir: string;
   private readonly timeoutMs: number;
   private readonly allowedCommands: Set<string>;
+  private readonly isolationMode: "auto" | "local" | "docker";
+  private readonly dockerImage: string;
 
   constructor(opts: SandboxAgentOpts = {}) {
     super("sandbox-run");
     this.rootDir = opts.rootDir ?? PATHS.sandboxesDir;
     this.timeoutMs = opts.timeoutMs ?? 30_000;
+    this.isolationMode = opts.isolationMode ?? (process.env.AGENTIX_SANDBOX_MODE as "auto" | "local" | "docker" | undefined) ?? "auto";
+    this.dockerImage = opts.dockerImage ?? process.env.AGENTIX_SANDBOX_DOCKER_IMAGE ?? "node:22-alpine";
     this.allowedCommands = new Set([
       ...(opts.allowedCommands ?? ["node"]),
       ...(process.env.AGENTIX_SANDBOX_ALLOWED_COMMANDS ?? "")
@@ -66,14 +93,16 @@ export class SandboxAgent extends BasePIAgent {
       return { ok: false, error: msg };
     }
 
+    const runner = this.resolveRunner(sandbox, command);
+    if (!runner.ok) {
+      this.emitError(task, runner.error);
+      return { ok: false, error: runner.error };
+    }
+
     return new Promise<TaskResult>((resolve) => {
-      const child = spawn(command[0], command.slice(1), {
+      const child = spawn(runner.command, runner.args, {
         cwd: sandbox,
-        env: {
-          PATH: process.env.PATH ?? "",
-          NODE_ENV: "test",
-          AGENTIX_SANDBOX: "1",
-        },
+        env: runner.env,
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
       });
@@ -105,10 +134,10 @@ export class SandboxAgent extends BasePIAgent {
       child.on("close", (code) => {
         clearTimeout(killTimer);
         const result: TaskResult = timedOut
-          ? { ok: false, error: `timeout after ${this.timeoutMs}ms`, output: { stdout, stderr } }
+          ? { ok: false, error: `timeout after ${this.timeoutMs}ms`, output: { stdout, stderr, isolation: runner.isolation } }
           : code === 0
-            ? { ok: true, output: { stdout, stderr, exitCode: code } }
-            : { ok: false, error: `exit ${code}`, output: { stdout, stderr, exitCode: code } };
+            ? { ok: true, output: { stdout, stderr, exitCode: code, isolation: runner.isolation } }
+            : { ok: false, error: `exit ${code}`, output: { stdout, stderr, exitCode: code, isolation: runner.isolation } };
         if (result.ok) this.emitComplete(task, result);
         else this.emitError(task, result.error ?? "sandbox failed");
         resolve(result);
@@ -165,5 +194,51 @@ export class SandboxAgent extends BasePIAgent {
         `Allowed commands: ${Array.from(this.allowedCommands).sort().join(", ")}`,
       );
     }
+  }
+
+  private resolveRunner(
+    sandbox: string,
+    command: string[],
+  ): { ok: true; command: string; args: string[]; env: NodeJS.ProcessEnv; isolation: "local" | "docker" } | { ok: false; error: string } {
+    const dockerAvailable = this.isolationMode !== "local" && this.dockerAvailable();
+    if (this.isolationMode === "docker" && !dockerAvailable) {
+      return { ok: false, error: "SandboxAgent: Docker isolation requested but docker is not available" };
+    }
+    if (dockerAvailable) {
+      return {
+        ok: true,
+        command: "docker",
+        args: buildDockerSandboxArgs(sandbox, this.dockerImage, command),
+        env: {
+          PATH: process.env.PATH ?? "",
+          AGENTIX_SANDBOX: "1",
+          AGENTIX_SANDBOX_ISOLATION: "docker",
+        },
+        isolation: "docker",
+      };
+    }
+    return {
+      ok: true,
+      command: command[0]!,
+      args: command.slice(1),
+      env: {
+        PATH: process.env.PATH ?? "",
+        NODE_ENV: "test",
+        AGENTIX_SANDBOX: "1",
+        AGENTIX_SANDBOX_ISOLATION: "local",
+      },
+      isolation: "local",
+    };
+  }
+
+  private dockerAvailable(): boolean {
+    const daemon = spawnSync("docker", ["version", "--format", "{{.Server.Version}}"], {
+      stdio: "ignore",
+    });
+    if (daemon.status !== 0) return false;
+    const image = spawnSync("docker", ["image", "inspect", this.dockerImage], {
+      stdio: "ignore",
+    });
+    return image.status === 0;
   }
 }
