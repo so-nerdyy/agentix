@@ -187,6 +187,7 @@ describe("Powerhouse restored runtime", () => {
     const doctor = runtime.doctor();
     expect(String(doctor.status)).toMatch(/pass|warn|fail/);
     expect(Array.isArray(doctor.checks)).toBe(true);
+    expect((doctor.checks as Array<{ id: string }>).some((check) => check.id === "sandbox.isolation")).toBe(true);
     const usage = runtime.usage() as {
       counts: { sessions: number; tasks: number; plans: number; memory: number };
       tasksByStatus: Record<string, number>;

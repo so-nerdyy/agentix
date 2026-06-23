@@ -18,6 +18,7 @@ import {
   verifyGatewaySecret,
 } from "../gateway/GatewayConnector.js";
 import type { CommandAgentProfile } from "../pi/AgentProfileStore.js";
+import { dockerSandboxAvailable } from "../pi/SandboxAgent.js";
 
 export type RuntimeSearchResults = {
   query: string;
@@ -1598,6 +1599,9 @@ export class LocalAgentixRuntime {
     const gateways = this.gateways.list();
     const jobs = this.scheduler.list();
     const healing = this.powerhouse.healing.listProcedures();
+    const sandboxMode = process.env.AGENTIX_SANDBOX_MODE ?? "auto";
+    const sandboxImage = process.env.AGENTIX_SANDBOX_DOCKER_IMAGE ?? "node:22-alpine";
+    const sandboxDockerReady = sandboxMode !== "local" && dockerSandboxAvailable(sandboxImage);
     const checks: Array<{
       id: string;
       label: string;
@@ -1650,6 +1654,15 @@ export class LocalAgentixRuntime {
       missingKinds.length || unhealthyAgents.length ? "fail" : "pass",
       `${agents.length} registered; missing ${missingKinds.join(", ") || "none"}; unhealthy ${unhealthyAgents.map((agent) => agent.id).join(", ") || "none"}`,
       missingKinds.length || unhealthyAgents.length ? "Restart the backend and inspect tool details." : undefined,
+    );
+    add(
+      "sandbox.isolation",
+      "Sandbox isolation",
+      sandboxMode === "docker" && !sandboxDockerReady ? "fail" : sandboxMode === "local" || !sandboxDockerReady ? "warn" : "pass",
+      sandboxDockerReady
+        ? `Docker isolation ready with image ${sandboxImage}`
+        : `Using local sandbox fallback; mode=${sandboxMode}, image=${sandboxImage}`,
+      sandboxDockerReady ? undefined : "Install Docker and pull the configured image, or set AGENTIX_SANDBOX_MODE=local if this is intentional.",
     );
     const disabledProfiles = agentProfiles.filter((profile) => !profile.enabled);
     add(

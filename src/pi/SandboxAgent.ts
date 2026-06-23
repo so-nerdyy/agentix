@@ -40,6 +40,17 @@ export function buildDockerSandboxArgs(sandbox: string, image: string, command: 
   ];
 }
 
+export function dockerSandboxAvailable(image: string): boolean {
+  const daemon = spawnSync("docker", ["version", "--format", "{{.Server.Version}}"], {
+    stdio: "ignore",
+  });
+  if (daemon.status !== 0) return false;
+  const inspected = spawnSync("docker", ["image", "inspect", image], {
+    stdio: "ignore",
+  });
+  return inspected.status === 0;
+}
+
 export class SandboxAgent extends BasePIAgent {
   private readonly rootDir: string;
   private readonly timeoutMs: number;
@@ -232,13 +243,6 @@ export class SandboxAgent extends BasePIAgent {
   }
 
   private dockerAvailable(): boolean {
-    const daemon = spawnSync("docker", ["version", "--format", "{{.Server.Version}}"], {
-      stdio: "ignore",
-    });
-    if (daemon.status !== 0) return false;
-    const image = spawnSync("docker", ["image", "inspect", this.dockerImage], {
-      stdio: "ignore",
-    });
-    return image.status === 0;
+    return dockerSandboxAvailable(this.dockerImage);
   }
 }
