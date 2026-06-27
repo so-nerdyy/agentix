@@ -24,12 +24,16 @@ describe("release packaging files", () => {
     expect(powershell).toContain("AGENTIX_EXPECTED_SHA256");
     expect(powershell).toContain("AGENTIX_VERSION");
     expect(powershell).toContain("Checksum mismatch");
+    expect(powershell).toContain("Get-AgentixFileSha256");
+    expect(powershell).toContain("System.Security.Cryptography.SHA256");
     expect(manifest).toContain("createHash");
     expect(manifest).toContain("sha256");
     expect(smoke).toContain("smokeInstallerChecksum");
     expect(smoke).toContain("smokeVersionedReleaseInstall");
     expect(smoke).toContain("tampered release artifact");
     expect(smoke).toContain("AGENTIX_RELEASE_BASE_URL");
+    expect(smoke).toContain("installHermesPythonDependencies");
+    expect(smoke).toContain("pip\", \"install\"");
     expect(releaseWorkflow).toContain("npm publish --provenance");
     expect(releaseWorkflow).toContain(".release/*-manifest.json");
     expect(dockerfile).toContain("dist/cli.js");

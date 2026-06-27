@@ -394,6 +394,14 @@ async function smokeVersionedReleaseInstall(tarball, expectedSha256, tarballName
   }
 }
 
+async function installHermesPythonDependencies() {
+  log("installing Hermes Python dependencies for direct import checks");
+  await run(python, ["-m", "pip", "install", "--disable-pip-version-check", "-e", join(installedPackageRoot, "hermes-agent")], {
+    cwd: smokeRoot,
+    timeoutMs: 240_000,
+  });
+}
+
 async function smokeCli() {
   log("checking installed CLI commands");
   const version = await run(agentixCommand, ["version"], { timeoutMs: 30_000 });
@@ -534,6 +542,7 @@ async function smokeServer() {
     assert(openapi.paths["/execute/stream"], "OpenAPI contract missing execute stream path");
 
     log("checking installed Hermes Python entrypoints");
+    await installHermesPythonDependencies();
     const hermesEnv = {
       ...serverEnv,
       AGENTIX_FRONTEND: "hermes",

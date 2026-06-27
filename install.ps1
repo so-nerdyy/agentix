@@ -15,6 +15,25 @@ function Fail($Message) {
   exit 1
 }
 
+function Get-AgentixFileSha256($Path) {
+  if (Get-Command Get-FileHash -ErrorAction SilentlyContinue) {
+    return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
+  }
+
+  $Stream = [System.IO.File]::OpenRead($Path)
+  try {
+    $Sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+      $HashBytes = $Sha.ComputeHash($Stream)
+      return ([System.BitConverter]::ToString($HashBytes) -replace "-", "").ToLowerInvariant()
+    } finally {
+      $Sha.Dispose()
+    }
+  } finally {
+    $Stream.Dispose()
+  }
+}
+
 if ([string]::IsNullOrWhiteSpace($Package)) {
   $Package = "agentix"
 }
@@ -59,7 +78,7 @@ try {
     if (-not (Test-Path -LiteralPath $Package -PathType Leaf)) {
       Fail "AGENTIX_EXPECTED_SHA256 requires AGENTIX_PACKAGE to be a local tarball path."
     }
-    $ActualSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $Package).Hash.ToLowerInvariant()
+    $ActualSha256 = Get-AgentixFileSha256 $Package
     if ($ActualSha256 -ne $ExpectedSha256.ToLowerInvariant()) {
       Fail "Checksum mismatch for $Package. Expected $ExpectedSha256, got $ActualSha256."
     }
