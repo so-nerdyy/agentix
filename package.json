@@ -54,6 +54,8 @@
   "scripts": {
     "build": "tsc && node frontend/build.mjs",
     "build:frontend": "node frontend/build.mjs",
+    "prepack": "npm run build",
+    "release:manifest": "node scripts/release-manifest.mjs",
     "smoke:release": "node scripts/release-smoke.mjs",
     "test:unit": "vitest run tests/unit",
     "test": "vitest run tests/unit",

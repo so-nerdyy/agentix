@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createServer } from "node:net";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, readdir, rm } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -80,6 +81,59 @@ function run(command, args, opts = {}) {
       ].filter(Boolean).join("\n")));
     });
   });
+}
+
+function runFailure(command, args, opts = {}) {
+  return new Promise((resolveRun, rejectRun) => {
+    const child = spawn(command, args, {
+      cwd: opts.cwd ?? root,
+      env: opts.env ?? process.env,
+      shell: shouldUseShell(command),
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    const timeout = opts.timeoutMs
+      ? setTimeout(() => {
+          child.kill();
+          rejectRun(new Error(`${command} ${args.join(" ")} timed out after ${opts.timeoutMs}ms`));
+        }, opts.timeoutMs)
+      : null;
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf-8");
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf-8");
+    });
+    child.on("error", (err) => {
+      if (timeout) clearTimeout(timeout);
+      rejectRun(err);
+    });
+    child.on("close", (code) => {
+      if (timeout) clearTimeout(timeout);
+      if (code !== 0) {
+        resolveRun({ stdout, stderr, code });
+        return;
+      }
+      rejectRun(new Error(`${command} ${args.join(" ")} unexpectedly succeeded`));
+    });
+  });
+}
+
+function sha256(file) {
+  const hash = createHash("sha256");
+  hash.update(readFileSync(file));
+  return hash.digest("hex");
+}
+
+function parseNpmPackJson(stdout) {
+  const jsonStart = stdout.indexOf("[");
+  if (jsonStart === -1) {
+    throw new Error(`npm pack did not emit JSON:\n${stdout}`);
+  }
+  return JSON.parse(stdout.slice(jsonStart));
 }
 
 function waitForProcessExit(child, timeoutMs) {
@@ -203,7 +257,7 @@ async function packAndInstall() {
     env: npmEnv,
     timeoutMs: 180_000,
   });
-  const packInfo = JSON.parse(packed.stdout);
+  const packInfo = parseNpmPackJson(packed.stdout);
   const tarball = join(packDir, packInfo[0].filename);
   assert(existsSync(tarball), `packed tarball missing: ${tarball}`);
 
@@ -214,6 +268,7 @@ async function packAndInstall() {
   });
   assert(existsSync(agentixCommand), `installed agentix command missing: ${agentixCommand}`);
   assert(existsSync(agentixEntrypoint), `installed agentix entrypoint missing: ${agentixEntrypoint}`);
+  return { tarball, sha256: sha256(tarball) };
 }
 
 function smokeInstallScripts() {
@@ -221,14 +276,59 @@ function smokeInstallScripts() {
   const shellInstaller = readFileSync(join(root, "install.sh"), "utf-8");
   assert(shellInstaller.includes("Install Agentix globally with npm."), "install.sh is not the Agentix installer");
   assert(shellInstaller.includes("AGENTIX_PACKAGE"), "install.sh missing AGENTIX_PACKAGE support");
+  assert(shellInstaller.includes("AGENTIX_EXPECTED_SHA256"), "install.sh missing checksum support");
+  assert(shellInstaller.includes("AGENTIX_VERSION"), "install.sh missing versioned release install support");
   assert(shellInstaller.includes("npm install -g"), "install.sh missing global npm install");
   assert(shellInstaller.includes("agentix setup"), "install.sh missing setup next step");
   assert(!shellInstaller.includes("caveman"), "install.sh contains unrelated plugin installer content");
 
   const powershellInstaller = readFileSync(join(root, "install.ps1"), "utf-8");
   assert(powershellInstaller.includes("Installing Agentix package"), "install.ps1 is not the Agentix installer");
+  assert(powershellInstaller.includes("AGENTIX_EXPECTED_SHA256"), "install.ps1 missing checksum support");
+  assert(powershellInstaller.includes("AGENTIX_VERSION"), "install.ps1 missing versioned release install support");
   assert(powershellInstaller.includes("npm install -g"), "install.ps1 missing global npm install");
   assert(powershellInstaller.includes("agentix setup"), "install.ps1 missing setup next step");
+}
+
+async function smokeInstallerChecksum(tarball, expectedSha256) {
+  log("checking installer checksum enforcement");
+  const installerEnv = {
+    ...process.env,
+    AGENTIX_PACKAGE: tarball,
+    AGENTIX_EXPECTED_SHA256: expectedSha256,
+    AGENTIX_DRY_RUN: "1",
+    AGENTIX_SKIP_SETUP: "1",
+  };
+  const tampered = join(packDir, "tampered.tgz");
+  await copyFile(tarball, tampered);
+  await writeFile(tampered, "tampered release artifact\n", "utf-8");
+  const badEnv = {
+    ...installerEnv,
+    AGENTIX_PACKAGE: tampered,
+  };
+
+  if (process.platform === "win32") {
+    await run("powershell", ["-ExecutionPolicy", "Bypass", "-File", join(root, "install.ps1"), "-DryRun", "-SkipSetup"], {
+      env: installerEnv,
+      timeoutMs: 60_000,
+    });
+    const failed = await runFailure("powershell", ["-ExecutionPolicy", "Bypass", "-File", join(root, "install.ps1"), "-DryRun", "-SkipSetup"], {
+      env: badEnv,
+      timeoutMs: 60_000,
+    });
+    assert(`${failed.stdout}\n${failed.stderr}`.includes("Checksum mismatch"), "install.ps1 did not fail closed on checksum mismatch");
+    return;
+  }
+
+  await run("sh", [join(root, "install.sh")], {
+    env: installerEnv,
+    timeoutMs: 60_000,
+  });
+  const failed = await runFailure("sh", [join(root, "install.sh")], {
+    env: badEnv,
+    timeoutMs: 60_000,
+  });
+  assert(`${failed.stdout}\n${failed.stderr}`.includes("Checksum mismatch"), "install.sh did not fail closed on checksum mismatch");
 }
 
 async function smokeCli() {
@@ -536,7 +636,8 @@ async function smokeServer() {
 try {
   await removeDirWithRetries(smokeRoot);
   smokeInstallScripts();
-  await packAndInstall();
+  const packedArtifact = await packAndInstall();
+  await smokeInstallerChecksum(packedArtifact.tarball, packedArtifact.sha256);
   await smokeCli();
   await smokeServer();
   log("release smoke passed");

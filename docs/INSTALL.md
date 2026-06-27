@@ -43,8 +43,36 @@ irm https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.ps1 | iex
 AGENTIX_PACKAGE=agentix@2.1.0 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
 ```
 
+For versioned GitHub release installs, set `AGENTIX_VERSION`; the installer downloads the release manifest,
+downloads the matching tarball, verifies SHA256, then installs that tarball:
+
+```powershell
+$env:AGENTIX_VERSION = "2.1.0"
+irm https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.ps1 | iex
+```
+
+```sh
+AGENTIX_VERSION=2.1.0 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
+```
+
 If Python is not discoverable under the default command names, set
 `AGENTIX_PYTHON` to an absolute Python 3 executable before running `agentix`.
+
+For verified tarball installs, generate a release manifest and pass the expected checksum:
+
+```powershell
+npm run release:manifest
+$env:AGENTIX_PACKAGE='.release/agentix-2.1.0.tgz'
+$env:AGENTIX_EXPECTED_SHA256='<sha256 from manifest>'
+.\install.ps1
+```
+
+```bash
+npm run release:manifest
+AGENTIX_PACKAGE=.release/agentix-2.1.0.tgz \
+AGENTIX_EXPECTED_SHA256=<sha256 from manifest> \
+sh install.sh
+```
 
 ## Local Development
 
@@ -56,7 +84,7 @@ npm test
 
 `npm run build` compiles the backend and rebuilds the static dashboard from `frontend/src` into `frontend/dist`.
 
-For release validation, run `npm run smoke:release` after build and tests. It packs and installs Agentix into an isolated prefix, starts the installed server, checks the dashboard/API, and verifies support-bundle generation.
+For release validation, run `npm run smoke:release` after build and tests. It packs and installs Agentix into an isolated prefix, checks installer SHA256 pass/fail behavior, starts the installed server, checks the dashboard/API, and verifies support-bundle generation. Run `npm run release:manifest` to produce a tarball plus SHA256 manifest for archival or verified installs.
 
 ## First Run
 
