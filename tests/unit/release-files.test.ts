@@ -12,6 +12,9 @@ describe("release packaging files", () => {
     const manifest = readFileSync(join(process.cwd(), "scripts", "release-manifest.mjs"), "utf-8");
     const smoke = readFileSync(join(process.cwd(), "scripts", "release-smoke.mjs"), "utf-8");
     const releaseWorkflow = readFileSync(join(process.cwd(), ".github", "workflows", "release.yml"), "utf-8");
+    const ciWorkflow = readFileSync(join(process.cwd(), ".github", "workflows", "ci.yml"), "utf-8");
+    const dockerfile = readFileSync(join(process.cwd(), "Dockerfile"), "utf-8");
+    const compose = readFileSync(join(process.cwd(), "docker-compose.yml"), "utf-8");
 
     expect(pkg.scripts.prepack).toBe("npm run build");
     expect(pkg.scripts["release:manifest"]).toBe("node scripts/release-manifest.mjs");
@@ -29,5 +32,10 @@ describe("release packaging files", () => {
     expect(smoke).toContain("AGENTIX_RELEASE_BASE_URL");
     expect(releaseWorkflow).toContain("npm publish --provenance");
     expect(releaseWorkflow).toContain(".release/*-manifest.json");
+    expect(dockerfile).toContain("dist/cli.js");
+    expect(dockerfile).toContain("\"server\"");
+    expect(dockerfile).toContain("HEALTHCHECK");
+    expect(compose).toContain("AGENTIX_SESSION_TOKEN");
+    expect(ciWorkflow).toContain("docker build -t agentix:ci .");
   });
 });

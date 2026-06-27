@@ -61,6 +61,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Build Agentix runtime image
+        run: docker build -t agentix:ci .
+
+      - name: Validate Agentix compose
+        run: docker compose -f docker-compose.yml config
+        env:
+          AGENTIX_SESSION_TOKEN: ci-token
+
       - name: Build Hermes frontend image
         run: docker build -f hermes-agent/Dockerfile hermes-agent
 

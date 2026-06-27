@@ -68,6 +68,18 @@ Inbound gateway webhooks use `POST /gateway/<id>/inbound` and must include `X-Ag
 - Role policy: `viewer` can read, `operator` can mutate runtime resources, `admin` can manage config/auth and memory reset
 - If neither env token nor workspace token exists, loopback servers run in local dev-open mode; non-loopback binds require a token or explicit `AGENTIX_ALLOW_UNAUTHENTICATED=1`
 
+## Docker
+
+Build and run the production runtime image:
+
+```powershell
+docker build -t agentix:local .
+$env:AGENTIX_SESSION_TOKEN = "replace-with-a-long-random-token"
+docker compose up
+```
+
+The root `Dockerfile` starts `agentix server` on `0.0.0.0`, exposes the dashboard on `3000` and bridge on `3456`, persists runtime state in the `agentix-data` volume, and mounts a workspace volume at `/workspace`. `docker-compose.yml` requires `AGENTIX_SESSION_TOKEN` because control APIs are exposed outside loopback.
+
 ## Release Smoke
 
 Before publishing a release, run:

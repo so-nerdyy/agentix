@@ -98,6 +98,14 @@ npm run build
 npm test
 ```
 
+Docker runtime:
+
+```powershell
+docker build -t agentix:local .
+$env:AGENTIX_SESSION_TOKEN = "replace-with-a-long-random-token"
+docker compose up
+```
+
 ## Documentation
 
 - [Install](docs/INSTALL.md)
