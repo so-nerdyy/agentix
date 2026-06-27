@@ -171,7 +171,10 @@ describe("Powerhouse restored runtime", () => {
     });
 
     expect(result.status).toBe("complete");
-    expect(runtime.listSessions().some((item) => item.id === session.id)).toBe(true);
+    const listedSession = runtime.listSessions().find((item) => item.id === session.id);
+    expect(listedSession?.status).toBe("active");
+    expect(listedSession?.metadata.model).toBe("test-model");
+    expect(listedSession?.updatedAt).toBeTruthy();
     expect(runtime.listTasks(session.id)).toHaveLength(1);
     const sessionPlans = runtime.listPlans().filter((plan) => plan.sessionId === session.id);
     expect(sessionPlans).toHaveLength(1);
@@ -294,12 +297,31 @@ describe("Powerhouse restored runtime", () => {
 
     const session = runtime.createSession({ model: "test-model" });
     expect(runtime.listSessions().some((item) => item.id === session.id)).toBe(true);
+    expect(runtime.listAudit().some((item) => item.type === "session.created" && item.subjectId === session.id)).toBe(true);
 
     runtime.deleteSession(session.id);
 
-    expect(runtime.listSessions().some((item) => item.id === session.id)).toBe(false);
+    const archived = runtime.listSessions().find((item) => item.id === session.id);
+    expect(archived?.status).toBe("complete");
+    expect(runtime.listAudit().some((item) => item.type === "session.closed" && item.subjectId === session.id)).toBe(true);
 
     runtime.shutdown();
+  });
+
+  it("keeps closed sessions in history after recovery", () => {
+    const dir = tempDir("agentix-session-history-");
+    const sessions = new SessionCoordinator(dir);
+    const session = sessions.create({ title: "Historical Session" });
+
+    sessions.close(session.id);
+
+    const recovered = new SessionCoordinator(dir);
+    const active = recovered.recover();
+    const historical = recovered.list().find((item) => item.id === session.id);
+
+    expect(active).toHaveLength(0);
+    expect(historical?.status).toBe("complete");
+    expect(historical?.metadata.title).toBe("Historical Session");
   });
 
   it("renames, prunes, and optimizes sessions through the runtime facade", async () => {
@@ -316,7 +338,7 @@ describe("Powerhouse restored runtime", () => {
     expect(optimized.ok).toBe(true);
     expect(pruned.ok).toBe(true);
     expect(pruned.pruned).toContain(session.id);
-    expect(runtime.listSessions().some((item) => item.id === session.id)).toBe(false);
+    expect(runtime.listSessions().find((item) => item.id === session.id)?.status).toBe("complete");
 
     runtime.shutdown();
   });

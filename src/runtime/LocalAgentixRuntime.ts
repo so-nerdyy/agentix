@@ -313,11 +313,20 @@ export class LocalAgentixRuntime {
     this.scheduler.start();
   }
 
-  listSessions(): Array<{ id: string; createdAt: string }> {
+  listSessions(): Array<{
+    id: string;
+    status: string;
+    createdAt: string;
+    updatedAt: string;
+    metadata: Record<string, unknown>;
+  }> {
     this.powerhouse.start();
     return this.powerhouse.listSessions().map((session) => ({
       id: session.id,
+      status: session.status,
       createdAt: new Date(session.createdAt).toISOString(),
+      updatedAt: new Date(session.updatedAt).toISOString(),
+      metadata: session.metadata,
     }));
   }
 

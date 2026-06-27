@@ -2,7 +2,7 @@
 // On startup, Powerhouse calls `recover()` to load any `active` sessions
 // from <dataDir>/sessions/*.json so they can be resumed.
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { PATHS } from "../config/paths.js";
@@ -35,7 +35,11 @@ export class SessionCoordinator {
   }
 
   list(): Session[] {
-    return Array.from(this.byId.values()).filter((session) => session.status === "active");
+    return Array.from(this.byId.values());
+  }
+
+  listActive(): Session[] {
+    return this.list().filter((session) => session.status === "active");
   }
 
   setStatus(id: string, status: Session["status"]): void {
@@ -91,16 +95,9 @@ export class SessionCoordinator {
       try {
         const raw = readFileSync(join(this.dir, file), "utf-8");
         const session = JSON.parse(raw) as Session;
+        this.byId.set(session.id, session);
         if (session.status === "active") {
-          this.byId.set(session.id, session);
           recovered.push(session);
-        } else {
-          // Stale terminal sessions can be deleted on recovery.
-          try {
-            unlinkSync(join(this.dir, file));
-          } catch {
-            /* ignore */
-          }
         }
       } catch {
         // Corrupt session file — leave it alone, the user can clean up.

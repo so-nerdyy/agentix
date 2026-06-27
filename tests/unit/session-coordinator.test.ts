@@ -37,7 +37,7 @@ describe("SessionCoordinator", () => {
     expect(persisted.pendingTaskIds).toContain("task-1");
   });
 
-  it("removes completed sessions during recovery", () => {
+  it("keeps completed sessions as history during recovery", () => {
     const dir = tempDir();
     dirs.push(dir);
 
@@ -48,8 +48,11 @@ describe("SessionCoordinator", () => {
     coordinator.close(session.id);
     expect(existsSync(sessionPath)).toBe(true);
 
-    const recovered = new SessionCoordinator(dir).recover();
+    const nextCoordinator = new SessionCoordinator(dir);
+    const recovered = nextCoordinator.recover();
     expect(recovered).toHaveLength(0);
-    expect(existsSync(sessionPath)).toBe(false);
+    expect(existsSync(sessionPath)).toBe(true);
+    expect(nextCoordinator.list().find((item) => item.id === session.id)?.status).toBe("complete");
+    expect(nextCoordinator.listActive()).toHaveLength(0);
   });
 });

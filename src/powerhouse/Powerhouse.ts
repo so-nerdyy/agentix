@@ -127,12 +127,31 @@ export class Powerhouse {
   createSession(metadata: Record<string, unknown> = {}): Session {
     this.start();
     const session = this.sessions.create(metadata);
+    this.audit.record({
+      type: "session.created",
+      actor: "user",
+      subjectId: session.id,
+      data: { sessionId: session.id, metadata },
+    });
     EventBus.emit("session:create", { sessionId: session.id });
     return session;
   }
 
   closeSession(id: string): void {
+    const session = this.sessions.get(id);
     this.sessions.close(id);
+    if (session) {
+      this.audit.record({
+        type: "session.closed",
+        actor: "user",
+        subjectId: id,
+        data: {
+          sessionId: id,
+          metadata: session.metadata,
+          status: "complete",
+        },
+      });
+    }
     EventBus.emit("session:close", { sessionId: id });
   }
 
