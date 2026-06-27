@@ -188,6 +188,9 @@ describe("Powerhouse restored runtime", () => {
     expect(String(doctor.status)).toMatch(/pass|warn|fail/);
     expect(Array.isArray(doctor.checks)).toBe(true);
     expect((doctor.checks as Array<{ id: string }>).some((check) => check.id === "sandbox.isolation")).toBe(true);
+    expect((doctor.checks as Array<{ id: string }>).some((check) => check.id === "install.assets")).toBe(true);
+    expect((doctor.install as { packageName?: string; packageVersion?: string }).packageName).toBe("agentix");
+    expect((doctor.install as { packageName?: string; packageVersion?: string }).packageVersion).toMatch(/\d+\.\d+\.\d+/);
     const usage = runtime.usage() as {
       counts: { sessions: number; tasks: number; plans: number; memory: number };
       tasksByStatus: Record<string, number>;
@@ -1012,6 +1015,10 @@ describe("Powerhouse restored runtime", () => {
     expect(bundle.files).toContain("doctor.json");
 
     const manifest = JSON.parse(readFileSync(join(bundle.bundleDir, "manifest.json"), "utf-8"));
+    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf-8"));
+    expect(manifest.packageName).toBe("agentix");
+    expect(manifest.version).toBe(pkg.version);
+    expect(manifest.installRoot).toBeTruthy();
     expect(manifest.counts.tasks).toBeGreaterThanOrEqual(1);
     expect(manifest.counts.plans).toBeGreaterThanOrEqual(1);
     expect(manifest.counts.sessions).toBeGreaterThanOrEqual(1);

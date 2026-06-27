@@ -1,6 +1,6 @@
 import { Powerhouse } from "../powerhouse/Powerhouse.js";
 import { SchedulerService } from "../scheduler/SchedulerService.js";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { PATHS } from "../config/paths.js";
 import { EventBus } from "../config/EventBus.js";
@@ -19,6 +19,23 @@ import {
 } from "../gateway/GatewayConnector.js";
 import type { CommandAgentProfile } from "../pi/AgentProfileStore.js";
 import { dockerSandboxAvailable } from "../pi/SandboxAgent.js";
+
+type PackageMetadata = {
+  name: string;
+  version: string;
+};
+
+function loadPackageMetadata(): PackageMetadata {
+  try {
+    const pkg = JSON.parse(readFileSync(join(PATHS.installRoot, "package.json"), "utf-8")) as Partial<PackageMetadata>;
+    return {
+      name: String(pkg.name ?? "agentix"),
+      version: String(pkg.version ?? "unknown"),
+    };
+  } catch {
+    return { name: "agentix", version: "unknown" };
+  }
+}
 
 export type RuntimeSearchResults = {
   query: string;
@@ -1599,6 +1616,17 @@ export class LocalAgentixRuntime {
     const gateways = this.gateways.list();
     const jobs = this.scheduler.list();
     const healing = this.powerhouse.healing.listProcedures();
+    const packageMetadata = loadPackageMetadata();
+    const requiredInstallAssets = [
+      join(PATHS.installRoot, "bin", process.platform === "win32" ? "agentix.js" : "agentix.js"),
+      PATHS.bridgeEntry,
+      PATHS.inboxEntry,
+      join(PATHS.installRoot, "frontend", "dist", "index.html"),
+      join(PATHS.installRoot, "install.sh"),
+      join(PATHS.installRoot, "install.ps1"),
+      join(PATHS.hermesRoot, "pyproject.toml"),
+    ];
+    const missingInstallAssets = requiredInstallAssets.filter((asset) => !existsSync(asset));
     const sandboxMode = process.env.AGENTIX_SANDBOX_MODE ?? "auto";
     const sandboxImage = process.env.AGENTIX_SANDBOX_DOCKER_IMAGE ?? "node:22-alpine";
     const sandboxDockerReady = sandboxMode !== "local" && dockerSandboxAvailable(sandboxImage);
@@ -1630,6 +1658,22 @@ export class LocalAgentixRuntime {
       existsSync(PATHS.hermesRoot) ? "pass" : "fail",
       PATHS.hermesRoot,
       existsSync(PATHS.hermesRoot) ? undefined : "Reinstall Agentix or restore the bundled hermes-agent directory.",
+    );
+    add(
+      "install.package",
+      "Installed package",
+      packageMetadata.version === "unknown" ? "warn" : "pass",
+      `${packageMetadata.name}@${packageMetadata.version}`,
+      packageMetadata.version === "unknown" ? "Ensure package.json is included in the installed Agentix package." : undefined,
+    );
+    add(
+      "install.assets",
+      "Installed runtime assets",
+      missingInstallAssets.length ? "fail" : "pass",
+      missingInstallAssets.length
+        ? `missing ${missingInstallAssets.length}: ${missingInstallAssets.join(", ")}`
+        : "bin, backend dist, dashboard, installers, and Hermes frontend present",
+      missingInstallAssets.length ? "Reinstall Agentix from npm or a verified release tarball." : undefined,
     );
     add(
       "config.model",
@@ -1748,6 +1792,12 @@ export class LocalAgentixRuntime {
         platform: process.platform,
         arch: process.arch,
       },
+      install: {
+        packageName: packageMetadata.name,
+        packageVersion: packageMetadata.version,
+        installRoot: PATHS.installRoot,
+        missingAssets: missingInstallAssets,
+      },
     };
   }
 
@@ -1777,6 +1827,7 @@ export class LocalAgentixRuntime {
     const agentProfiles = this.listAgentProfiles();
     const plans = this.powerhouse.planStore.list();
     const doctor = this.doctor();
+    const packageMetadata = loadPackageMetadata();
     const audit = this.listAudit();
     const healing = this.healingStats();
     const memory = this.powerhouse.memory.list().slice(-250);
@@ -1784,10 +1835,12 @@ export class LocalAgentixRuntime {
     writeJson("manifest.json", {
       createdAt: new Date().toISOString(),
       bundleId,
-      version: "2.1.0",
+      packageName: packageMetadata.name,
+      version: packageMetadata.version,
       nodeVersion: process.version,
       platform: process.platform,
       arch: process.arch,
+      installRoot: PATHS.installRoot,
       projectRoot: PATHS.projectRoot,
       dataDir: PATHS.dataDir,
       counts: {
