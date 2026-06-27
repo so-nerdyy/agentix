@@ -317,6 +317,7 @@ export class Powerhouse {
     this.start();
     const session = this.ensureSession(opts.sessionId);
     const taskIds: string[] = [];
+    const emitProgress = (message: string) => opts.onDelta?.(`[agentix] ${message}\n`);
 
     this.memory.add({
       sessionId: session.id,
@@ -325,10 +326,19 @@ export class Powerhouse {
       tags: ["stimulus"],
     });
 
+    emitProgress("Planning task with Symphony...");
     const result = await this.symphony.run(opts.stimulus, {
       executeStep: async (step, planId) => {
+        emitProgress(`Running step ${step.id} (${step.kind})...`);
         const { task, result } = await this.executeStep(session.id, step, planId);
         taskIds.push(task.id);
+        if (result.ok) {
+          emitProgress(`Step ${step.id} completed as ${task.id}.`);
+        } else if (result.error?.includes("approval required")) {
+          emitProgress(`Step ${step.id} is waiting for approval as ${task.id}.`);
+        } else {
+          emitProgress(`Step ${step.id} failed as ${task.id}: ${result.error ?? "unknown error"}`);
+        }
         return { taskId: task.id, result };
       },
       recoverStep: (step, failure) => this.recoverStep(step, failure),
@@ -341,6 +351,7 @@ export class Powerhouse {
       ? this.approvalResponse(taskIds)
       : result.response;
 
+    emitProgress(`Execution ${status}.`);
     for (const chunk of this.streamChunks(response)) {
       opts.onDelta?.(chunk);
     }

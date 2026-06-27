@@ -457,6 +457,27 @@ describe("Powerhouse restored runtime", () => {
     powerhouse.stop();
   });
 
+  it("streams execution progress before the final response", async () => {
+    const powerhouse = makePowerhouse();
+    const deltas: string[] = [];
+
+    const execution = powerhouse.executeStimulus({
+      stimulus: "stream progress smoke",
+      onDelta: (delta) => deltas.push(delta),
+    });
+
+    expect(deltas[0]).toContain("Planning task with Symphony");
+
+    const result = await execution;
+
+    expect(result.status).toBe("complete");
+    expect(deltas.some((delta) => delta.includes("Running step"))).toBe(true);
+    expect(deltas.some((delta) => delta.includes("Execution complete"))).toBe(true);
+    expect(deltas.join("")).toContain(result.response);
+
+    powerhouse.stop();
+  });
+
   it("continues dependent plan steps after approval", async () => {
     const powerhouse = makePowerhouse();
     const plan = {
