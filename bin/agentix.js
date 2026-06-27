@@ -499,9 +499,9 @@ function pythonCandidates() {
   const configured = process.env.AGENTIX_PYTHON || process.env.PYTHON;
   const candidates = [];
   if (configured) candidates.push({ command: configured, args: [] });
-  if (process.platform === "win32") candidates.push({ command: "py", args: ["-3"] });
   candidates.push({ command: "python3", args: [] });
   candidates.push({ command: "python", args: [] });
+  if (process.platform === "win32") candidates.push({ command: "py", args: ["-3"] });
   return candidates;
 }
 

@@ -113,10 +113,13 @@ describe("launcher help", () => {
 
   it("detects Python instead of requiring a literal python command", () => {
     const launcher = readFileSync(join(process.cwd(), "bin", "agentix.js"), "utf8");
+    const bridge = readFileSync(join(process.cwd(), "src", "shell", "hermes_python_bridge.ts"), "utf8");
 
     expect(launcher).toContain("AGENTIX_PYTHON");
     expect(launcher).toContain("python3");
     expect(launcher).toContain("py\", args: [\"-3\"]");
+    expect(launcher.indexOf('command: "python"')).toBeLessThan(launcher.indexOf('command: "py"'));
+    expect(bridge.indexOf('command: "python"')).toBeLessThan(bridge.indexOf('command: "py"'));
     expect(launcher).not.toContain('spawnSync("python", ["-m", "venv"');
   });
 });
