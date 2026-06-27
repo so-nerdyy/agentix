@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createServer } from "node:net";
+import { createServer as createHttpServer } from "node:http";
+import { createServer as createNetServer } from "node:net";
 import { existsSync, readFileSync } from "node:fs";
 import { copyFile, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -18,6 +19,7 @@ const keepArtifacts = process.env.AGENTIX_SMOKE_KEEP === "1";
 
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const python = process.platform === "win32" ? "python" : "python3";
+const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf-8"));
 const agentixCommand = process.platform === "win32"
   ? join(prefixDir, "agentix.cmd")
   : join(prefixDir, "bin", "agentix");
@@ -195,7 +197,7 @@ async function removeDirWithRetries(dir) {
 
 async function freePort() {
   return new Promise((resolvePort, rejectPort) => {
-    const server = createServer();
+    const server = createNetServer();
     server.on("error", rejectPort);
     server.listen(0, "127.0.0.1", () => {
       const address = server.address();
@@ -268,7 +270,7 @@ async function packAndInstall() {
   });
   assert(existsSync(agentixCommand), `installed agentix command missing: ${agentixCommand}`);
   assert(existsSync(agentixEntrypoint), `installed agentix entrypoint missing: ${agentixEntrypoint}`);
-  return { tarball, sha256: sha256(tarball) };
+  return { tarball, tarballName: packInfo[0].filename, sha256: sha256(tarball) };
 }
 
 function smokeInstallScripts() {
@@ -329,6 +331,67 @@ async function smokeInstallerChecksum(tarball, expectedSha256) {
     timeoutMs: 60_000,
   });
   assert(`${failed.stdout}\n${failed.stderr}`.includes("Checksum mismatch"), "install.sh did not fail closed on checksum mismatch");
+}
+
+async function smokeVersionedReleaseInstall(tarball, expectedSha256, tarballName) {
+  log("checking versioned release installer download");
+  const manifestName = `agentix-${packageJson.version}-manifest.json`;
+  const manifest = JSON.stringify({
+    package: packageJson.name,
+    version: packageJson.version,
+    tarball: tarballName,
+    sha256: expectedSha256,
+  });
+  const port = await freePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const server = createHttpServer((req, res) => {
+    if (req.url === `/${manifestName}`) {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(manifest);
+      return;
+    }
+    if (req.url === `/${tarballName}`) {
+      res.writeHead(200, { "content-type": "application/octet-stream" });
+      res.end(readFileSync(tarball));
+      return;
+    }
+    res.writeHead(404, { "content-type": "text/plain" });
+    res.end("not found");
+  });
+
+  await new Promise((resolveListen, rejectListen) => {
+    server.once("error", rejectListen);
+    server.listen(port, "127.0.0.1", resolveListen);
+  });
+
+  try {
+    const releaseEnv = {
+      ...process.env,
+      AGENTIX_VERSION: packageJson.version,
+      AGENTIX_RELEASE_BASE_URL: baseUrl,
+      AGENTIX_DRY_RUN: "1",
+      AGENTIX_SKIP_SETUP: "1",
+    };
+
+    if (process.platform === "win32") {
+      const result = await run("powershell", ["-ExecutionPolicy", "Bypass", "-File", join(root, "install.ps1"), "-DryRun", "-SkipSetup"], {
+        env: releaseEnv,
+        timeoutMs: 60_000,
+      });
+      assert(result.stdout.includes("Downloading Agentix release manifest"), "install.ps1 did not fetch release manifest");
+      assert(result.stdout.includes("Verified SHA256"), "install.ps1 did not verify downloaded release tarball");
+      return;
+    }
+
+    const result = await run("sh", [join(root, "install.sh")], {
+      env: releaseEnv,
+      timeoutMs: 60_000,
+    });
+    assert(result.stdout.includes("Downloading Agentix release manifest"), "install.sh did not fetch release manifest");
+    assert(result.stdout.includes("Verified SHA256"), "install.sh did not verify downloaded release tarball");
+  } finally {
+    await new Promise((resolveClose) => server.close(resolveClose));
+  }
 }
 
 async function smokeCli() {
@@ -638,6 +701,7 @@ try {
   smokeInstallScripts();
   const packedArtifact = await packAndInstall();
   await smokeInstallerChecksum(packedArtifact.tarball, packedArtifact.sha256);
+  await smokeVersionedReleaseInstall(packedArtifact.tarball, packedArtifact.sha256, packedArtifact.tarballName);
   await smokeCli();
   await smokeServer();
   log("release smoke passed");

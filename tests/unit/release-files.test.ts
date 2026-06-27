@@ -24,7 +24,9 @@ describe("release packaging files", () => {
     expect(manifest).toContain("createHash");
     expect(manifest).toContain("sha256");
     expect(smoke).toContain("smokeInstallerChecksum");
+    expect(smoke).toContain("smokeVersionedReleaseInstall");
     expect(smoke).toContain("tampered release artifact");
+    expect(smoke).toContain("AGENTIX_RELEASE_BASE_URL");
     expect(releaseWorkflow).toContain("npm publish --provenance");
     expect(releaseWorkflow).toContain(".release/*-manifest.json");
   });
