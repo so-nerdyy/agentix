@@ -51,6 +51,9 @@ describe("release packaging files", () => {
     expect(smoke).toContain("public-release-proof.json");
     expect(releaseWorkflow).toContain("npm publish --provenance");
     expect(releaseWorkflow).toContain(".release/*-manifest.json");
+    expect(releaseWorkflow).toContain("npm run release:verify -- --out data/release/public-release-proof.json");
+    expect(releaseWorkflow).toContain("npm run verify:llm -- --out data/release/live-llm-proof.json");
+    expect(releaseWorkflow).toContain("agentix-readiness-proofs");
     expect(dockerfile).toContain("dist/cli.js");
     expect(dockerfile).toContain("\"server\"");
     expect(dockerfile).toContain("HEALTHCHECK");

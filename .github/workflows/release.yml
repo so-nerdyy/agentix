@@ -14,6 +14,8 @@ jobs:
   publish:
     name: Publish npm package and release artifacts
     runs-on: ubuntu-latest
+    env:
+      AGENTIX_HAS_LLM_KEY: ${{ secrets.AGENTIX_LLM_API_KEY != '' }}
 
     steps:
       - name: Checkout
@@ -59,3 +61,40 @@ jobs:
           files: |
             .release/*.tgz
             .release/*-manifest.json
+
+      - name: Verify published release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          mkdir -p data/release
+          for attempt in 1 2 3 4 5; do
+            if npm run release:verify -- --out data/release/public-release-proof.json; then
+              exit 0
+            fi
+            echo "release verification attempt ${attempt} failed; retrying after registry/release propagation"
+            sleep 30
+          done
+          npm run release:verify -- --out data/release/public-release-proof.json
+
+      - name: Verify live LLM provider
+        if: startsWith(github.ref, 'refs/tags/') && env.AGENTIX_HAS_LLM_KEY == 'true'
+        run: npm run verify:llm -- --out data/release/live-llm-proof.json
+        env:
+          AGENTIX_LLM_API_KEY: ${{ secrets.AGENTIX_LLM_API_KEY }}
+          AGENTIX_PROVIDER: ${{ vars.AGENTIX_PROVIDER || 'openai' }}
+          AGENTIX_MODEL: ${{ vars.AGENTIX_MODEL || 'gpt-4o-mini' }}
+          AGENTIX_BASE_URL: ${{ vars.AGENTIX_BASE_URL }}
+
+      - name: Upload readiness proofs as workflow artifacts
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentix-readiness-proofs
+          path: data/release/*.json
+          if-no-files-found: error
+
+      - name: Upload readiness proofs to GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: data/release/*.json
