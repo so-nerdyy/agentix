@@ -238,6 +238,47 @@ describe("Powerhouse restored runtime", () => {
     runtime.shutdown();
   });
 
+  it("accepts a verified public-release proof file for readiness", () => {
+    const dir = tempDir("agentix-release-proof-");
+    const proofPath = join(dir, "proof.json");
+    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf-8")) as { version: string };
+    const previousProof = process.env.AGENTIX_PUBLIC_RELEASE_PROOF;
+    process.env.AGENTIX_PUBLIC_RELEASE_PROOF = proofPath;
+    writeFileSync(proofPath, JSON.stringify({
+      ok: true,
+      package: "agentix",
+      version: pkg.version,
+      installerDryRun: true,
+      verifiedAt: new Date().toISOString(),
+      release: {
+        sha256: "abc123",
+        manifestUrl: `https://example.test/agentix-${pkg.version}-manifest.json`,
+        tarballUrl: `https://example.test/agentix-${pkg.version}.tgz`,
+      },
+      npm: {
+        tarball: `https://registry.npmjs.org/agentix/-/agentix-${pkg.version}.tgz`,
+      },
+    }), "utf-8");
+    const runtime = new LocalAgentixRuntime();
+
+    try {
+      const readiness = runtime.readiness() as {
+        gates: Array<{ id: string; status: string }>;
+        releaseProof: { ok: boolean; path: string };
+      };
+
+      expect(readiness.releaseProof).toMatchObject({ ok: true, path: proofPath });
+      expect(readiness.gates.find((gate) => gate.id === "release.publish")?.status).toBe("pass");
+    } finally {
+      runtime.shutdown();
+      if (previousProof === undefined) {
+        delete process.env.AGENTIX_PUBLIC_RELEASE_PROOF;
+      } else {
+        process.env.AGENTIX_PUBLIC_RELEASE_PROOF = previousProof;
+      }
+    }
+  });
+
   it("exposes audit-backed runtime logs", async () => {
     const runtime = new LocalAgentixRuntime();
 

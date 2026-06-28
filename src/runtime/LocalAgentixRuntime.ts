@@ -1,6 +1,6 @@
 import { Powerhouse } from "../powerhouse/Powerhouse.js";
 import { SchedulerService } from "../scheduler/SchedulerService.js";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { PATHS } from "../config/paths.js";
 import { EventBus } from "../config/EventBus.js";
@@ -1819,11 +1819,12 @@ export class LocalAgentixRuntime {
     const piAgents = byId.get("agents.pi");
     const sandbox = byId.get("sandbox.isolation");
     const llmConfigured = Boolean(doctor.config?.llmApiKeyConfigured);
-    const publicReleaseVerified = process.env.AGENTIX_PUBLIC_RELEASE_VERIFIED === "1";
     const privateBetaBlocks = failures.filter((check) => !["config.llm", "sandbox.isolation"].includes(String(check.id ?? "")));
     const packageVersion = String(doctor.install?.packageVersion ?? "unknown");
     const missingAssets = Array.isArray(doctor.install?.missingAssets) ? doctor.install.missingAssets : [];
     const gateStatus = (ok: boolean, warn = false): "pass" | "warn" | "block" => ok ? (warn ? "warn" : "pass") : "block";
+    const releaseProof = this.readPublicReleaseProof(packageVersion);
+    const publicReleaseVerified = releaseProof.ok || process.env.AGENTIX_PUBLIC_RELEASE_VERIFIED === "1";
 
     const gates = [
       gate(
@@ -1878,7 +1879,11 @@ export class LocalAgentixRuntime {
         "release.publish",
         "Published npm/GitHub release",
         publicReleaseVerified,
-        publicReleaseVerified ? "external release proof supplied" : "external proof required; local code cannot prove public registry state",
+        releaseProof.ok
+          ? `verified by ${releaseProof.path}`
+          : publicReleaseVerified
+            ? "external release proof supplied by AGENTIX_PUBLIC_RELEASE_VERIFIED=1"
+            : releaseProof.detail,
         "external",
         publicReleaseVerified ? undefined : "Tag a release, publish with provenance, then verify npm install -g and curl install from public URLs.",
       ),
@@ -1912,7 +1917,63 @@ export class LocalAgentixRuntime {
           action: item.action,
         })),
       doctorStatus: doctor.status ?? "unknown",
+      releaseProof,
     };
+  }
+
+  private readPublicReleaseProof(packageVersion: string): {
+    ok: boolean;
+    path: string;
+    detail: string;
+    verifiedAt?: string;
+  } {
+    const proofPath = process.env.AGENTIX_PUBLIC_RELEASE_PROOF
+      || join(PATHS.dataDir, "release", "public-release-proof.json");
+    if (!existsSync(proofPath)) {
+      return {
+        ok: false,
+        path: proofPath,
+        detail: `missing proof file: ${proofPath}`,
+      };
+    }
+    try {
+      const proof = JSON.parse(readFileSync(proofPath, "utf-8")) as {
+        ok?: boolean;
+        package?: string;
+        version?: string;
+        installerDryRun?: boolean;
+        verifiedAt?: string;
+        release?: { sha256?: string; manifestUrl?: string; tarballUrl?: string };
+        npm?: unknown;
+      };
+      if (!proof.ok) {
+        return { ok: false, path: proofPath, detail: "proof file does not mark ok=true" };
+      }
+      if (proof.package !== PACKAGE_METADATA.name) {
+        return { ok: false, path: proofPath, detail: `proof package mismatch: ${String(proof.package)}` };
+      }
+      if (proof.version !== packageVersion) {
+        return { ok: false, path: proofPath, detail: `proof version mismatch: ${String(proof.version)} != ${packageVersion}` };
+      }
+      if (!proof.release?.sha256 || !proof.release.manifestUrl || !proof.release.tarballUrl) {
+        return { ok: false, path: proofPath, detail: "proof missing release manifest/tarball/SHA256 details" };
+      }
+      if (!proof.installerDryRun) {
+        return { ok: false, path: proofPath, detail: "proof did not verify installer dry-run" };
+      }
+      return {
+        ok: true,
+        path: proofPath,
+        detail: `${proof.package}@${proof.version} verified`,
+        verifiedAt: proof.verifiedAt,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        path: proofPath,
+        detail: `invalid proof file: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
   }
 
   createSupportBundle(): Record<string, unknown> {

@@ -90,11 +90,11 @@ npm run build
 npm test
 npm run smoke:release
 npm run release:manifest
-npm run release:verify
+npm run release:verify -- --out data/release/public-release-proof.json
 agentix readiness
 ```
 
-The release smoke packs the npm artifact, installs it into an isolated temporary prefix, proves installer SHA256 success and tamper failure, runs `agentix version`, `agentix help`, `agentix readiness`, and `agentix support`, starts the installed server, verifies both health endpoints, loads `/ui/`, executes a task through the Hermes frontend adapter, verifies Hermes config sync, verifies gateway commands, runs a scheduler job, and creates a support bundle. The release manifest writes a tarball checksum file under `.release/`; use `AGENTIX_EXPECTED_SHA256` with `install.sh` or `install.ps1` for verified tarball installs. After the tag is published, `npm run release:verify` checks npm metadata, GitHub release manifest, release tarball SHA256, and installer dry-run. Tag pushes matching `v*.*.*` run `.github/workflows/release.yml`, publish with `npm publish --provenance`, and upload the tarball plus manifest as GitHub release assets.
+The release smoke packs the npm artifact, installs it into an isolated temporary prefix, proves installer SHA256 success and tamper failure, runs `agentix version`, `agentix help`, `agentix readiness`, and `agentix support`, starts the installed server, verifies both health endpoints, loads `/ui/`, executes a task through the Hermes frontend adapter, verifies Hermes config sync, verifies gateway commands, runs a scheduler job, and creates a support bundle. The release manifest writes a tarball checksum file under `.release/`; use `AGENTIX_EXPECTED_SHA256` with `install.sh` or `install.ps1` for verified tarball installs. After the tag is published, `npm run release:verify` checks npm metadata, GitHub release manifest, release tarball SHA256, and installer dry-run. With `--out data/release/public-release-proof.json`, `agentix readiness` can verify the public release proof instead of relying on a manual claim. Tag pushes matching `v*.*.*` run `.github/workflows/release.yml`, publish with `npm publish --provenance`, and upload the tarball plus manifest as GitHub release assets.
 
 ## Support Bundle
 

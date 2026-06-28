@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -176,6 +176,7 @@ const result = {
 };
 
 if (outputPath) {
+  await mkdir(dirname(resolve(outputPath)), { recursive: true });
   await writeFile(resolve(outputPath), `${JSON.stringify(result, null, 2)}\n`, "utf-8");
   log(`wrote proof ${outputPath}`);
 }

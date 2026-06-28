@@ -41,6 +41,8 @@ describe("release packaging files", () => {
     expect(verifier).toContain("verifyGitHubRelease");
     expect(verifier).toContain("verifyInstaller");
     expect(verifier).toContain("AGENTIX_VERIFY_SKIP_NPM");
+    expect(verifier).toContain("mkdir(dirname(resolve(outputPath))");
+    expect(smoke).toContain("public-release-proof.json");
     expect(releaseWorkflow).toContain("npm publish --provenance");
     expect(releaseWorkflow).toContain(".release/*-manifest.json");
     expect(dockerfile).toContain("dist/cli.js");
