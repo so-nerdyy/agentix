@@ -44,6 +44,7 @@ From any project folder, `agentix` opens the interactive shell. Use `agentix das
 - `agentix model` - configure provider and model
 - `agentix update` - check update/install options
 - `agentix doctor` - validate config and runtime health
+- `agentix readiness` - report private-beta and public-release gates
 - `agentix cron` - manage scheduled jobs
 - `agentix gateway` - manage integrations
 - `agentix skills` - manage skills/plugins

@@ -9,6 +9,7 @@ describe("CLI help", () => {
     expect(help).toContain("dashboard");
     expect(help).toContain("logs");
     expect(help).toContain("doctor");
+    expect(help).toContain("readiness");
     expect(help).toContain("plans, plan");
     expect(help).toContain("tasks, task");
     expect(help).toContain("approvals, approval");

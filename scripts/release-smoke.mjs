@@ -412,6 +412,7 @@ async function smokeCli() {
   assert(help.stdout.includes("server"), "agentix help missing server command");
   assert(help.stdout.includes("tasks, task"), "agentix help missing task commands");
   assert(help.stdout.includes("approvals, approval"), "agentix help missing approval commands");
+  assert(help.stdout.includes("readiness"), "agentix help missing readiness command");
 
   const workspaceDir = join(smokeRoot, "workspace-cli");
   await mkdir(workspaceDir, { recursive: true });
@@ -454,6 +455,12 @@ async function smokeCli() {
     timeoutMs: 60_000,
   });
   assert(usage.stdout.includes("\"counts\""), "installed backend usage command failed");
+  const readiness = await run(agentixCommand, ["--agentix-cli", "readiness", "--json"], {
+    env: backendEnv,
+    timeoutMs: 60_000,
+  });
+  assert(readiness.stdout.includes("\"privateBetaReady\""), "installed backend readiness command failed");
+  assert(readiness.stdout.includes("\"release.publish\""), "installed backend readiness command missing external release gate");
   const config = await run(agentixCommand, ["--agentix-cli", "config", "show"], {
     env: backendEnv,
     timeoutMs: 60_000,

@@ -194,6 +194,18 @@ describe("Powerhouse restored runtime", () => {
     expect((doctor.checks as Array<{ id: string }>).some((check) => check.id === "install.assets")).toBe(true);
     expect((doctor.install as { packageName?: string; packageVersion?: string }).packageName).toBe("agentix");
     expect((doctor.install as { packageName?: string; packageVersion?: string }).packageVersion).toMatch(/\d+\.\d+\.\d+/);
+    const readiness = runtime.readiness() as {
+      status: string;
+      privateBetaReady: boolean;
+      publicReleaseReady: boolean;
+      gates: Array<{ id: string; status: string }>;
+      externalRequirements: Array<{ id: string }>;
+    };
+    expect(readiness.status).toMatch(/ready|not-ready/);
+    expect(typeof readiness.privateBetaReady).toBe("boolean");
+    expect(typeof readiness.publicReleaseReady).toBe("boolean");
+    expect(readiness.gates.some((gate) => gate.id === "backend.pi_agents")).toBe(true);
+    expect(readiness.externalRequirements.some((item) => item.id === "release.publish")).toBe(true);
     const usage = runtime.usage() as {
       counts: { sessions: number; tasks: number; plans: number; memory: number };
       tasksByStatus: Record<string, number>;

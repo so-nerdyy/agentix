@@ -21,6 +21,7 @@ const BACKEND_COMMANDS = new Set([
   "ui",
   "web",
   "support",
+  "readiness",
   "plans",
   "plan",
   "tasks",
@@ -112,6 +113,7 @@ function buildLauncherHelp() {
     "  dashboard, ui, web      start the web control surface only",
     "                         flags: --port <n> --host <addr>",
     "  support                 create a support bundle",
+    "  readiness               report private-beta and public-release gates",
     "  plans, plan             inspect Symphony plan executions",
     "  tasks, task             list tasks or inspect/control one task",
     "  approvals, approval     list approvals or decide one task",
@@ -167,6 +169,13 @@ function buildCommandHelp(command) {
         "",
         "Creates a timestamped support bundle under data/support/ with runtime snapshots,",
         "logs, memory, tasks, approvals, jobs, healing state, and config metadata.",
+      ].join("\n");
+    case "readiness":
+      return [
+        "Usage: agentix readiness [--json]",
+        "",
+        "Reports private-beta and public-release readiness gates.",
+        "Public release readiness still requires external proof for npm/GitHub publishing and live credentials.",
       ].join("\n");
     case "plans":
       return [

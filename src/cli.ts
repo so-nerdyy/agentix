@@ -152,6 +152,35 @@ async function main() {
         }
       }
       return;
+    case "readiness":
+      ensureDataDirs();
+      {
+        const report = getBackendRuntime().readiness();
+        if (cleanArgs.includes("--json")) {
+          printJson(report);
+          return;
+        }
+        const gates = Array.isArray(report.gates) ? report.gates as Array<Record<string, unknown>> : [];
+        const external = Array.isArray(report.externalRequirements) ? report.externalRequirements as Array<Record<string, unknown>> : [];
+        console.log(`Agentix readiness: ${String(report.status ?? "unknown").toUpperCase()}`);
+        console.log(`Private beta ready: ${report.privateBetaReady ? "yes" : "no"}`);
+        console.log(`Public release ready: ${report.publicReleaseReady ? "yes" : "no"}`);
+        console.log("");
+        console.log("Gates:");
+        for (const gate of gates) {
+          console.log(`  [${String(gate.status ?? "unknown").toUpperCase()}] ${String(gate.label ?? gate.id ?? "gate")}: ${String(gate.detail ?? "")}`);
+          if (gate.action) console.log(`      action: ${String(gate.action)}`);
+        }
+        if (external.length > 0) {
+          console.log("");
+          console.log("External proof still required:");
+          for (const item of external) {
+            console.log(`  - ${String(item.id ?? "external")}: ${String(item.detail ?? "")}`);
+            if (item.action) console.log(`    action: ${String(item.action)}`);
+          }
+        }
+      }
+      return;
     case "usage":
       ensureDataDirs();
       printJson(getBackendRuntime().usage());

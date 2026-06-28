@@ -16,6 +16,7 @@ export function buildHelpText(version: string): string {
     "  gateway              inspect or manage gateway integrations",
   "  logs                 print recent runtime logs",
   "  doctor               run backend diagnostics",
+  "  readiness            report private-beta and public-release gates",
   "  usage                print backend runtime usage counts",
   "  config               inspect or set backend runtime config",
   "  auth                 manage backend workspace API tokens",

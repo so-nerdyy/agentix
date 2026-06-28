@@ -1794,6 +1794,127 @@ export class LocalAgentixRuntime {
     };
   }
 
+  readiness(): Record<string, unknown> {
+    const doctor = this.doctor() as {
+      status?: string;
+      checks?: Array<{ id?: string; status?: string; detail?: string; action?: string }>;
+      config?: { llmApiKeyConfigured?: boolean; sessionTokenConfigured?: boolean };
+      install?: { packageVersion?: string; missingAssets?: string[] };
+    };
+    const checks = Array.isArray(doctor.checks) ? doctor.checks : [];
+    const failures = checks.filter((check) => check.status === "fail");
+    const warnings = checks.filter((check) => check.status === "warn");
+    const byId = new Map(checks.map((check) => [check.id, check]));
+    const gate = (
+      id: string,
+      label: string,
+      ok: boolean,
+      detail: string,
+      requiredFor: "private-beta" | "public-release" | "external",
+      action?: string,
+    ) => ({ id, label, status: ok ? "pass" : "block", detail, requiredFor, ...(action ? { action } : {}) });
+
+    const installAssets = byId.get("install.assets");
+    const hermes = byId.get("paths.hermes");
+    const piAgents = byId.get("agents.pi");
+    const sandbox = byId.get("sandbox.isolation");
+    const llmConfigured = Boolean(doctor.config?.llmApiKeyConfigured);
+    const publicReleaseVerified = process.env.AGENTIX_PUBLIC_RELEASE_VERIFIED === "1";
+    const privateBetaBlocks = failures.filter((check) => !["config.llm", "sandbox.isolation"].includes(String(check.id ?? "")));
+    const packageVersion = String(doctor.install?.packageVersion ?? "unknown");
+    const missingAssets = Array.isArray(doctor.install?.missingAssets) ? doctor.install.missingAssets : [];
+    const gateStatus = (ok: boolean, warn = false): "pass" | "warn" | "block" => ok ? (warn ? "warn" : "pass") : "block";
+
+    const gates = [
+      gate(
+        "install.assets",
+        "Installed assets",
+        installAssets?.status === "pass",
+        installAssets?.detail ?? "unknown",
+        "private-beta",
+        installAssets?.action,
+      ),
+      gate(
+        "frontend.hermes",
+        "Hermes frontend bundled",
+        hermes?.status === "pass",
+        hermes?.detail ?? "unknown",
+        "private-beta",
+        hermes?.action,
+      ),
+      gate(
+        "backend.pi_agents",
+        "Powerhouse/Symphony/Pi backend",
+        piAgents?.status === "pass",
+        piAgents?.detail ?? "unknown",
+        "private-beta",
+        piAgents?.action,
+      ),
+      gate(
+        "sandbox.isolation",
+        "Sandbox isolation",
+        sandbox?.status !== "fail",
+        sandbox?.detail ?? "unknown",
+        "private-beta",
+        sandbox?.action,
+      ),
+      gate(
+        "package.version",
+        "Versioned package metadata",
+        packageVersion !== "unknown",
+        packageVersion,
+        "public-release",
+        packageVersion === "unknown" ? "Ensure package.json is included in the installed Agentix package." : undefined,
+      ),
+      gate(
+        "llm.live_key",
+        "Live LLM credential configured",
+        llmConfigured,
+        llmConfigured ? "configured" : "missing; deterministic fallback active",
+        "public-release",
+        llmConfigured ? undefined : "Run agentix setup or export AGENTIX_LLM_API_KEY, then run a live task.",
+      ),
+      gate(
+        "release.publish",
+        "Published npm/GitHub release",
+        publicReleaseVerified,
+        publicReleaseVerified ? "external release proof supplied" : "external proof required; local code cannot prove public registry state",
+        "external",
+        publicReleaseVerified ? undefined : "Tag a release, publish with provenance, then verify npm install -g and curl install from public URLs.",
+      ),
+    ].map((item) => item.id === "sandbox.isolation" && item.status === "pass" && sandbox?.status === "warn"
+      ? { ...item, status: gateStatus(true, true) }
+      : item);
+    const privateBetaReady = privateBetaBlocks.length === 0 && missingAssets.length === 0;
+    const publicReleaseReady = privateBetaReady && llmConfigured && packageVersion !== "unknown" && publicReleaseVerified;
+
+    return {
+      status: publicReleaseReady ? "public-release-ready" : privateBetaReady ? "private-beta-ready" : "not-ready",
+      privateBetaReady,
+      publicReleaseReady,
+      generatedAt: new Date().toISOString(),
+      gates,
+      warnings: warnings.map((check) => ({
+        id: check.id,
+        detail: check.detail,
+        action: check.action,
+      })),
+      blockers: privateBetaBlocks.map((check) => ({
+        id: check.id,
+        detail: check.detail,
+        action: check.action,
+      })),
+      externalRequirements: gates
+        .filter((item) => (item.requiredFor === "external" || item.requiredFor === "public-release") && item.status !== "pass")
+        .map((item) => ({
+          id: item.id,
+          detail: item.detail,
+          action: item.action,
+        })),
+      doctorStatus: doctor.status ?? "unknown",
+    };
+  }
+
   createSupportBundle(): Record<string, unknown> {
     this.powerhouse.start();
     const bundleId = `${Date.now()}-${randomUUID().slice(0, 8)}`;

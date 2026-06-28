@@ -63,6 +63,7 @@ Inbound gateway webhooks use `POST /gateway/<id>/inbound` and must include `X-Ag
 - `GET /health` on the inbox server
 - `GET /health` on the bridge server
 - `agentix doctor` for Hermes diagnostics; `agentix --agentix-cli doctor` or `GET /doctor` for Agentix backend diagnostics
+- `agentix readiness` reports private-beta and public-release gates; public release readiness stays false until live credentials and external release publication are verified
 - If `AGENTIX_SESSION_TOKEN` is configured, it acts as an admin bearer token for all non-health control endpoints
 - Workspace API tokens can be created with `agentix --agentix-cli auth create [viewer|operator|admin] [label]`; plaintext is printed once and hashes persist under `data/auth/tokens.json`
 - Role policy: `viewer` can read, `operator` can mutate runtime resources, `admin` can manage config/auth and memory reset
@@ -89,9 +90,10 @@ npm run build
 npm test
 npm run smoke:release
 npm run release:manifest
+agentix readiness
 ```
 
-The release smoke packs the npm artifact, installs it into an isolated temporary prefix, proves installer SHA256 success and tamper failure, runs `agentix version`, `agentix help`, and `agentix support`, starts the installed server, verifies both health endpoints, loads `/ui/`, executes a task through the Hermes frontend adapter, runs a scheduler job, and creates a support bundle. The release manifest writes a tarball checksum file under `.release/`; use `AGENTIX_EXPECTED_SHA256` with `install.sh` or `install.ps1` for verified tarball installs. Tag pushes matching `v*.*.*` run `.github/workflows/release.yml`, publish with `npm publish --provenance`, and upload the tarball plus manifest as GitHub release assets.
+The release smoke packs the npm artifact, installs it into an isolated temporary prefix, proves installer SHA256 success and tamper failure, runs `agentix version`, `agentix help`, `agentix readiness`, and `agentix support`, starts the installed server, verifies both health endpoints, loads `/ui/`, executes a task through the Hermes frontend adapter, verifies Hermes config sync, verifies gateway commands, runs a scheduler job, and creates a support bundle. The release manifest writes a tarball checksum file under `.release/`; use `AGENTIX_EXPECTED_SHA256` with `install.sh` or `install.ps1` for verified tarball installs. Tag pushes matching `v*.*.*` run `.github/workflows/release.yml`, publish with `npm publish --provenance`, and upload the tarball plus manifest as GitHub release assets.
 
 ## Support Bundle
 
