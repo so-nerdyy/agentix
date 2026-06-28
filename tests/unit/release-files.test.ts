@@ -12,6 +12,7 @@ describe("release packaging files", () => {
     const manifest = readFileSync(join(process.cwd(), "scripts", "release-manifest.mjs"), "utf-8");
     const smoke = readFileSync(join(process.cwd(), "scripts", "release-smoke.mjs"), "utf-8");
     const verifier = readFileSync(join(process.cwd(), "scripts", "verify-public-release.mjs"), "utf-8");
+    const llmVerifier = readFileSync(join(process.cwd(), "scripts", "verify-live-llm.mjs"), "utf-8");
     const releaseWorkflow = readFileSync(join(process.cwd(), ".github", "workflows", "release.yml"), "utf-8");
     const ciWorkflow = readFileSync(join(process.cwd(), ".github", "workflows", "ci.yml"), "utf-8");
     const dockerfile = readFileSync(join(process.cwd(), "Dockerfile"), "utf-8");
@@ -20,6 +21,8 @@ describe("release packaging files", () => {
     expect(pkg.scripts.prepack).toBe("npm run build");
     expect(pkg.scripts["release:manifest"]).toBe("node scripts/release-manifest.mjs");
     expect(pkg.scripts["release:verify"]).toBe("node scripts/verify-public-release.mjs");
+    expect(pkg.scripts["verify:llm"]).toBe("node scripts/verify-live-llm.mjs");
+    expect(pkg.files).toContain("scripts");
     expect(shell).toContain("AGENTIX_EXPECTED_SHA256");
     expect(shell).toContain("AGENTIX_VERSION");
     expect(shell).toContain("Checksum mismatch");
@@ -42,6 +45,9 @@ describe("release packaging files", () => {
     expect(verifier).toContain("verifyInstaller");
     expect(verifier).toContain("AGENTIX_VERIFY_SKIP_NPM");
     expect(verifier).toContain("mkdir(dirname(resolve(outputPath))");
+    expect(llmVerifier).toContain("AGENTIX_LLM_VERIFY_OUTPUT");
+    expect(llmVerifier).toContain("/chat/completions");
+    expect(llmVerifier).toContain("/v1/messages");
     expect(smoke).toContain("public-release-proof.json");
     expect(releaseWorkflow).toContain("npm publish --provenance");
     expect(releaseWorkflow).toContain(".release/*-manifest.json");

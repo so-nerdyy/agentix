@@ -1824,7 +1824,9 @@ export class LocalAgentixRuntime {
     const missingAssets = Array.isArray(doctor.install?.missingAssets) ? doctor.install.missingAssets : [];
     const gateStatus = (ok: boolean, warn = false): "pass" | "warn" | "block" => ok ? (warn ? "warn" : "pass") : "block";
     const releaseProof = this.readPublicReleaseProof(packageVersion);
+    const llmProof = this.readLiveLlmProof(packageVersion);
     const publicReleaseVerified = releaseProof.ok || process.env.AGENTIX_PUBLIC_RELEASE_VERIFIED === "1";
+    const liveLlmVerified = llmProof.ok || process.env.AGENTIX_LLM_LIVE_VERIFIED === "1";
 
     const gates = [
       gate(
@@ -1869,11 +1871,17 @@ export class LocalAgentixRuntime {
       ),
       gate(
         "llm.live_key",
-        "Live LLM credential configured",
-        llmConfigured,
-        llmConfigured ? "configured" : "missing; deterministic fallback active",
+        "Live LLM task verified",
+        liveLlmVerified,
+        llmProof.ok
+          ? `verified by ${llmProof.path}`
+          : liveLlmVerified
+            ? "external live LLM proof supplied by AGENTIX_LLM_LIVE_VERIFIED=1"
+            : llmConfigured
+              ? llmProof.detail
+              : "missing; deterministic fallback active",
         "public-release",
-        llmConfigured ? undefined : "Run agentix setup or export AGENTIX_LLM_API_KEY, then run a live task.",
+        liveLlmVerified ? undefined : "Run agentix setup or export AGENTIX_LLM_API_KEY, then run npm run verify:llm -- --out data/release/live-llm-proof.json.",
       ),
       gate(
         "release.publish",
@@ -1891,7 +1899,7 @@ export class LocalAgentixRuntime {
       ? { ...item, status: gateStatus(true, true) }
       : item);
     const privateBetaReady = privateBetaBlocks.length === 0 && missingAssets.length === 0;
-    const publicReleaseReady = privateBetaReady && llmConfigured && packageVersion !== "unknown" && publicReleaseVerified;
+    const publicReleaseReady = privateBetaReady && liveLlmVerified && packageVersion !== "unknown" && publicReleaseVerified;
 
     return {
       status: publicReleaseReady ? "public-release-ready" : privateBetaReady ? "private-beta-ready" : "not-ready",
@@ -1918,7 +1926,64 @@ export class LocalAgentixRuntime {
         })),
       doctorStatus: doctor.status ?? "unknown",
       releaseProof,
+      llmProof,
     };
+  }
+
+  private readLiveLlmProof(packageVersion: string): {
+    ok: boolean;
+    path: string;
+    detail: string;
+    verifiedAt?: string;
+  } {
+    const proofPath = process.env.AGENTIX_LLM_PROOF
+      || join(PATHS.dataDir, "release", "live-llm-proof.json");
+    if (!existsSync(proofPath)) {
+      return {
+        ok: false,
+        path: proofPath,
+        detail: `missing proof file: ${proofPath}`,
+      };
+    }
+    try {
+      const proof = JSON.parse(readFileSync(proofPath, "utf-8")) as {
+        ok?: boolean;
+        package?: string;
+        version?: string;
+        provider?: string;
+        model?: string;
+        endpoint?: string;
+        responseChars?: number;
+        verifiedAt?: string;
+      };
+      if (!proof.ok) {
+        return { ok: false, path: proofPath, detail: "proof file does not mark ok=true" };
+      }
+      if (proof.package !== PACKAGE_METADATA.name) {
+        return { ok: false, path: proofPath, detail: `proof package mismatch: ${String(proof.package)}` };
+      }
+      if (proof.version !== packageVersion) {
+        return { ok: false, path: proofPath, detail: `proof version mismatch: ${String(proof.version)} != ${packageVersion}` };
+      }
+      if (!proof.provider || !proof.model || !proof.endpoint) {
+        return { ok: false, path: proofPath, detail: "proof missing provider/model/endpoint details" };
+      }
+      if (!proof.responseChars || proof.responseChars <= 0) {
+        return { ok: false, path: proofPath, detail: "proof did not record a live model response" };
+      }
+      return {
+        ok: true,
+        path: proofPath,
+        detail: `${proof.provider}/${proof.model} verified`,
+        verifiedAt: proof.verifiedAt,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        path: proofPath,
+        detail: `invalid proof file: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
   }
 
   private readPublicReleaseProof(packageVersion: string): {

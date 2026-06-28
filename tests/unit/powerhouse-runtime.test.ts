@@ -279,6 +279,98 @@ describe("Powerhouse restored runtime", () => {
     }
   });
 
+  it("accepts a verified live-LLM proof file for readiness", () => {
+    const dir = tempDir("agentix-llm-proof-");
+    const proofPath = join(dir, "proof.json");
+    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf-8")) as { version: string };
+    const previousProof = process.env.AGENTIX_LLM_PROOF;
+    process.env.AGENTIX_LLM_PROOF = proofPath;
+    writeFileSync(proofPath, JSON.stringify({
+      ok: true,
+      package: "agentix",
+      version: pkg.version,
+      verifiedAt: new Date().toISOString(),
+      provider: "openai",
+      model: "gpt-release-smoke",
+      endpoint: "https://api.openai.com/v1/chat/completions",
+      responseChars: 16,
+    }), "utf-8");
+    const runtime = new LocalAgentixRuntime();
+
+    try {
+      const readiness = runtime.readiness() as {
+        gates: Array<{ id: string; status: string }>;
+        llmProof: { ok: boolean; path: string };
+      };
+
+      expect(readiness.llmProof).toMatchObject({ ok: true, path: proofPath });
+      expect(readiness.gates.find((gate) => gate.id === "llm.live_key")?.status).toBe("pass");
+    } finally {
+      runtime.shutdown();
+      if (previousProof === undefined) {
+        delete process.env.AGENTIX_LLM_PROOF;
+      } else {
+        process.env.AGENTIX_LLM_PROOF = previousProof;
+      }
+    }
+  });
+
+  it("reports public-release readiness when release and live-LLM proofs are present", () => {
+    const dir = tempDir("agentix-public-ready-");
+    const releaseProofPath = join(dir, "release-proof.json");
+    const llmProofPath = join(dir, "llm-proof.json");
+    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf-8")) as { version: string };
+    const previousReleaseProof = process.env.AGENTIX_PUBLIC_RELEASE_PROOF;
+    const previousLlmProof = process.env.AGENTIX_LLM_PROOF;
+    process.env.AGENTIX_PUBLIC_RELEASE_PROOF = releaseProofPath;
+    process.env.AGENTIX_LLM_PROOF = llmProofPath;
+    writeFileSync(releaseProofPath, JSON.stringify({
+      ok: true,
+      package: "agentix",
+      version: pkg.version,
+      installerDryRun: true,
+      verifiedAt: new Date().toISOString(),
+      release: {
+        sha256: "abc123",
+        manifestUrl: `https://example.test/agentix-${pkg.version}-manifest.json`,
+        tarballUrl: `https://example.test/agentix-${pkg.version}.tgz`,
+      },
+    }), "utf-8");
+    writeFileSync(llmProofPath, JSON.stringify({
+      ok: true,
+      package: "agentix",
+      version: pkg.version,
+      verifiedAt: new Date().toISOString(),
+      provider: "openai",
+      model: "gpt-release-smoke",
+      endpoint: "https://api.openai.com/v1/chat/completions",
+      responseChars: 16,
+    }), "utf-8");
+    const runtime = new LocalAgentixRuntime();
+
+    try {
+      const readiness = runtime.readiness() as {
+        status: string;
+        publicReleaseReady: boolean;
+      };
+
+      expect(readiness.status).toBe("public-release-ready");
+      expect(readiness.publicReleaseReady).toBe(true);
+    } finally {
+      runtime.shutdown();
+      if (previousReleaseProof === undefined) {
+        delete process.env.AGENTIX_PUBLIC_RELEASE_PROOF;
+      } else {
+        process.env.AGENTIX_PUBLIC_RELEASE_PROOF = previousReleaseProof;
+      }
+      if (previousLlmProof === undefined) {
+        delete process.env.AGENTIX_LLM_PROOF;
+      } else {
+        process.env.AGENTIX_LLM_PROOF = previousLlmProof;
+      }
+    }
+  });
+
   it("exposes audit-backed runtime logs", async () => {
     const runtime = new LocalAgentixRuntime();
 
