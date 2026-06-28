@@ -97,6 +97,7 @@ By default, Agentix stores Hermes frontend state under `.agentix/hermes/` in the
 npm install
 npm run build
 npm test
+npm run smoke:release
 ```
 
 Docker runtime:
@@ -106,6 +107,17 @@ docker build -t agentix:local .
 $env:AGENTIX_SESSION_TOKEN = "replace-with-a-long-random-token"
 docker compose up
 ```
+
+Public-release readiness:
+
+```powershell
+npm run release:manifest
+npm run verify:llm -- --out data/release/live-llm-proof.json
+npm run release:verify -- --out data/release/public-release-proof.json
+agentix readiness
+```
+
+`agentix readiness` stays at `private-beta-ready` until both proof files exist: one from a live model call, one from published npm/GitHub release verification.
 
 ## Documentation
 
