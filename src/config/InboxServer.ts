@@ -24,8 +24,7 @@ import { ensureDataDirs, PATHS } from "./paths.js";
 import { getBackendRuntime } from "../runtime/backend.js";
 import { assertSafeListenHost, requireSessionToken, requiredRoleForRequest } from "./HttpAuth.js";
 import { openApiSpec } from "./openapi.js";
-
-const VERSION = "2.1.0";
+import { PACKAGE_METADATA } from "./package.js";
 
 export async function startInboxServer(opts: { port?: number; host?: string } = {}): Promise<{
   close: () => Promise<void>;
@@ -68,7 +67,7 @@ export async function startInboxServer(opts: { port?: number; host?: string } = 
   server.get("/health", async () => ({
     status: "ok",
     uptime: Math.floor((Date.now() - startedAt) / 1000),
-    version: VERSION,
+    version: PACKAGE_METADATA.version,
     sseClients: subscriberCount(),
   }));
   server.get("/openapi.json", async () => openApiSpec);

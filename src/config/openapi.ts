@@ -1,8 +1,10 @@
+import { PACKAGE_METADATA } from "./package.js";
+
 export const openApiSpec = {
   openapi: "3.1.0",
   info: {
     title: "Agentix Backend API",
-    version: "2.1.0",
+    version: PACKAGE_METADATA.version,
     description: "Agentix control API for Powerhouse, Symphony, Pi agents, memory, approvals, scheduler, gateways, and support diagnostics.",
   },
   servers: [

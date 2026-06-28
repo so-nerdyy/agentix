@@ -123,4 +123,14 @@ describe("config", () => {
     expect(pathsMod.PATHS.installRoot).not.toBe(resolve(dir));
     expect(pathsMod.PATHS.bridgeEntry).toContain("dist");
   });
+
+  it("uses package metadata as the API version source of truth", async () => {
+    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf-8")) as { name: string; version: string };
+    const { PACKAGE_METADATA } = await import("../../src/config/package.js");
+    const { openApiSpec } = await import("../../src/config/openapi.js");
+
+    expect(PACKAGE_METADATA.name).toBe(pkg.name);
+    expect(PACKAGE_METADATA.version).toBe(pkg.version);
+    expect(openApiSpec.info.version).toBe(pkg.version);
+  });
 });

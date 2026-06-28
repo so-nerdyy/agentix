@@ -1,6 +1,6 @@
 import { Powerhouse } from "../powerhouse/Powerhouse.js";
 import { SchedulerService } from "../scheduler/SchedulerService.js";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { PATHS } from "../config/paths.js";
 import { EventBus } from "../config/EventBus.js";
@@ -19,23 +19,7 @@ import {
 } from "../gateway/GatewayConnector.js";
 import type { CommandAgentProfile } from "../pi/AgentProfileStore.js";
 import { dockerSandboxAvailable } from "../pi/SandboxAgent.js";
-
-type PackageMetadata = {
-  name: string;
-  version: string;
-};
-
-function loadPackageMetadata(): PackageMetadata {
-  try {
-    const pkg = JSON.parse(readFileSync(join(PATHS.installRoot, "package.json"), "utf-8")) as Partial<PackageMetadata>;
-    return {
-      name: String(pkg.name ?? "agentix"),
-      version: String(pkg.version ?? "unknown"),
-    };
-  } catch {
-    return { name: "agentix", version: "unknown" };
-  }
-}
+import { PACKAGE_METADATA } from "../config/package.js";
 
 export type RuntimeSearchResults = {
   query: string;
@@ -1625,7 +1609,7 @@ export class LocalAgentixRuntime {
     const gateways = this.gateways.list();
     const jobs = this.scheduler.list();
     const healing = this.powerhouse.healing.listProcedures();
-    const packageMetadata = loadPackageMetadata();
+    const packageMetadata = PACKAGE_METADATA;
     const requiredInstallAssets = [
       join(PATHS.installRoot, "bin", process.platform === "win32" ? "agentix.js" : "agentix.js"),
       PATHS.bridgeEntry,
@@ -1836,7 +1820,7 @@ export class LocalAgentixRuntime {
     const agentProfiles = this.listAgentProfiles();
     const plans = this.powerhouse.planStore.list();
     const doctor = this.doctor();
-    const packageMetadata = loadPackageMetadata();
+    const packageMetadata = PACKAGE_METADATA;
     const audit = this.listAudit();
     const healing = this.healingStats();
     const memory = this.powerhouse.memory.list().slice(-250);
