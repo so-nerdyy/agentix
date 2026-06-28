@@ -486,6 +486,52 @@ async function smokeCli() {
   });
 }
 
+async function smokeReinstallPreservesWorkspace(tarball) {
+  log("checking reinstall preserves workspace state");
+  const workspaceDir = join(smokeRoot, "workspace-upgrade");
+  const workspaceData = join(workspaceDir, "data");
+  const workspaceHermes = join(workspaceDir, ".agentix", "hermes");
+  await mkdir(workspaceData, { recursive: true });
+  await mkdir(workspaceHermes, { recursive: true });
+  await writeFile(join(workspaceData, "config.json"), JSON.stringify({
+    provider: "openai",
+    model: "preserved-upgrade-model",
+    baseUrl: "http://127.0.0.1:5555/v1",
+  }, null, 2) + "\n", "utf-8");
+  await writeFile(join(workspaceHermes, "config.yaml"), [
+    "model:",
+    "  provider: openai",
+    "  default: preserved-hermes-model",
+    "  base_url: http://127.0.0.1:5555/v1",
+    "",
+  ].join("\n"), "utf-8");
+
+  await run(npm, ["install", "-g", "--prefix", prefixDir, tarball, "--no-audit", "--no-fund"], {
+    env: {
+      ...process.env,
+      npm_config_cache: cacheDir,
+      npm_config_audit: "false",
+      npm_config_fund: "false",
+    },
+    timeoutMs: 480_000,
+  });
+
+  const preserved = JSON.parse(readFileSync(join(workspaceData, "config.json"), "utf-8"));
+  assert(preserved.model === "preserved-upgrade-model", "global reinstall mutated workspace model config");
+  assert(preserved.provider === "openai", "global reinstall mutated workspace provider config");
+  assert(existsSync(join(workspaceHermes, "config.yaml")), "global reinstall removed Hermes workspace config");
+
+  const shown = await run(agentixCommand, ["--agentix-cli", "config", "show"], {
+    cwd: workspaceDir,
+    env: {
+      ...process.env,
+      AGENTIX_WORKSPACE_DIR: workspaceDir,
+    },
+    timeoutMs: 60_000,
+  });
+  assert(shown.stdout.includes("\"model\": \"preserved-upgrade-model\""), "reinstalled CLI did not read preserved workspace config");
+}
+
 async function smokeServer() {
   const inboxPort = await freePort();
   const bridgePort = await freePort();
@@ -551,6 +597,44 @@ async function smokeServer() {
         process.env.PYTHONPATH,
       ].filter(Boolean).join(process.platform === "win32" ? ";" : ":"),
     };
+
+    const syncWorkspace = join(smokeRoot, "workspace-sync");
+    const syncData = join(syncWorkspace, "data");
+    const syncHermesHome = join(syncWorkspace, ".agentix", "hermes");
+    await mkdir(syncData, { recursive: true });
+    await mkdir(syncHermesHome, { recursive: true });
+    await writeFile(join(syncHermesHome, "config.yaml"), [
+      "model:",
+      "  provider: openai",
+      "  default: release-smoke-model",
+      "  base_url: http://127.0.0.1:7777/v1",
+      "",
+    ].join("\n"), "utf-8");
+    await writeFile(join(syncHermesHome, ".env"), "OPENAI_API_KEY=release-smoke-secret\n", "utf-8");
+    const syncConfig = await run(python, [
+      "-c",
+      [
+        "import json",
+        "from hermes_cli.agentix_commands import sync_agentix_runtime_config",
+        "print(json.dumps(sync_agentix_runtime_config(), sort_keys=True))",
+      ].join("; "),
+    ], {
+      cwd: syncWorkspace,
+      env: {
+        ...hermesEnv,
+        HERMES_HOME: syncHermesHome,
+        AGENTIX_WORKSPACE_DIR: syncWorkspace,
+        AGENTIX_DATA_DIR: syncData,
+      },
+      timeoutMs: 120_000,
+    });
+    assert(syncConfig.stdout.includes("\"model\": \"release-smoke-model\""), "Hermes setup/model sync did not report selected model");
+    const syncedRuntimeConfig = JSON.parse(readFileSync(join(syncData, "config.json"), "utf-8"));
+    assert(syncedRuntimeConfig.model === "release-smoke-model", "Hermes setup/model sync did not persist model");
+    assert(syncedRuntimeConfig.provider === "openai", "Hermes setup/model sync did not persist provider");
+    assert(syncedRuntimeConfig.baseUrl === "http://127.0.0.1:7777/v1", "Hermes setup/model sync did not persist base URL");
+    assert(!("llmApiKey" in syncedRuntimeConfig), "Hermes setup/model sync persisted API secret");
+
     const installedOneshotPrompt = "release smoke installed oneshot delegation";
     const installedOneshot = await run(agentixCommand, [
       "-z",
@@ -623,6 +707,29 @@ async function smokeServer() {
     });
     assert(cronAdapter.stdout.includes("Created Agentix scheduled job"), "Hermes cron adapter did not create an Agentix scheduler job");
     assert(cronAdapter.stdout.includes("release smoke cli cron"), "Hermes cron adapter list did not include created job");
+
+    const gatewayList = await run(agentixCommand, ["gateway", "list"], {
+      cwd: smokeRoot,
+      env: hermesEnv,
+      timeoutMs: 120_000,
+    });
+    assert(gatewayList.stdout.includes("Platform") && gatewayList.stdout.includes("Messages"), "installed agentix gateway list did not print backend gateway table");
+    assert(gatewayList.stdout.includes("webhook"), "installed agentix gateway list missing webhook gateway");
+
+    const gatewayEnable = await run(agentixCommand, ["gateway", "enable", "webhook"], {
+      cwd: smokeRoot,
+      env: hermesEnv,
+      timeoutMs: 120_000,
+    });
+    assert(gatewayEnable.stdout.includes("Enabled Agentix gateway: webhook"), "installed agentix gateway enable did not route through Agentix backend");
+
+    const gatewayMessage = await run(agentixCommand, ["gateway", "message", "webhook", "release", "smoke", "gateway", "delegation"], {
+      cwd: smokeRoot,
+      env: hermesEnv,
+      timeoutMs: 120_000,
+    });
+    assert(gatewayMessage.stdout.includes("\"ok\": true"), "installed agentix gateway message did not return ok");
+    assert(gatewayMessage.stdout.includes("release smoke gateway delegation"), "installed agentix gateway message did not execute stimulus");
 
     const memoryReset = await run(python, [
       "-c",
@@ -712,6 +819,7 @@ try {
   await smokeInstallerChecksum(packedArtifact.tarball, packedArtifact.sha256);
   await smokeVersionedReleaseInstall(packedArtifact.tarball, packedArtifact.sha256, packedArtifact.tarballName);
   await smokeCli();
+  await smokeReinstallPreservesWorkspace(packedArtifact.tarball);
   await smokeServer();
   log("release smoke passed");
 } finally {
