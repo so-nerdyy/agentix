@@ -373,6 +373,20 @@ async function smokeVersionedReleaseInstall(tarball, expectedSha256, tarballName
       AGENTIX_SKIP_SETUP: "1",
     };
 
+    const verified = await run(process.execPath, [
+      join(root, "scripts", "verify-public-release.mjs"),
+      "--skip-npm",
+      "--version",
+      packageJson.version,
+      "--release-base-url",
+      baseUrl,
+    ], {
+      env: releaseEnv,
+      timeoutMs: 120_000,
+    });
+    assert(verified.stdout.includes("\"ok\": true"), "release verifier did not pass against local release fixture");
+    assert(verified.stdout.includes(`"sha256": "${expectedSha256}"`), "release verifier did not validate tarball SHA256");
+
     if (process.platform === "win32") {
       const result = await run("powershell", ["-ExecutionPolicy", "Bypass", "-File", join(root, "install.ps1"), "-DryRun", "-SkipSetup"], {
         env: releaseEnv,
