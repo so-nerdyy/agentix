@@ -111,13 +111,14 @@ docker compose up
 Public-release readiness:
 
 ```powershell
+npm run release:preflight -- --require-llm
 npm run release:manifest
 npm run verify:llm -- --out data/release/live-llm-proof.json
 npm run release:verify -- --out data/release/public-release-proof.json
 agentix readiness
 ```
 
-`agentix readiness` stays at `private-beta-ready` until both proof files exist: one from a live model call, one from published npm/GitHub release verification.
+`agentix readiness` stays at `private-beta-ready` until both proof files exist: one from a live model call, one from published npm/GitHub release verification. Public release also requires a public GitHub repository and an `NPM_TOKEN` with publish rights for `@so-nerdyy/agentix`.
 
 ## Documentation
 

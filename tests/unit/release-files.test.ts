@@ -10,6 +10,7 @@ describe("release packaging files", () => {
     const shell = readFileSync(join(process.cwd(), "install.sh"), "utf-8");
     const powershell = readFileSync(join(process.cwd(), "install.ps1"), "utf-8");
     const manifest = readFileSync(join(process.cwd(), "scripts", "release-manifest.mjs"), "utf-8");
+    const preflight = readFileSync(join(process.cwd(), "scripts", "release-preflight.mjs"), "utf-8");
     const smoke = readFileSync(join(process.cwd(), "scripts", "release-smoke.mjs"), "utf-8");
     const verifier = readFileSync(join(process.cwd(), "scripts", "verify-public-release.mjs"), "utf-8");
     const llmVerifier = readFileSync(join(process.cwd(), "scripts", "verify-live-llm.mjs"), "utf-8");
@@ -20,6 +21,7 @@ describe("release packaging files", () => {
 
     expect(pkg.scripts.prepack).toBe("npm run build");
     expect(pkg.scripts["release:manifest"]).toBe("node scripts/release-manifest.mjs");
+    expect(pkg.scripts["release:preflight"]).toBe("node scripts/release-preflight.mjs");
     expect(pkg.scripts["release:verify"]).toBe("node scripts/verify-public-release.mjs");
     expect(pkg.scripts["verify:llm"]).toBe("node scripts/verify-live-llm.mjs");
     expect(pkg.files).toContain("scripts");
@@ -33,6 +35,10 @@ describe("release packaging files", () => {
     expect(powershell).toContain("System.Security.Cryptography.SHA256");
     expect(manifest).toContain("createHash");
     expect(manifest).toContain("sha256");
+    expect(preflight).toContain("github.repo");
+    expect(preflight).toContain("gh\", [\"auth\", \"token\"]");
+    expect(preflight).toContain("npm.auth");
+    expect(preflight).toContain("llm.secret");
     expect(smoke).toContain("smokeInstallerChecksum");
     expect(smoke).toContain("smokeVersionedReleaseInstall");
     expect(smoke).toContain("tampered release artifact");
@@ -51,6 +57,7 @@ describe("release packaging files", () => {
     expect(smoke).toContain("public-release-proof.json");
     expect(releaseWorkflow).toContain("npm publish --provenance");
     expect(releaseWorkflow).toContain("Validate npm authentication");
+    expect(releaseWorkflow).toContain("npm run release:preflight -- --require-llm");
     expect(releaseWorkflow).toContain("NPM_TOKEN secret is required");
     expect(releaseWorkflow).toContain(".release/*-manifest.json");
     expect(releaseWorkflow).toContain("npm run release:verify -- --out data/release/public-release-proof.json");
