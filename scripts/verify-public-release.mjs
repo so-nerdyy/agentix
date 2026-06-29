@@ -104,8 +104,8 @@ async function verifyNpm(packageName, version) {
   };
 }
 
-async function verifyGitHubRelease(packageName, version, releaseBaseUrl) {
-  const manifestUrl = `${releaseBaseUrl.replace(/\/+$/, "")}/${packageName}-${version}-manifest.json`;
+async function verifyGitHubRelease(packageName, version, releaseBaseUrl, artifactBase) {
+  const manifestUrl = `${releaseBaseUrl.replace(/\/+$/, "")}/${artifactBase}-${version}-manifest.json`;
   log(`checking release manifest ${manifestUrl}`);
   const manifest = await fetchJson(manifestUrl);
   if (manifest.package !== packageName) fail(`release manifest package mismatch: ${manifest.package}`);
@@ -157,9 +157,13 @@ const releaseBaseUrl = readArg(
 const skipNpm = hasFlag("--skip-npm") || process.env.AGENTIX_VERIFY_SKIP_NPM === "1";
 const skipInstaller = hasFlag("--skip-installer") || process.env.AGENTIX_VERIFY_SKIP_INSTALLER === "1";
 const outputPath = readArg("--out", process.env.AGENTIX_VERIFY_OUTPUT);
+const artifactBase = readArg(
+  "--artifact-base",
+  process.env.AGENTIX_RELEASE_ARTIFACT_BASE ?? packageName.replace(/^@/, "").replace(/[\/\\]/g, "-"),
+);
 
 const npmResult = skipNpm ? null : await verifyNpm(packageName, version);
-const releaseResult = await verifyGitHubRelease(packageName, version, releaseBaseUrl);
+const releaseResult = await verifyGitHubRelease(packageName, version, releaseBaseUrl, artifactBase);
 if (!skipInstaller) {
   await verifyInstaller(version, releaseBaseUrl);
 }
@@ -169,6 +173,7 @@ const result = {
   package: packageName,
   version,
   releaseBaseUrl,
+  artifactBase,
   npm: npmResult,
   release: releaseResult,
   installerDryRun: !skipInstaller,

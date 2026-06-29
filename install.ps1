@@ -2,6 +2,7 @@ param(
   [string]$Package = $env:AGENTIX_PACKAGE,
   [string]$Version = $env:AGENTIX_VERSION,
   [string]$ReleaseBaseUrl = $env:AGENTIX_RELEASE_BASE_URL,
+  [string]$ReleaseArtifactBase = $env:AGENTIX_RELEASE_ARTIFACT_BASE,
   [string]$ExpectedSha256 = $env:AGENTIX_EXPECTED_SHA256,
   [switch]$DryRun,
   [switch]$SkipSetup
@@ -35,7 +36,11 @@ function Get-AgentixFileSha256($Path) {
 }
 
 if ([string]::IsNullOrWhiteSpace($Package)) {
-  $Package = "agentix"
+  $Package = "@so-nerdyy/agentix"
+}
+
+if ([string]::IsNullOrWhiteSpace($ReleaseArtifactBase)) {
+  $ReleaseArtifactBase = "so-nerdyy-agentix"
 }
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
@@ -54,13 +59,13 @@ if ($NodeMajor -lt 18) {
 
 $TempDir = $null
 try {
-  if (-not [string]::IsNullOrWhiteSpace($Version) -and $Package -eq "agentix") {
+  if (-not [string]::IsNullOrWhiteSpace($Version) -and $Package -eq "@so-nerdyy/agentix") {
     $TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("agentix-install-" + [System.Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Force -Path $TempDir | Out-Null
     if ([string]::IsNullOrWhiteSpace($ReleaseBaseUrl)) {
       $ReleaseBaseUrl = "https://github.com/so-nerdyy/agentix/releases/download/v$Version"
     }
-    $ManifestUrl = "$ReleaseBaseUrl/agentix-$Version-manifest.json"
+    $ManifestUrl = "$ReleaseBaseUrl/$ReleaseArtifactBase-$Version-manifest.json"
     $ManifestPath = Join-Path $TempDir "manifest.json"
     Write-Host "Downloading Agentix release manifest: $ManifestUrl"
     Invoke-WebRequest -Uri $ManifestUrl -OutFile $ManifestPath
@@ -113,6 +118,6 @@ if (-not $SkipSetup) {
 Write-Host "  agentix"
 Write-Host ""
 Write-Host "Use AGENTIX_PACKAGE to install a tag or tarball, for example:"
-Write-Host "  `$env:AGENTIX_PACKAGE='agentix@2.1.0'; irm <url>/install.ps1 | iex"
+Write-Host "  `$env:AGENTIX_PACKAGE='@so-nerdyy/agentix@2.1.0'; irm <url>/install.ps1 | iex"
 Write-Host "Use AGENTIX_VERSION to install a verified GitHub release tarball:"
 Write-Host "  `$env:AGENTIX_VERSION='2.1.0'; irm https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.ps1 | iex"

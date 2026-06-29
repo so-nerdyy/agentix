@@ -1,5 +1,5 @@
 {
-  "name": "agentix",
+  "name": "@so-nerdyy/agentix",
   "version": "2.1.0",
   "description": "Agentix CLI - AI coding agent with Hermes frontend",
   "type": "module",

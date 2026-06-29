@@ -1,9 +1,11 @@
 #!/usr/bin/env sh
 set -eu
 
-PACKAGE="${AGENTIX_PACKAGE:-agentix}"
+DEFAULT_PACKAGE="@so-nerdyy/agentix"
+PACKAGE="${AGENTIX_PACKAGE:-$DEFAULT_PACKAGE}"
 VERSION="${AGENTIX_VERSION:-}"
 RELEASE_BASE_URL="${AGENTIX_RELEASE_BASE_URL:-}"
+RELEASE_ARTIFACT_BASE="${AGENTIX_RELEASE_ARTIFACT_BASE:-so-nerdyy-agentix}"
 DRY_RUN="${AGENTIX_DRY_RUN:-0}"
 SKIP_SETUP="${AGENTIX_SKIP_SETUP:-0}"
 EXPECTED_SHA256="${AGENTIX_EXPECTED_SHA256:-}"
@@ -19,16 +21,17 @@ usage() {
 Install Agentix globally with npm.
 
 Environment:
-  AGENTIX_PACKAGE     Package, version, or tarball to install. Default: agentix
+  AGENTIX_PACKAGE     Package, version, or tarball to install. Default: @so-nerdyy/agentix
   AGENTIX_VERSION     Download and verify a GitHub release asset, for example 2.1.0.
   AGENTIX_RELEASE_BASE_URL  Override release asset base URL.
+  AGENTIX_RELEASE_ARTIFACT_BASE  Override release manifest basename.
   AGENTIX_EXPECTED_SHA256  Optional SHA256 for local tarball installs.
   AGENTIX_DRY_RUN     Set to 1 to print actions without installing.
   AGENTIX_SKIP_SETUP  Set to 1 to omit setup from the next-step hint.
 
 Examples:
   curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
-  AGENTIX_PACKAGE=agentix@2.1.0 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
+  AGENTIX_PACKAGE=@so-nerdyy/agentix@2.1.0 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
   AGENTIX_VERSION=2.1.0 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
 EOF
 }
@@ -60,13 +63,13 @@ if [ "$NODE_MAJOR" -lt 18 ]; then
   fail "Node.js 18+ is required before installing Agentix. Found $(node -v)."
 fi
 
-if [ -n "$VERSION" ] && [ "$PACKAGE" = "agentix" ]; then
+if [ -n "$VERSION" ] && [ "$PACKAGE" = "$DEFAULT_PACKAGE" ]; then
   command -v curl >/dev/null 2>&1 || fail "curl is required for AGENTIX_VERSION release installs."
   TEMP_DIR="$(mktemp -d)"
   if [ -z "$RELEASE_BASE_URL" ]; then
     RELEASE_BASE_URL="https://github.com/so-nerdyy/agentix/releases/download/v$VERSION"
   fi
-  MANIFEST_URL="$RELEASE_BASE_URL/agentix-$VERSION-manifest.json"
+  MANIFEST_URL="$RELEASE_BASE_URL/$RELEASE_ARTIFACT_BASE-$VERSION-manifest.json"
   MANIFEST_PATH="$TEMP_DIR/manifest.json"
   printf 'Downloading Agentix release manifest: %s\n' "$MANIFEST_URL"
   curl -fsSL "$MANIFEST_URL" -o "$MANIFEST_PATH"
@@ -105,6 +108,6 @@ if [ "$SKIP_SETUP" != "1" ]; then
 fi
 printf '  agentix\n\n'
 printf 'Use AGENTIX_PACKAGE to install a tag or tarball, for example:\n'
-printf '  AGENTIX_PACKAGE=agentix@2.1.0 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh\n'
+printf '  AGENTIX_PACKAGE=@so-nerdyy/agentix@2.1.0 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh\n'
 printf 'Use AGENTIX_VERSION to install a verified GitHub release tarball:\n'
 printf '  AGENTIX_VERSION=2.1.0 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh\n'

@@ -12,7 +12,7 @@
 Use npm directly:
 
 ```powershell
-npm install -g agentix
+npm install -g @so-nerdyy/agentix
 ```
 
 Or install with the curl-friendly bootstrap scripts:
@@ -35,12 +35,12 @@ agentix
 The installer scripts require Node.js/npm first, then install the global `agentix` package and verify `agentix version`. To install a specific release or tarball, set `AGENTIX_PACKAGE`, for example:
 
 ```powershell
-$env:AGENTIX_PACKAGE = "agentix@2.1.0"
+$env:AGENTIX_PACKAGE = "@so-nerdyy/agentix@2.1.0"
 irm https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.ps1 | iex
 ```
 
 ```sh
-AGENTIX_PACKAGE=agentix@2.1.0 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
+AGENTIX_PACKAGE=@so-nerdyy/agentix@2.1.0 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
 ```
 
 For versioned GitHub release installs, set `AGENTIX_VERSION`; the installer downloads the release manifest,
@@ -62,14 +62,14 @@ For verified tarball installs, generate a release manifest and pass the expected
 
 ```powershell
 npm run release:manifest
-$env:AGENTIX_PACKAGE='.release/agentix-2.1.0.tgz'
+$env:AGENTIX_PACKAGE='.release/so-nerdyy-agentix-2.1.0.tgz'
 $env:AGENTIX_EXPECTED_SHA256='<sha256 from manifest>'
 .\install.ps1
 ```
 
 ```bash
 npm run release:manifest
-AGENTIX_PACKAGE=.release/agentix-2.1.0.tgz \
+AGENTIX_PACKAGE=.release/so-nerdyy-agentix-2.1.0.tgz \
 AGENTIX_EXPECTED_SHA256=<sha256 from manifest> \
 sh install.sh
 ```

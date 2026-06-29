@@ -192,7 +192,8 @@ describe("Powerhouse restored runtime", () => {
     expect(Array.isArray(doctor.checks)).toBe(true);
     expect((doctor.checks as Array<{ id: string }>).some((check) => check.id === "sandbox.isolation")).toBe(true);
     expect((doctor.checks as Array<{ id: string }>).some((check) => check.id === "install.assets")).toBe(true);
-    expect((doctor.install as { packageName?: string; packageVersion?: string }).packageName).toBe("agentix");
+    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf-8")) as { name: string; version: string };
+    expect((doctor.install as { packageName?: string; packageVersion?: string }).packageName).toBe(pkg.name);
     expect((doctor.install as { packageName?: string; packageVersion?: string }).packageVersion).toMatch(/\d+\.\d+\.\d+/);
     const readiness = runtime.readiness() as {
       status: string;
@@ -241,22 +242,23 @@ describe("Powerhouse restored runtime", () => {
   it("accepts a verified public-release proof file for readiness", () => {
     const dir = tempDir("agentix-release-proof-");
     const proofPath = join(dir, "proof.json");
-    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf-8")) as { version: string };
+    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf-8")) as { name: string; version: string };
+    const artifactBase = pkg.name.replace(/^@/, "").replace(/[\/\\]/g, "-");
     const previousProof = process.env.AGENTIX_PUBLIC_RELEASE_PROOF;
     process.env.AGENTIX_PUBLIC_RELEASE_PROOF = proofPath;
     writeFileSync(proofPath, JSON.stringify({
       ok: true,
-      package: "agentix",
+      package: pkg.name,
       version: pkg.version,
       installerDryRun: true,
       verifiedAt: new Date().toISOString(),
       release: {
         sha256: "abc123",
-        manifestUrl: `https://example.test/agentix-${pkg.version}-manifest.json`,
-        tarballUrl: `https://example.test/agentix-${pkg.version}.tgz`,
+        manifestUrl: `https://example.test/${artifactBase}-${pkg.version}-manifest.json`,
+        tarballUrl: `https://example.test/${artifactBase}-${pkg.version}.tgz`,
       },
       npm: {
-        tarball: `https://registry.npmjs.org/agentix/-/agentix-${pkg.version}.tgz`,
+        tarball: `https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/-/${artifactBase}-${pkg.version}.tgz`,
       },
     }), "utf-8");
     const runtime = new LocalAgentixRuntime();
@@ -282,12 +284,12 @@ describe("Powerhouse restored runtime", () => {
   it("accepts a verified live-LLM proof file for readiness", () => {
     const dir = tempDir("agentix-llm-proof-");
     const proofPath = join(dir, "proof.json");
-    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf-8")) as { version: string };
+    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf-8")) as { name: string; version: string };
     const previousProof = process.env.AGENTIX_LLM_PROOF;
     process.env.AGENTIX_LLM_PROOF = proofPath;
     writeFileSync(proofPath, JSON.stringify({
       ok: true,
-      package: "agentix",
+      package: pkg.name,
       version: pkg.version,
       verifiedAt: new Date().toISOString(),
       provider: "openai",
@@ -319,26 +321,27 @@ describe("Powerhouse restored runtime", () => {
     const dir = tempDir("agentix-public-ready-");
     const releaseProofPath = join(dir, "release-proof.json");
     const llmProofPath = join(dir, "llm-proof.json");
-    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf-8")) as { version: string };
+    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf-8")) as { name: string; version: string };
+    const artifactBase = pkg.name.replace(/^@/, "").replace(/[\/\\]/g, "-");
     const previousReleaseProof = process.env.AGENTIX_PUBLIC_RELEASE_PROOF;
     const previousLlmProof = process.env.AGENTIX_LLM_PROOF;
     process.env.AGENTIX_PUBLIC_RELEASE_PROOF = releaseProofPath;
     process.env.AGENTIX_LLM_PROOF = llmProofPath;
     writeFileSync(releaseProofPath, JSON.stringify({
       ok: true,
-      package: "agentix",
+      package: pkg.name,
       version: pkg.version,
       installerDryRun: true,
       verifiedAt: new Date().toISOString(),
       release: {
         sha256: "abc123",
-        manifestUrl: `https://example.test/agentix-${pkg.version}-manifest.json`,
-        tarballUrl: `https://example.test/agentix-${pkg.version}.tgz`,
+        manifestUrl: `https://example.test/${artifactBase}-${pkg.version}-manifest.json`,
+        tarballUrl: `https://example.test/${artifactBase}-${pkg.version}.tgz`,
       },
     }), "utf-8");
     writeFileSync(llmProofPath, JSON.stringify({
       ok: true,
-      package: "agentix",
+      package: pkg.name,
       version: pkg.version,
       verifiedAt: new Date().toISOString(),
       provider: "openai",
@@ -1204,7 +1207,7 @@ describe("Powerhouse restored runtime", () => {
 
     const manifest = JSON.parse(readFileSync(join(bundle.bundleDir, "manifest.json"), "utf-8"));
     const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf-8"));
-    expect(manifest.packageName).toBe("agentix");
+    expect(manifest.packageName).toBe(pkg.name);
     expect(manifest.version).toBe(pkg.version);
     expect(manifest.installRoot).toBeTruthy();
     expect(manifest.counts.tasks).toBeGreaterThanOrEqual(1);

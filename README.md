@@ -9,7 +9,7 @@ Agentix is a Hermes-class agent platform with an Agentix-owned backend.
 ## Quick Start
 
 ```powershell
-npm install -g agentix
+npm install -g @so-nerdyy/agentix
 agentix setup
 agentix
 ```

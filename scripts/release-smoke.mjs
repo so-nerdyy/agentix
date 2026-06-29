@@ -20,12 +20,14 @@ const keepArtifacts = process.env.AGENTIX_SMOKE_KEEP === "1";
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const python = process.platform === "win32" ? "python" : "python3";
 const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf-8"));
+const releaseArtifactBase = packageJson.name.replace(/^@/, "").replace(/[\/\\]/g, "-");
 const agentixCommand = process.platform === "win32"
   ? join(prefixDir, "agentix.cmd")
   : join(prefixDir, "bin", "agentix");
+const packagePathParts = packageJson.name.split("/");
 const installedPackageRoot = process.platform === "win32"
-  ? join(prefixDir, "node_modules", "agentix")
-  : join(prefixDir, "lib", "node_modules", "agentix");
+  ? join(prefixDir, "node_modules", ...packagePathParts)
+  : join(prefixDir, "lib", "node_modules", ...packagePathParts);
 const agentixEntrypoint = join(installedPackageRoot, "bin", "agentix.js");
 
 function shouldUseShell(command) {
@@ -335,7 +337,7 @@ async function smokeInstallerChecksum(tarball, expectedSha256) {
 
 async function smokeVersionedReleaseInstall(tarball, expectedSha256, tarballName) {
   log("checking versioned release installer download");
-  const manifestName = `agentix-${packageJson.version}-manifest.json`;
+  const manifestName = `${releaseArtifactBase}-${packageJson.version}-manifest.json`;
   const manifest = JSON.stringify({
     package: packageJson.name,
     version: packageJson.version,

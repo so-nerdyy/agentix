@@ -10,6 +10,8 @@ const root = resolve(dirname(__filename), "..");
 const outDir = resolve(process.env.AGENTIX_RELEASE_DIR || join(root, ".release"));
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf-8"));
+const artifactBase = (process.env.AGENTIX_RELEASE_ARTIFACT_BASE
+  || pkg.name.replace(/^@/, "").replace(/[\/\\]/g, "-"));
 
 function run(command, args) {
   const result = spawnSync(command, args, {
@@ -68,7 +70,7 @@ const manifest = {
   },
 };
 
-const manifestPath = join(outDir, `${pkg.name}-${pkg.version}-manifest.json`);
+const manifestPath = join(outDir, `${artifactBase}-${pkg.version}-manifest.json`);
 writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
 
 console.log(`Wrote ${manifestPath}`);
