@@ -2023,6 +2023,9 @@ export class LocalAgentixRuntime {
       if (!proof.release?.sha256 || !proof.release.manifestUrl || !proof.release.tarballUrl) {
         return { ok: false, path: proofPath, detail: "proof missing release manifest/tarball/SHA256 details" };
       }
+      if (!proof.npm) {
+        return { ok: false, path: proofPath, detail: "proof missing npm registry metadata" };
+      }
       if (!proof.installerDryRun) {
         return { ok: false, path: proofPath, detail: "proof did not verify installer dry-run" };
       }
