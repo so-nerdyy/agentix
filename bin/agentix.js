@@ -7,6 +7,7 @@ import { fileURLToPath } from "url";
 import { dirname, join, resolve } from "path";
 import os from "os";
 import http from "http";
+import net from "net";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -78,6 +79,7 @@ const AGENTIX_COMMAND_HELP = new Set(["gateway", "logs"]);
 const AGENTIX_HERMES_HOME = process.env.HERMES_HOME
   ? resolve(process.env.HERMES_HOME)
   : join(WORKSPACE_ROOT, ".agentix", "hermes");
+let activeBridgeUrl = null;
 
 function buildLauncherHelp() {
   return [
@@ -303,11 +305,53 @@ const VENV_ROOT = resolve(
 );
 
 function bridgeUrl() {
+  if (activeBridgeUrl) {
+    return activeBridgeUrl;
+  }
   return (
     process.env.AGENTIX_BRIDGE_URL ||
     process.env.HERMES_BRIDGE_URL ||
     "http://127.0.0.1:3456"
   );
+}
+
+function explicitBridgeUrlConfigured() {
+  return Boolean(process.env.AGENTIX_BRIDGE_URL || process.env.HERMES_BRIDGE_URL);
+}
+
+function portFromBridgeUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.port) {
+      return Number(parsed.port);
+    }
+    return parsed.protocol === "https:" ? 443 : 80;
+  } catch {
+    return 3456;
+  }
+}
+
+function urlForPort(port) {
+  return `http://127.0.0.1:${port}`;
+}
+
+function findFreePort() {
+  return new Promise((resolvePort, rejectPort) => {
+    const server = net.createServer();
+    server.unref();
+    server.on("error", rejectPort);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      server.close(() => {
+        if (port > 0) {
+          resolvePort(port);
+        } else {
+          rejectPort(new Error("failed to allocate a local bridge port"));
+        }
+      });
+    });
+  });
 }
 
 function parseEnvFile(file) {
@@ -462,7 +506,7 @@ function buildRuntimeEnv(extra = {}) {
   return env;
 }
 
-function healthCheck(timeoutMs = 2000) {
+function healthCheck(timeoutMs = 2000, url = bridgeUrl()) {
   return new Promise((resolveHealth) => {
     let settled = false;
     const finish = (healthy) => {
@@ -473,7 +517,7 @@ function healthCheck(timeoutMs = 2000) {
       resolveHealth(healthy);
     };
 
-    const req = http.get(`${bridgeUrl()}/health`, { timeout: timeoutMs }, (res) => {
+    const req = http.get(`${url}/health`, { timeout: timeoutMs }, (res) => {
       const healthy = res.statusCode === 200;
       res.resume();
       res.on("end", () => finish(healthy));
@@ -487,10 +531,10 @@ function healthCheck(timeoutMs = 2000) {
   });
 }
 
-async function waitForBridgeHealth(timeoutMs = 10000) {
+async function waitForBridgeHealth(timeoutMs = 10000, url = bridgeUrl()) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (await healthCheck(1000)) {
+    if (await healthCheck(1000, url)) {
       return true;
     }
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
@@ -572,16 +616,30 @@ async function ensureBridgeRunning() {
     return;
   }
 
+  const preferredUrl = bridgeUrl();
+  const port = explicitBridgeUrlConfigured()
+    ? portFromBridgeUrl(preferredUrl)
+    : await findFreePort();
+  const url = explicitBridgeUrlConfigured() ? preferredUrl : urlForPort(port);
+  activeBridgeUrl = url;
+
   const child = spawn("node", [resolve(PROJECT_ROOT, "dist", "bridge", "entry.js")], {
     cwd: WORKSPACE_ROOT,
     detached: true,
     stdio: "ignore",
-    env: buildRuntimeEnv(),
+    env: buildRuntimeEnv({
+      AGENTIX_BRIDGE_PORT: String(port),
+      AGENTIX_BRIDGE_URL: url,
+      HERMES_BRIDGE_URL: url,
+    }),
   });
   child.unref();
 
-  if (!(await waitForBridgeHealth(10000))) {
-    throw new Error("Agentix bridge failed to start");
+  if (!(await waitForBridgeHealth(10000, url))) {
+    if (!explicitBridgeUrlConfigured() && url !== preferredUrl) {
+      throw new Error(`Agentix bridge failed to start on fallback port ${port}`);
+    }
+    throw new Error(`Agentix bridge failed to start at ${url}`);
   }
 }
 

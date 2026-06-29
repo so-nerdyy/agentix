@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { tmpdir } from "node:os";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -31,6 +32,8 @@ export const HERMES_ROOT = resolveHermesRoot();
 
 export const DATA_DIR = process.env.AGENTIX_DATA_DIR
   ? resolve(process.env.AGENTIX_DATA_DIR)
+  : process.env.VITEST && WORKSPACE_ROOT === INSTALL_ROOT
+    ? resolve(tmpdir(), "agentix-vitest", String(process.pid), "data")
   : resolve(WORKSPACE_ROOT, "data");
 
 export const PATHS = {
