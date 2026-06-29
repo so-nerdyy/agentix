@@ -57,6 +57,7 @@
     "build:frontend": "node frontend/build.mjs",
     "prepack": "npm run build",
     "release:manifest": "node scripts/release-manifest.mjs",
+    "release:preflight": "node scripts/release-preflight.mjs",
     "release:verify": "node scripts/verify-public-release.mjs",
     "verify:llm": "node scripts/verify-live-llm.mjs",
     "smoke:release": "node scripts/release-smoke.mjs",
