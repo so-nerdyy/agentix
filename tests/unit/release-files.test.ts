@@ -50,6 +50,8 @@ describe("release packaging files", () => {
     expect(llmVerifier).toContain("/v1/messages");
     expect(smoke).toContain("public-release-proof.json");
     expect(releaseWorkflow).toContain("npm publish --provenance");
+    expect(releaseWorkflow).toContain("Validate npm authentication");
+    expect(releaseWorkflow).toContain("NPM_TOKEN secret is required");
     expect(releaseWorkflow).toContain(".release/*-manifest.json");
     expect(releaseWorkflow).toContain("npm run release:verify -- --out data/release/public-release-proof.json");
     expect(releaseWorkflow).toContain("npm run verify:llm -- --out data/release/live-llm-proof.json");
