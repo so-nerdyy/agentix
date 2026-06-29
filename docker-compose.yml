@@ -1,0 +1,32 @@
+services:
+  agentix:
+    build:
+      context: .
+    image: agentix:local
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+      - "3456:3456"
+    environment:
+      AGENTIX_SESSION_TOKEN: ${AGENTIX_SESSION_TOKEN:?Set AGENTIX_SESSION_TOKEN before running docker compose}
+      AGENTIX_PROVIDER: ${AGENTIX_PROVIDER:-openai}
+      AGENTIX_MODEL: ${AGENTIX_MODEL:-gpt-4o-mini}
+      AGENTIX_LLM_API_KEY: ${AGENTIX_LLM_API_KEY:-}
+      AGENTIX_SANDBOX_MODE: ${AGENTIX_SANDBOX_MODE:-local}
+      AGENTIX_DATA_DIR: /data
+      AGENTIX_WORKSPACE_DIR: /workspace
+      AGENTIX_INBOX_PORT: "3000"
+      AGENTIX_BRIDGE_PORT: "3456"
+    volumes:
+      - agentix-data:/data
+      - agentix-workspace:/workspace
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  agentix-data:
+  agentix-workspace:

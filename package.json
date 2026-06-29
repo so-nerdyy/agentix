@@ -1,0 +1,81 @@
+{
+  "name": "@so-nerdyy/agentix",
+  "version": "2.1.0",
+  "description": "Agentix CLI - AI coding agent with Hermes frontend",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "agentix": "./bin/agentix.js"
+  },
+  "keywords": [
+    "agentix",
+    "hermes",
+    "cli",
+    "agent",
+    "ai",
+    "coding"
+  ],
+  "files": [
+    "bin",
+    "dist",
+    "scripts",
+    "frontend",
+    "hermes-agent/*.py",
+    "hermes-agent/hermes",
+    "hermes-agent/pyproject.toml",
+    "hermes-agent/MANIFEST.in",
+    "hermes-agent/LICENSE",
+    "hermes-agent/README.md",
+    "hermes-agent/AGENTS.md",
+    "hermes-agent/.env.example",
+    "hermes-agent/cli-config.yaml.example",
+    "hermes-agent/acp_adapter",
+    "hermes-agent/acp_registry",
+    "hermes-agent/agent",
+    "hermes-agent/assets",
+    "hermes-agent/cron",
+    "hermes-agent/gateway",
+    "hermes-agent/hermes_cli",
+    "hermes-agent/locales",
+    "hermes-agent/optional-skills",
+    "hermes-agent/plugins",
+    "hermes-agent/providers",
+    "hermes-agent/skills",
+    "hermes-agent/tools",
+    "hermes-agent/tui_gateway",
+    "README.md",
+    "LICENSE",
+    "install.ps1",
+    "install.sh",
+    "docs"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc && node frontend/build.mjs",
+    "build:frontend": "node frontend/build.mjs",
+    "prepack": "npm run build",
+    "release:manifest": "node scripts/release-manifest.mjs",
+    "release:verify": "node scripts/verify-public-release.mjs",
+    "verify:llm": "node scripts/verify-live-llm.mjs",
+    "smoke:release": "node scripts/release-smoke.mjs",
+    "test:unit": "vitest run tests/unit",
+    "test": "vitest run tests/unit",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@fastify/cors": "^9.0.1",
+    "@fastify/static": "^7.0.4",
+    "fastify": "^4.28.1",
+    "undici": "^6.19.7"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "typescript": "^5.5.3",
+    "vitest": "^1.6.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
