@@ -1,4 +1,4 @@
-// Shell entry point - starts the HermesShell.
+// Shell entry point - starts the Agentix interactive shell.
 import { HermesShell } from "./HermesShell.js";
 
 async function main() {

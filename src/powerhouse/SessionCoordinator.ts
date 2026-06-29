@@ -42,6 +42,15 @@ export class SessionCoordinator {
     return this.list().filter((session) => session.status === "active");
   }
 
+  count(): number {
+    if (!existsSync(this.dir)) return 0;
+    try {
+      return readdirSync(this.dir).filter((f) => f.endsWith(".json")).length;
+    } catch {
+      return this.byId.size;
+    }
+  }
+
   setStatus(id: string, status: Session["status"]): void {
     const s = this.byId.get(id);
     if (!s) return;

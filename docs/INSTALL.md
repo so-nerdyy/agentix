@@ -3,7 +3,7 @@
 ## Requirements
 
 - Node.js 18 or newer
-- Python 3 available on `PATH` for the Hermes frontend launcher. Agentix checks
+- Python 3 available on `PATH` for bundled compatibility commands. Agentix checks
   `AGENTIX_PYTHON`, `PYTHON`, Windows `py -3`, `python3`, then `python`.
 - A valid model provider and API key for interactive use
 
@@ -88,7 +88,7 @@ For release validation, run `npm run smoke:release` after build and tests. It pa
 
 ## First Run
 
-`agentix setup` writes workspace-local Hermes frontend configuration under `.agentix/hermes/`, syncs non-secret backend defaults into `data/config.json`, and prepares the shell for the current folder. The default `agentix` command opens the interactive Hermes-style frontend.
+`agentix setup` writes workspace-local API secrets to `.env.local`, syncs non-secret backend defaults into `data/config.json`, and prepares the shell for the current folder. The default `agentix` command opens the interactive Agentix shell.
 Use `agentix dashboard` to start the web control surface by itself. The full backend + dashboard stack is served by `agentix server` at `http://127.0.0.1:3000/ui/` by default.
 
 ## Update Path

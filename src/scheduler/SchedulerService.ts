@@ -281,7 +281,7 @@ export class SchedulerService {
 
   private assembleStimulus(job: ScheduledJob, scriptOutput: string): string {
     const skillHint = job.skills?.length
-      ? `Use these Hermes skills if relevant: ${job.skills.join(", ")}.\n\n`
+      ? `Use these Agentix skills if relevant: ${job.skills.join(", ")}.\n\n`
       : "";
     if (!scriptOutput) return `${skillHint}${job.stimulus}`;
     return [

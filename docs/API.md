@@ -36,4 +36,4 @@ Core endpoint groups:
 - Pi agent profiles: `/agents/profiles`, `/agents/profiles/{id}/enable`, `/agents/profiles/{id}/disable`. Dynamic profiles run configured commands as approval-gated Pi agents and receive task JSON on stdin.
 - Runtime support: `/doctor`, `/usage`, `/logs`, `/audit`, `/support/bundle`, `/events`
 
-Use `agentix server` for the full dashboard/API runtime, or `agentix --agentix-cli server` when bypassing the Hermes frontend wrapper.
+Use `agentix server` for the full dashboard/API runtime, or `agentix --agentix-cli server` when bypassing the Agentix shell wrapper.

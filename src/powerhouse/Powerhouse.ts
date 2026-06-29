@@ -77,19 +77,24 @@ export class Powerhouse {
     });
   }
 
-  start(): void {
+  start(opts: { recover?: boolean } = {}): void {
     if (this.started) return;
+    const recover = opts.recover ?? true;
     EventBus.emit("powerhouse:starting", {});
-    this.sessions.recover();
-    const recoveredTasks = this.taskStore.recoverOpen().map((task) => {
-      if (task.status === "running") {
-        task.status = "queued";
-        task.startedAt = undefined;
-        this.taskStore.upsert(task);
-      }
-      return task;
-    });
-    this.queue.hydrate(recoveredTasks);
+    const recoveredTasks = recover
+      ? this.taskStore.recoverOpen().map((task) => {
+          if (task.status === "running") {
+            task.status = "queued";
+            task.startedAt = undefined;
+            this.taskStore.upsert(task);
+          }
+          return task;
+        })
+      : [];
+    if (recover) {
+      this.sessions.recover();
+      this.queue.hydrate(recoveredTasks);
+    }
     this.registerDefaultAgents();
     for (const task of recoveredTasks) {
       if (task.status === "awaiting-approval") {
@@ -105,7 +110,10 @@ export class Powerhouse {
     });
     EventBus.emit("powerhouse:started", {});
     if (recoveredTasks.length > 0) {
-      void this.resumeRecoveredWork(recoveredTasks);
+      const recovery = setTimeout(() => {
+        void this.resumeRecoveredWork(recoveredTasks);
+      }, 0);
+      recovery.unref?.();
     }
   }
 
@@ -673,7 +681,7 @@ export class Powerhouse {
       const existing = this.sessions.get(sessionId);
       if (existing) return existing;
     }
-    return this.createSession({ source: "hermes-frontend" });
+    return this.createSession({ source: "agentix-shell" });
   }
 
   private createTask(sessionId: string, step: PlanStep, planId: string): Task {
@@ -724,7 +732,7 @@ export class Powerhouse {
     return pending
       .map((task) => [
         `Approval required for ${task.kind} task ${task.id}.`,
-        "Use the Hermes approval command or call the Agentix approval endpoint to continue.",
+        "Use the Agentix approval command or call the Agentix approval endpoint to continue.",
         `Payload: ${JSON.stringify(task.payload, null, 2)}`,
       ].join("\n"))
       .join("\n\n");

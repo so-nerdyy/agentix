@@ -1,7 +1,7 @@
 {
   "name": "@so-nerdyy/agentix",
   "version": "2.1.0",
-  "description": "Agentix CLI - AI coding agent with Hermes frontend",
+  "description": "Agentix CLI - AI coding agent with Agentix shell and orchestration backend",
   "type": "module",
   "license": "MIT",
   "bin": {
@@ -9,7 +9,6 @@
   },
   "keywords": [
     "agentix",
-    "hermes",
     "cli",
     "agent",
     "ai",

@@ -428,7 +428,7 @@ async function smokeCli() {
   assert(version.stdout.includes("Agentix v"), "agentix version did not print version");
 
   const help = await run(agentixCommand, ["help"], { timeoutMs: 30_000 });
-  assert(help.stdout.includes("open the Hermes-style interactive shell"), "agentix help missing shell launch help");
+  assert(help.stdout.includes("open the Agentix interactive shell"), "agentix help missing shell launch help");
   assert(help.stdout.includes("server"), "agentix help missing server command");
   assert(help.stdout.includes("tasks, task"), "agentix help missing task commands");
   assert(help.stdout.includes("approvals, approval"), "agentix help missing approval commands");
@@ -614,7 +614,7 @@ async function smokeServer() {
     assert(openapi.openapi === "3.1.0", "inbox OpenAPI contract missing");
     assert(openapi.paths["/execute/stream"], "OpenAPI contract missing execute stream path");
 
-    log("checking installed Hermes Python entrypoints");
+    log("checking installed Agentix compatibility Python entrypoints");
     await installHermesPythonDependencies();
     const hermesEnv = {
       ...serverEnv,
@@ -655,12 +655,12 @@ async function smokeServer() {
       },
       timeoutMs: 120_000,
     });
-    assert(syncConfig.stdout.includes("\"model\": \"release-smoke-model\""), "Hermes setup/model sync did not report selected model");
+    assert(syncConfig.stdout.includes("\"model\": \"release-smoke-model\""), "Agentix setup/model compatibility sync did not report selected model");
     const syncedRuntimeConfig = JSON.parse(readFileSync(join(syncData, "config.json"), "utf-8"));
-    assert(syncedRuntimeConfig.model === "release-smoke-model", "Hermes setup/model sync did not persist model");
-    assert(syncedRuntimeConfig.provider === "openai", "Hermes setup/model sync did not persist provider");
-    assert(syncedRuntimeConfig.baseUrl === "http://127.0.0.1:7777/v1", "Hermes setup/model sync did not persist base URL");
-    assert(!("llmApiKey" in syncedRuntimeConfig), "Hermes setup/model sync persisted API secret");
+    assert(syncedRuntimeConfig.model === "release-smoke-model", "Agentix setup/model compatibility sync did not persist model");
+    assert(syncedRuntimeConfig.provider === "openai", "Agentix setup/model compatibility sync did not persist provider");
+    assert(syncedRuntimeConfig.baseUrl === "http://127.0.0.1:7777/v1", "Agentix setup/model compatibility sync did not persist base URL");
+    assert(!("llmApiKey" in syncedRuntimeConfig), "Agentix setup/model compatibility sync persisted API secret");
 
     const installedOneshotPrompt = "release smoke installed oneshot delegation";
     const installedOneshot = await run(agentixCommand, [
@@ -671,7 +671,7 @@ async function smokeServer() {
       env: hermesEnv,
       timeoutMs: 120_000,
     });
-    assert(installedOneshot.stdout.includes("Agentix is running with the Hermes frontend and Agentix backend."), "installed agentix -z did not route through Agentix backend");
+    assert(installedOneshot.stdout.includes("Agentix is running with the Agentix shell and backend."), "installed agentix -z did not route through Agentix backend");
     assert(installedOneshot.stdout.includes(`Input: ${installedOneshotPrompt}`), "installed agentix -z output did not preserve input");
 
     const installedUsage = await run(agentixCommand, ["usage"], {
@@ -686,7 +686,11 @@ async function smokeServer() {
       env: hermesEnv,
       timeoutMs: 120_000,
     });
-    assert(configSet.stdout.includes("Set Agentix config provider=openai"), "installed agentix config set did not route through Agentix backend");
+    const configSetResult = JSON.parse(configSet.stdout);
+    assert(
+      configSetResult.ok === true && configSetResult.key === "provider" && configSetResult.value === "openai",
+      "installed agentix config set did not route through Agentix backend",
+    );
     const configShow = await run(agentixCommand, ["config", "show"], {
       cwd: smokeRoot,
       env: hermesEnv,
@@ -702,7 +706,7 @@ async function smokeServer() {
       env: hermesEnv,
       timeoutMs: 120_000,
     });
-    assert(oneshot.stdout.includes("Agentix is running with the Hermes frontend and Agentix backend."), "oneshot did not route through Agentix backend");
+    assert(oneshot.stdout.includes("Agentix is running with the Agentix shell and backend."), "oneshot did not route through Agentix backend");
     assert(oneshot.stdout.includes("Input: release smoke oneshot delegation"), "oneshot output did not preserve streamed content");
 
     const tuiProxy = await run(python, [
@@ -714,7 +718,7 @@ async function smokeServer() {
       timeoutMs: 120_000,
     });
     const tuiProxyOutput = `${tuiProxy.stdout}\n${tuiProxy.stderr}`;
-    assert(tuiProxyOutput.includes("Agentix is running with the Hermes frontend and Agentix backend."), "TUI proxy did not route through Agentix backend");
+    assert(tuiProxyOutput.includes("Agentix is running with the Agentix shell and backend."), "TUI proxy did not route through Agentix backend");
     assert(tuiProxyOutput.includes("Input: release smoke tui proxy delegation"), "TUI proxy output did not preserve streamed content");
 
     const cronAdapter = await run(python, [
@@ -732,8 +736,8 @@ async function smokeServer() {
       env: hermesEnv,
       timeoutMs: 120_000,
     });
-    assert(cronAdapter.stdout.includes("Created Agentix scheduled job"), "Hermes cron adapter did not create an Agentix scheduler job");
-    assert(cronAdapter.stdout.includes("release smoke cli cron"), "Hermes cron adapter list did not include created job");
+    assert(cronAdapter.stdout.includes("Created Agentix scheduled job"), "Agentix cron compatibility adapter did not create an Agentix scheduler job");
+    assert(cronAdapter.stdout.includes("release smoke cli cron"), "Agentix cron compatibility adapter list did not include created job");
 
     const gatewayList = await run(agentixCommand, ["gateway", "list"], {
       cwd: smokeRoot,
@@ -771,7 +775,7 @@ async function smokeServer() {
       env: hermesEnv,
       timeoutMs: 120_000,
     });
-    assert(memoryReset.stdout.includes("Removed"), "Hermes memory reset did not route through Agentix backend");
+    assert(memoryReset.stdout.includes("Removed"), "Agentix memory compatibility reset did not route through Agentix backend");
 
     const execution = await fetchJson(`${inboxUrl}/execute`, {
       method: "POST",

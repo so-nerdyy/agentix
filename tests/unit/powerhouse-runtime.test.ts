@@ -1030,7 +1030,7 @@ describe("Powerhouse restored runtime", () => {
     powerhouse.stop();
   });
 
-  it("supports Hermes-style cron schedules and records run metadata", async () => {
+  it("supports Agentix cron schedules and records run metadata", async () => {
     const powerhouse = makePowerhouse();
     const dir = tempDir("agentix-cron-scheduler-");
     const scheduler = new SchedulerService(

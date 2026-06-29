@@ -18,7 +18,7 @@ export class ConversationAgent extends BasePIAgent {
         role: "system",
         content: [
           "You are Agentix, an autonomous software agent backend.",
-          "The Hermes frontend owns the terminal UI, setup, commands, and integrations.",
+          "The Agentix shell owns the terminal UI, setup, commands, and integrations.",
           "The Agentix backend owns Powerhouse orchestration, Symphony planning, Pi agents, memory, approvals, validation, and healing.",
           "Answer the user directly and be concise unless the task requires detail.",
         ].join(" "),
@@ -41,7 +41,7 @@ export class ConversationAgent extends BasePIAgent {
     }
 
     const lines = [
-      "Agentix is running with the Hermes frontend and Agentix backend.",
+      "Agentix is running with the Agentix shell and backend.",
       "",
       "Backend path:",
       "- Powerhouse accepted the task.",

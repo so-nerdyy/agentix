@@ -2,7 +2,7 @@
 
 ## Runtime Components
 
-- Hermes frontend: user-facing shell, setup, update, cron, gateway, model, and command UX
+- Agentix shell: user-facing shell, setup, update, cron, gateway, model, options, and command UX
 - Agentix backend: bridge/API, task orchestration, memory, approvals, validation, and Pi workers
 - Data directory: persistent workspace state under `AGENTIX_DATA_DIR` or `./data`
 
@@ -17,16 +17,17 @@
 - Sessions are stored under the data directory
 - Memory and sandbox artifacts are stored under the data directory
 - By default, `agentix` treats the current working directory as the workspace and stores state in `./data`
-- By default, Hermes frontend config for that workspace is stored in `.agentix/hermes/`
-- Set `AGENTIX_DATA_DIR` to move persistent state, `AGENTIX_HERMES_VENV` to move the bundled Hermes Python environment, or `AGENTIX_PYTHON` to force a specific Python 3 executable
+- By default, Agentix setup writes secrets to `.env.local` and non-secret defaults to `data/config.json`
+- Set `AGENTIX_DATA_DIR` to move persistent state, `AGENTIX_HERMES_VENV` to move bundled compatibility internals, or `AGENTIX_PYTHON` to force a specific Python 3 executable
 
-## Hermes Command Delegation
+## Agentix Command Surface
 
-When `agentix` launches Hermes, it sets `AGENTIX_FRONTEND=hermes`. In this mode Hermes command UX delegates backend-owned state to Agentix:
+When `agentix` launches, it starts the Agentix shell and connects it to the Agentix bridge:
 
-- `agentix`, `agentix chat`, and `agentix -z/--oneshot` execute prompts through the Agentix bridge
-- `agentix --tui` uses the Hermes TUI transport but submits prompts through an Agentix backend proxy
-- `agentix setup` and `agentix model` use Hermes provider/model UX, then sync non-secret backend defaults into Agentix
+- `agentix` opens the Agentix shell
+- `agentix -z/--oneshot` executes prompts through the Agentix bridge
+- `agentix setup` and `agentix model` configure provider/model/base URL/API key for Agentix
+- `agentix options` lists provider/model/environment options
 - `agentix sessions list|stats|export|delete`
 - `agentix memory status|search|consolidate`
 - `agentix tools list`
@@ -34,7 +35,7 @@ When `agentix` launches Hermes, it sets `AGENTIX_FRONTEND=hermes`. In this mode 
 - `agentix cron`
 - `agentix --agentix-cli plans` and shell `/plans` inspect Agentix Symphony plans
 
-Set `AGENTIX_DISABLE_BACKEND_COMMANDS=1` only for debugging upstream Hermes command behavior. Set `AGENTIX_DISABLE_BACKEND_CHAT=1` only for debugging upstream Hermes prompt execution.
+Bundled compatibility internals are implementation detail, not the public command surface.
 
 ## Planning
 
@@ -62,7 +63,7 @@ Inbound gateway webhooks use `POST /gateway/<id>/inbound` and must include `X-Ag
 
 - `GET /health` on the inbox server
 - `GET /health` on the bridge server
-- `agentix doctor` for Hermes diagnostics; `agentix --agentix-cli doctor` or `GET /doctor` for Agentix backend diagnostics
+- `agentix doctor`, `agentix --agentix-cli doctor`, or `GET /doctor` for Agentix diagnostics
 - `agentix readiness` reports private-beta and public-release gates; public release readiness stays false until live credentials and external release publication are verified
 - If `AGENTIX_SESSION_TOKEN` is configured, it acts as an admin bearer token for all non-health control endpoints
 - Workspace API tokens can be created with `agentix --agentix-cli auth create [viewer|operator|admin] [label]`; plaintext is printed once and hashes persist under `data/auth/tokens.json`
@@ -96,7 +97,7 @@ npm run release:verify -- --out data/release/public-release-proof.json
 agentix readiness
 ```
 
-The release preflight checks that the repository is public, npm authentication is configured, the npm version is publishable, and the live LLM secret is present when `--require-llm` is used. The release smoke packs the npm artifact, installs it into an isolated temporary prefix, proves installer SHA256 success and tamper failure, runs `agentix version`, `agentix help`, `agentix readiness`, and `agentix support`, starts the installed server, verifies both health endpoints, loads `/ui/`, executes a task through the Hermes frontend adapter, verifies Hermes config sync, verifies gateway commands, runs a scheduler job, and creates a support bundle. The release manifest writes a tarball checksum file under `.release/`; use `AGENTIX_EXPECTED_SHA256` with `install.sh` or `install.ps1` for verified tarball installs. `npm run verify:llm` makes a live provider call and writes `data/release/live-llm-proof.json`; `agentix readiness` requires that proof for public-release readiness. After the tag is published, `npm run release:verify` checks npm metadata, GitHub release manifest, release tarball SHA256, and installer dry-run. With `--out data/release/public-release-proof.json`, `agentix readiness` can verify the public release proof instead of relying on a manual claim; the proof must include npm registry metadata and public GitHub release assets. Tag pushes matching `v*.*.*` run `.github/workflows/release.yml`, publish with `npm publish --provenance`, upload the tarball plus manifest as GitHub release assets, generate public release proof, optionally generate live LLM proof when the `AGENTIX_LLM_API_KEY` secret exists, and upload proof JSON files as workflow artifacts plus release assets.
+The release preflight checks that the repository is public, npm authentication is configured, the npm version is publishable, and the live LLM secret is present when `--require-llm` is used. The release smoke packs the npm artifact, installs it into an isolated temporary prefix, proves installer SHA256 success and tamper failure, runs `agentix version`, `agentix help`, `agentix readiness`, and `agentix support`, starts the installed server, verifies both health endpoints, loads `/ui/`, executes a task through the Agentix shell adapter, verifies Agentix config sync, verifies gateway commands, runs a scheduler job, and creates a support bundle. The release manifest writes a tarball checksum file under `.release/`; use `AGENTIX_EXPECTED_SHA256` with `install.sh` or `install.ps1` for verified tarball installs. `npm run verify:llm` makes a live provider call and writes `data/release/live-llm-proof.json`; `agentix readiness` requires that proof for public-release readiness. After the tag is published, `npm run release:verify` checks npm metadata, GitHub release manifest, release tarball SHA256, and installer dry-run. With `--out data/release/public-release-proof.json`, `agentix readiness` can verify the public release proof instead of relying on a manual claim; the proof must include npm registry metadata and public GitHub release assets. Tag pushes matching `v*.*.*` run `.github/workflows/release.yml`, publish with `npm publish --provenance`, upload the tarball plus manifest as GitHub release assets, generate public release proof, optionally generate live LLM proof when the `AGENTIX_LLM_API_KEY` secret exists, and upload proof JSON files as workflow artifacts plus release assets.
 
 ## Support Bundle
 

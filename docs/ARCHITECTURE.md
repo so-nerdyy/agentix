@@ -2,12 +2,12 @@
 
 Agentix is split into two layers:
 
-## Hermes Layer
+## Agentix Shell Layer
 
 - Owns the user-facing shell
 - Handles setup, model selection, update checks, cron, gateway, skills, tools, and other interactive commands
 - Provides the terminal UX users launch with `agentix`
-- Delegates backend-owned commands to Agentix when launched with `AGENTIX_FRONTEND=hermes`
+- Uses bundled compatibility internals only where needed for legacy integrations
 
 ## Agentix Backend
 
@@ -16,13 +16,13 @@ Agentix is split into two layers:
 - Exposes the HTTP bridge and inbox/dashboard runtime
 - Runs PI workers and validates results
 
-## Hermes-to-Agentix Command Bridge
+## Agentix Command Bridge
 
-The installed `agentix` command launches Hermes for the frontend, but it sets `AGENTIX_FRONTEND=hermes` and points Hermes at the Agentix bridge. In that mode:
+The installed `agentix` command launches the Agentix shell and points it at the Agentix bridge. In that mode:
 
-- `agentix`, `agentix chat`, and `agentix -z/--oneshot` execute prompts through Agentix Powerhouse/Symphony/Pi workers.
-- `agentix --tui` keeps the Hermes TUI transport and streams prompt submissions through an Agentix bridge proxy.
-- `agentix setup` and `agentix model` keep the Hermes provider/model UX, then sync non-secret model/provider/base URL defaults into Agentix backend config.
+- `agentix` and `agentix -z/--oneshot` execute prompts through Agentix Powerhouse/Symphony/Pi workers.
+- `agentix setup` and `agentix model` use the Agentix setup wizard, writing secrets to `.env.local` and syncing non-secret model/provider/base URL defaults into Agentix backend config.
+- `agentix options` lists provider/model/environment options.
 - `agentix cron` uses Agentix scheduler jobs.
 - `agentix sessions list|stats|export|delete` uses Agentix sessions.
 - `agentix memory status|search|consolidate` uses Agentix memory.
@@ -31,7 +31,7 @@ The installed `agentix` command launches Hermes for the frontend, but it sets `A
 - `agentix --agentix-cli plans`, shell `/plans`, and shell `/plan <id>` inspect Agentix Symphony plan executions.
 - Dashboard `/ui` reads Agentix `/plans` and `/plans/:id` to inspect Symphony plan execution, dependencies, approvals, and task linkage.
 
-Standalone upstream Hermes still uses its native local stores when those Agentix environment variables are absent.
+Bundled compatibility internals are not the public command surface.
 
 ## Core Backend Primitives
 
@@ -48,7 +48,7 @@ Standalone upstream Hermes still uses its native local stores when those Agentix
 
 ## Data Flow
 
-1. The user types into the Hermes shell.
+1. The user types into the Agentix shell.
 2. The shell emits a stimulus or command.
 3. The Agentix backend receives the request through the bridge.
 4. Symphony builds a safe plan, either from the LLM planner or static fallback.
@@ -59,7 +59,7 @@ Standalone upstream Hermes still uses its native local stores when those Agentix
 
 ## Workspace Layout
 
-- Workspace-local Hermes config lives under `.agentix/hermes/`
+- Workspace-local Agentix config lives under `.env.local` and `data/config.json`
 - Persistent runtime state lives under `data/` by default
 - The launcher passes `AGENTIX_WORKSPACE_DIR` to backend processes so tasks run from the caller's folder
 - The launcher can override state paths with `AGENTIX_DATA_DIR`

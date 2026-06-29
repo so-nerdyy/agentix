@@ -43,10 +43,12 @@ export function buildDockerSandboxArgs(sandbox: string, image: string, command: 
 export function dockerSandboxAvailable(image: string): boolean {
   const daemon = spawnSync("docker", ["version", "--format", "{{.Server.Version}}"], {
     stdio: "ignore",
+    timeout: 2_000,
   });
   if (daemon.status !== 0) return false;
   const inspected = spawnSync("docker", ["image", "inspect", image], {
     stdio: "ignore",
+    timeout: 2_000,
   });
   return inspected.status === 0;
 }

@@ -406,7 +406,7 @@ export class LocalAgentixRuntime {
   }
 
   listTools(): Array<{ name: string; description: string }> {
-    this.powerhouse.start();
+    this.powerhouse.start({ recover: false });
     return this.powerhouse.agents.list().map((agent) => ({
       name: agent.kind,
       description: `Pi agent ${agent.id} handles ${agent.kind} tasks.`,
@@ -414,7 +414,7 @@ export class LocalAgentixRuntime {
   }
 
   getTool(toolId: string): RuntimeToolDetail | null {
-    this.powerhouse.start();
+    this.powerhouse.start({ recover: false });
     const tool = this.powerhouse.agents.get(toolId) ?? this.powerhouse.agents.list().find((agent) => agent.kind === toolId);
     if (!tool) return null;
     const relatedTasks = this.powerhouse
@@ -454,6 +454,7 @@ export class LocalAgentixRuntime {
   }
 
   listAgentProfiles(): Record<string, unknown> {
+    this.powerhouse.start({ recover: false });
     return {
       profiles: this.powerhouse.agentProfiles.list(),
       registeredAgents: this.powerhouse.agents.list().map((agent) => ({
@@ -1457,12 +1458,11 @@ export class LocalAgentixRuntime {
   }
 
   usage(): Record<string, unknown> {
-    const sessions = this.powerhouse.listSessions();
+    this.powerhouse.start({ recover: false });
     const tasks = this.powerhouse.listTasks();
     const plans = this.powerhouse.planStore.list();
     const jobs = this.scheduler.list();
     const gateways = this.gateways.list();
-    const memory = this.powerhouse.memory.list();
     const tasksByStatus: Record<string, number> = {};
     const jobsByLastStatus: Record<string, number> = {};
 
@@ -1475,15 +1475,16 @@ export class LocalAgentixRuntime {
     }
 
     return {
+      title: "Agentix backend usage",
       generatedAt: new Date().toISOString(),
       counts: {
-        sessions: sessions.length,
+        sessions: this.powerhouse.sessions.count(),
         tasks: tasks.length,
         plans: plans.length,
         jobs: jobs.length,
         gateways: gateways.length,
         enabledGateways: gateways.filter((gateway) => gateway.enabled).length,
-        memory: memory.length,
+        memory: this.powerhouse.memory.count(),
       },
       tasksByStatus,
       jobsByLastStatus,
@@ -1601,7 +1602,7 @@ export class LocalAgentixRuntime {
   }
 
   doctor(): Record<string, unknown> {
-    this.powerhouse.start();
+    this.powerhouse.start({ recover: false });
     const config = loadConfig();
     const tasks = this.powerhouse.listTasks();
     const agents = this.powerhouse.agents.list();
@@ -1647,7 +1648,7 @@ export class LocalAgentixRuntime {
     );
     add(
       "paths.hermes",
-      "Hermes frontend",
+      "Bundled compatibility runtime",
       existsSync(PATHS.hermesRoot) ? "pass" : "fail",
       PATHS.hermesRoot,
       existsSync(PATHS.hermesRoot) ? undefined : "Reinstall Agentix or restore the bundled hermes-agent directory.",
@@ -1665,7 +1666,7 @@ export class LocalAgentixRuntime {
       missingInstallAssets.length ? "fail" : "pass",
       missingInstallAssets.length
         ? `missing ${missingInstallAssets.length}: ${missingInstallAssets.join(", ")}`
-        : "bin, backend dist, dashboard, installers, and Hermes frontend present",
+        : "bin, backend dist, dashboard, installers, and bundled compatibility runtime present",
       missingInstallAssets.length ? "Reinstall Agentix from npm or a verified release tarball." : undefined,
     );
     add(
@@ -1763,13 +1764,13 @@ export class LocalAgentixRuntime {
       installRoot: PATHS.installRoot,
       checks,
       counts: {
-        sessions: this.powerhouse.listSessions().length,
+        sessions: this.powerhouse.sessions.count(),
         tasks: tasks.length,
         plans: this.powerhouse.planStore.list().length,
         approvals: pendingApprovals.length,
         jobs: jobs.length,
         gateways: gateways.length,
-        memory: this.powerhouse.memory.list().length,
+        memory: this.powerhouse.memory.count(),
         healingProcedures: healing.length,
         agentProfiles: agentProfiles.length,
       },
@@ -1839,7 +1840,7 @@ export class LocalAgentixRuntime {
       ),
       gate(
         "frontend.hermes",
-        "Hermes frontend bundled",
+        "Agentix compatibility runtime bundled",
         hermes?.status === "pass",
         hermes?.detail ?? "unknown",
         "private-beta",

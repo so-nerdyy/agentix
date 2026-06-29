@@ -25,7 +25,7 @@ export function resolvePythonCommand(): PythonCommand {
     if (check.status === 0) return candidate;
   }
   throw new Error(
-    "Python 3 is required for the Hermes frontend. Set AGENTIX_PYTHON to a Python 3 executable if auto-detection fails.",
+    "Python 3 is required for bundled Agentix compatibility commands. Set AGENTIX_PYTHON to a Python 3 executable if auto-detection fails.",
   );
 }
 
@@ -58,7 +58,7 @@ export async function runHermesSubcommand(
   let spawnError: Error | null = null;
 
   child.on("error", (err) => {
-    spawnError = new Error(`Failed to spawn Hermes CLI: ${err.message}`);
+    spawnError = new Error(`Failed to spawn bundled Agentix compatibility command: ${err.message}`);
   });
 
   const timeout = setTimeout(() => {
@@ -88,7 +88,7 @@ export async function runHermesSubcommand(
     throw spawnError;
   }
   if (timedOut) {
-    throw new Error(`Hermes subcommand timed out after ${timeoutMs}ms`);
+    throw new Error(`Agentix compatibility command timed out after ${timeoutMs}ms`);
   }
   if (child.exitCode !== 0 && stderr.trim()) {
     throw new Error(stderr.trim());

@@ -17,8 +17,8 @@ describe("launcher help", () => {
     });
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("open the Hermes-style interactive shell");
-    expect(result.stdout).toContain("Hermes shell commands:");
+    expect(result.stdout).toContain("open the Agentix interactive shell");
+    expect(result.stdout).toContain("Agentix commands:");
     expect(result.stdout).toContain("Agentix backend commands:");
     expect(result.stdout).toContain("setup");
     expect(result.stdout).toContain("server");
@@ -80,15 +80,21 @@ describe("launcher help", () => {
     expect(result.stdout).toContain("flags: --port <n> --host <addr>");
   });
 
-  it("routes Hermes-owned UX commands through Hermes before backend CLI", () => {
+  it("routes Agentix-owned commands through the backend CLI", () => {
     const backendCommands = commandSet("BACKEND_COMMANDS");
     const hermesCommands = commandSet("HERMES_COMMANDS");
     const bridgelessCommands = commandSet("BRIDGELESS_HERMES_COMMANDS");
 
-    expect(hermesCommands).toContain("gateway");
-    expect(hermesCommands).toContain("logs");
-    expect(backendCommands).not.toContain("gateway");
-    expect(backendCommands).not.toContain("logs");
+    expect(backendCommands).toContain("doctor");
+    expect(backendCommands).toContain("status");
+    expect(backendCommands).toContain("usage");
+    expect(backendCommands).toContain("config");
+    expect(backendCommands).toContain("sessions");
+    expect(backendCommands).toContain("memory");
+    expect(backendCommands).toContain("cron");
+    expect(backendCommands).toContain("gateway");
+    expect(backendCommands).toContain("logs");
+    expect(backendCommands).toContain("tools");
     expect(backendCommands).toContain("task");
     expect(backendCommands).toContain("approval");
     expect(backendCommands).toContain("search");
@@ -96,19 +102,33 @@ describe("launcher help", () => {
     expect(backendCommands).toContain("healing");
     expect(backendCommands).toContain("agents");
     expect(backendCommands).toContain("auth");
+    expect(hermesCommands).not.toContain("doctor");
+    expect(hermesCommands).not.toContain("config");
+    expect(hermesCommands).not.toContain("gateway");
+    expect(hermesCommands).not.toContain("logs");
     expect(hermesCommands).not.toContain("auth");
     expect(bridgelessCommands).not.toContain("auth");
   });
 
   it("does not start the bridge for setup/model before configuration exists", () => {
     const launcher = readFileSync(join(process.cwd(), "bin", "agentix.js"), "utf8");
-    const bridgelessCommands = commandSet("BRIDGELESS_HERMES_COMMANDS");
 
-    expect(bridgelessCommands).toContain("setup");
-    expect(bridgelessCommands).toContain("model");
+    expect(launcher).toContain('if (cmd === "setup")');
+    expect(launcher).toContain('if (cmd === "model")');
+    expect(launcher).toContain('if (cmd === "options")');
+    expect(launcher).toContain("writeWorkspaceEnv");
+    expect(launcher).toContain("writeWorkspaceConfig");
     expect(launcher).toContain("AGENTIX_HERMES_HOME");
     expect(launcher).toContain("parseHermesModelConfig");
     expect(launcher).toContain("AGENTIX_LLM_API_KEY");
+  });
+
+  it("opens the Agentix-owned shell for no-argument launches", () => {
+    const launcher = readFileSync(join(process.cwd(), "bin", "agentix.js"), "utf8");
+
+    expect(launcher).toContain("async function spawnNodeShell");
+    expect(launcher).toContain("await spawnNodeShell();");
+    expect(launcher).not.toContain("if (!cmd && process.stdin.isTTY) {\n    await ensureBridgeRunning();\n    await spawnHermes([]);");
   });
 
   it("detects Python instead of requiring a literal python command", () => {

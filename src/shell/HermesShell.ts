@@ -29,7 +29,7 @@ export class HermesShell {
   private history: Array<{ role: string; content: string }> = [];
 
   async start(): Promise<void> {
-    console.log("Agentix (Hermes frontend) - type /help for commands\n");
+    console.log("Agentix - type /help for commands\n");
 
     this.rl.on("line", async (line) => {
       const input = line.trim();
@@ -122,19 +122,19 @@ export class HermesShell {
           break;
         case "doctor":
           console.log(this.formatDoctor(await this.backend.doctor()));
-          console.log("\nHermes diagnostics:");
-          console.log(await hermesCommand("doctor", []));
+          console.log("\nUse `agentix doctor --full` for full diagnostics.");
           break;
         case "usage":
           console.log(await hermesCommand("usage", []));
           break;
         case "setup":
-          console.log("-> Running Hermes setup wizard...\n");
-          await this.runHermesInteractive("setup");
+          console.log("Run `agentix setup` in a terminal to configure this workspace.\n");
           break;
         case "model":
-          console.log("-> Running Hermes model configuration...\n");
-          await this.runHermesInteractive("model");
+          console.log("Run `agentix model` in a terminal to configure provider/model settings.\n");
+          break;
+        case "options":
+          console.log("Run `agentix options` in a terminal to list setup/provider/model options.\n");
           break;
         case "update":
           console.log(await hermesCommand("update", ["--check"], 15_000));
@@ -249,7 +249,7 @@ export class HermesShell {
             break;
           }
           if (action === "reject") {
-            const reason = actionArgs.join(" ").trim() || "rejected from Hermes shell";
+            const reason = actionArgs.join(" ").trim() || "rejected from Agentix shell";
             console.log(JSON.stringify(await this.backend.reject(taskId, reason), null, 2));
             break;
           }
@@ -348,7 +348,7 @@ export class HermesShell {
             break;
           }
           if (action === "reject") {
-            const reason = actionArgs.join(" ").trim() || "rejected from Hermes shell";
+            const reason = actionArgs.join(" ").trim() || "rejected from Agentix shell";
             console.log(JSON.stringify(await this.backend.reject(taskId, reason), null, 2));
             break;
           }
@@ -387,10 +387,14 @@ export class HermesShell {
           break;
         }
         case "theme":
-          console.log("Theme comes from Hermes.\n");
+          console.log("Theme is controlled by the Agentix shell.\n");
           break;
         case "personality":
-          console.log("Personality is controlled by the Hermes frontend.\n");
+          console.log("Personality is controlled by the Agentix shell.\n");
+          break;
+        case "exit":
+        case "quit":
+          this.rl.close();
           break;
         case "fortune":
           console.log(await hermesCommand("fortune", []));
@@ -432,10 +436,11 @@ export class HermesShell {
   /reset              Clear conversation context
   /status             Show current session and bridge
   /history            Show conversation history
-  /doctor             Run Hermes diagnostics
+  /doctor             Run Agentix diagnostics
   /usage              Show usage stats
   /setup              Run first-run setup wizard
   /model              Configure model provider
+  /options            Show setup/provider/model options
   /update             Check for updates
   /cron <args>        Manage scheduled tasks
   /job <id> [action]  Inspect or run a scheduled job
@@ -458,6 +463,7 @@ export class HermesShell {
   /theme              Show theme source
   /personality        Show personality source
   /fortune            Random wisdom
+  /exit               Exit Agentix
   /help               Show this help
 `);
   }
@@ -465,9 +471,9 @@ export class HermesShell {
   private showStatus(): void {
     console.log(`Session: ${this.sessionId}`);
     console.log(
-      `Bridge: ${process.env.HERMES_BRIDGE_URL || "http://127.0.0.1:3456"}`,
+      `Bridge: ${process.env.AGENTIX_BRIDGE_URL || process.env.HERMES_BRIDGE_URL || "http://127.0.0.1:3456"}`,
     );
-    console.log(`Hermes root: ${PATHS.hermesRoot}`);
+    console.log(`Agentix frontend root: ${PATHS.hermesRoot}`);
     console.log();
   }
 
