@@ -289,8 +289,16 @@ async function main() {
         const [action = "list", idOrValue, ...rest] = cleanArgs;
         const runtime = getBackendRuntime();
         if (action === "list") {
-          for (const session of runtime.listSessions()) {
+          const limitFlag = readFlagValue(cleanArgs, "--limit");
+          const limit = cleanArgs.includes("--all")
+            ? undefined
+            : Math.max(1, Number(limitFlag ?? idOrValue ?? 50) || 50);
+          const sessions = runtime.listSessions({ limit, recover: limit === undefined });
+          for (const session of sessions) {
             console.log(`${session.id}: created=${session.createdAt}`);
+          }
+          if (limit !== undefined && sessions.length >= limit) {
+            console.log(`Showing ${limit} session(s). Use --all for full list.`);
           }
           return;
         }

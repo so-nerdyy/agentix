@@ -38,6 +38,27 @@ export class SessionCoordinator {
     return Array.from(this.byId.values());
   }
 
+  listRecent(limit = 50): Session[] {
+    if (!existsSync(this.dir)) return [];
+    const files = readdirSync(this.dir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .map((entry) => entry.name)
+      .sort()
+      .reverse()
+      .slice(0, Math.max(1, limit));
+
+    const sessions: Session[] = [];
+    for (const file of files) {
+      try {
+        const raw = readFileSync(join(this.dir, file), "utf-8");
+        sessions.push(JSON.parse(raw) as Session);
+      } catch {
+        // Corrupt session file remains for support-bundle inspection.
+      }
+    }
+    return sessions;
+  }
+
   listActive(): Session[] {
     return this.list().filter((session) => session.status === "active");
   }

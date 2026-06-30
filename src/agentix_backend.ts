@@ -89,8 +89,9 @@ export class AgentixBackend {
     await this.execute(opts);
   }
 
-  async listSessions(): Promise<Array<{ id: string; createdAt: string }>> {
-    return this.get("/sessions");
+  async listSessions(opts: { limit?: number } = {}): Promise<Array<{ id: string; createdAt: string; status?: string }>> {
+    const suffix = opts.limit ? `?limit=${encodeURIComponent(String(opts.limit))}` : "";
+    return this.get(`/sessions${suffix}`);
   }
 
   async getSession(sessionId: string): Promise<Record<string, unknown>> {

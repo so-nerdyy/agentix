@@ -394,8 +394,14 @@ def handle_oneshot(
         return None
 
     backend = _backend()
-    session = backend.create_session(model=model)
-    response = backend.execute(str(prompt), session_id=session.get("id"))
+    session = backend.create_session(model=model, provider=provider, toolsets=toolsets)
+    response = backend.execute(
+        str(prompt),
+        session_id=session.get("id"),
+        model=model,
+        provider=provider,
+        toolsets=toolsets,
+    )
     if response:
         print(response)
     return 0

@@ -22,6 +22,7 @@ const BACKEND_COMMANDS = new Set([
   "ui",
   "web",
   "support",
+  "update",
   "doctor",
   "status",
   "readiness",
@@ -58,7 +59,6 @@ const HERMES_COMMANDS = new Set([
   "setup",
   "model",
   "options",
-  "update",
   "insights",
   "skills",
   "plugins",
@@ -68,7 +68,6 @@ const HERMES_COMMANDS = new Set([
 ]);
 
 const BRIDGELESS_HERMES_COMMANDS = new Set([
-  "update",
   "plugins",
   "skills",
   "fortune",
@@ -169,6 +168,13 @@ function buildCommandHelp(command) {
         "Usage: agentix options [providers|models|env|commands]",
         "",
         "Lists Agentix setup/provider/model/environment options.",
+      ].join("\n");
+    case "update":
+      return [
+        "Usage: agentix update [--check]",
+        "",
+        "Checks npm for Agentix updates and prints install commands.",
+        "Use `npm install -g @so-nerdyy/agentix` or the verified curl installer to upgrade.",
       ].join("\n");
     case "server":
       return [
@@ -861,6 +867,56 @@ function printAgentixOptions(topic = "all") {
   }
 }
 
+async function runAgentixUpdate(args = []) {
+  if (args.includes("--help") || args.includes("-h")) {
+    console.log(buildCommandHelp("update"));
+    return;
+  }
+
+  const registryUrl = `https://registry.npmjs.org/${encodeURIComponent(pkg.name)}`;
+  let latest = null;
+  try {
+    const res = await fetch(registryUrl, { headers: { Accept: "application/json" } });
+    if (res.status === 404) {
+      console.log("Agentix update");
+      console.log(`Installed: ${pkg.version}`);
+      console.log("Latest:    not published on npm yet");
+      console.log("Status:    local/source install");
+      console.log("");
+      console.log(`Once published: npm install -g ${pkg.name}`);
+      return;
+    }
+    if (!res.ok) {
+      throw new Error(`npm registry returned ${res.status}`);
+    }
+    const metadata = await res.json();
+    latest = metadata?.["dist-tags"]?.latest || null;
+  } catch (err) {
+    console.log("Agentix update check failed.");
+    console.log(`Installed: ${pkg.version}`);
+    console.log(`Reason: ${err instanceof Error ? err.message : String(err)}`);
+    console.log("");
+    console.log(`Manual upgrade: npm install -g ${pkg.name}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log("Agentix update");
+  console.log(`Installed: ${pkg.version}`);
+  console.log(`Latest:    ${latest || "unknown"}`);
+  if (!latest || latest === pkg.version) {
+    console.log("Status:    up to date");
+    return;
+  }
+  console.log("Status:    update available");
+  console.log("");
+  console.log("Upgrade:");
+  console.log(`  npm install -g ${pkg.name}`);
+  console.log("");
+  console.log("Verified installer:");
+  console.log("  curl -fsSL <release-install-url> | sh");
+}
+
 function writeWorkspaceConfig({ provider, model, baseUrl }) {
   const dataDir = join(WORKSPACE_ROOT, "data");
   mkdirSync(dataDir, { recursive: true });
@@ -1014,6 +1070,11 @@ async function main() {
 
   if (cmd === "options") {
     printAgentixOptions(args[0] || "all");
+    return;
+  }
+
+  if (cmd === "update") {
+    await runAgentixUpdate(args);
     return;
   }
 

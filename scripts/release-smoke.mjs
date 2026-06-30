@@ -674,6 +674,31 @@ async function smokeServer() {
     assert(installedOneshot.stdout.includes("Agentix is running with the Agentix shell and backend."), "installed agentix -z did not route through Agentix backend");
     assert(installedOneshot.stdout.includes(`Input: ${installedOneshotPrompt}`), "installed agentix -z output did not preserve input");
 
+    const selectorOneshot = await run(agentixCommand, [
+      "-z",
+      "release-smoke-selector-delegation",
+      "--model",
+      "release-selector-model",
+      "--provider",
+      "local",
+      "--toolsets",
+      "web",
+    ], {
+      cwd: smokeRoot,
+      env: hermesEnv,
+      timeoutMs: 120_000,
+    });
+    assert(selectorOneshot.stdout.includes("Input: release-smoke-selector-delegation"), "installed agentix -z selector run did not preserve input");
+    const selectorSessions = await fetchJson(`${bridgeUrl}/sessions?all=1`, { timeoutMs: 60_000 });
+    assert(
+      Array.isArray(selectorSessions) && selectorSessions.some((session) =>
+        session?.metadata?.model === "release-selector-model"
+        && session?.metadata?.provider === "local"
+        && String(session?.metadata?.toolsets ?? "").includes("web"),
+      ),
+      "installed agentix -z did not persist selector metadata through Agentix backend",
+    );
+
     const installedUsage = await run(agentixCommand, ["usage"], {
       cwd: smokeRoot,
       env: hermesEnv,

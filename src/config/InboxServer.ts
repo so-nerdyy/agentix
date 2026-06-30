@@ -139,9 +139,19 @@ export async function startInboxServer(opts: { port?: number; host?: string } = 
     return runtime.execute({
       stimulus: String(body.stimulus ?? body.text ?? ""),
       sessionId: body.sessionId as string | undefined,
+      model: typeof body.model === "string" ? body.model : undefined,
+      provider: typeof body.provider === "string" ? body.provider : undefined,
+      baseUrl: typeof body.baseUrl === "string" ? body.baseUrl : undefined,
+      toolsets: body.toolsets,
     });
   });
-  server.get("/sessions", async () => runtime.listSessions());
+  server.get("/sessions", async (request) => {
+    const query = request.query as { limit?: string; all?: string };
+    const limit = query.all === "1" || query.all === "true"
+      ? undefined
+      : Number(query.limit ?? 50) || 50;
+    return runtime.listSessions({ limit, recover: limit === undefined });
+  });
   server.get("/sessions/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
     const session = runtime.getSession(id);

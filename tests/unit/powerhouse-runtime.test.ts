@@ -20,6 +20,7 @@ import { TaskStore } from "../../src/powerhouse/TaskStore.js";
 import { SchedulerService } from "../../src/scheduler/SchedulerService.js";
 import { ScheduledJobStore } from "../../src/scheduler/ScheduledJobStore.js";
 import { PlanStore } from "../../src/symphony/PlanStore.js";
+import { resetConfigCache } from "../../src/config/index.js";
 import type { Task, TaskResult } from "../../src/powerhouse/types.js";
 
 const tempDirs: string[] = [];
@@ -81,6 +82,12 @@ class HealingResistantAgent extends BasePIAgent {
 }
 
 afterEach(() => {
+  vi.unstubAllGlobals();
+  delete process.env.AGENTIX_PROVIDER;
+  delete process.env.AGENTIX_MODEL;
+  delete process.env.AGENTIX_BASE_URL;
+  delete process.env.AGENTIX_LLM_API_KEY;
+  resetConfigCache();
   while (tempDirs.length > 0) {
     rmSync(tempDirs.pop()!, { recursive: true, force: true });
   }
@@ -100,6 +107,41 @@ describe("Powerhouse restored runtime", () => {
     expect(result.taskIds).toHaveLength(1);
     expect(powerhouse.listTasks()[0]?.status).toBe("complete");
     expect(powerhouse.memory.search("hello").length).toBeGreaterThanOrEqual(1);
+
+    powerhouse.stop();
+  });
+
+  it("honors per-invocation model and provider selectors during conversation execution", async () => {
+    process.env.AGENTIX_PROVIDER = "local";
+    process.env.AGENTIX_MODEL = "env-model";
+    process.env.AGENTIX_BASE_URL = "http://local.invalid/v1";
+    resetConfigCache();
+    let requestBody: Record<string, unknown> | null = null;
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: "selected model response" } }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const powerhouse = makePowerhouse();
+
+    const result = await powerhouse.executeStimulus({
+      stimulus: "hello selected model",
+      model: "cli-model",
+      provider: "local",
+      baseUrl: "http://override.invalid/v1",
+      toolsets: ["web"],
+    });
+
+    expect(result.status).toBe("complete");
+    expect(result.response).toContain("selected model response");
+    expect(requestBody?.model).toBe("cli-model");
+    expect(powerhouse.listSessions()[0]?.metadata).toMatchObject({
+      model: "cli-model",
+      provider: "local",
+      baseUrl: "http://override.invalid/v1",
+      toolsets: ["web"],
+    });
 
     powerhouse.stop();
   });

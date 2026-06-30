@@ -297,15 +297,20 @@ export class LocalAgentixRuntime {
     this.scheduler.start();
   }
 
-  listSessions(): Array<{
+  listSessions(opts: { limit?: number; recover?: boolean } = {}): Array<{
     id: string;
     status: string;
     createdAt: string;
     updatedAt: string;
     metadata: Record<string, unknown>;
   }> {
-    this.powerhouse.start();
-    return this.powerhouse.listSessions().map((session) => ({
+    const sessions = opts.limit
+      ? this.powerhouse.sessions.listRecent(opts.limit)
+      : (() => {
+          this.powerhouse.start({ recover: opts.recover ?? true });
+          return this.powerhouse.listSessions();
+        })();
+    return sessions.map((session) => ({
       id: session.id,
       status: session.status,
       createdAt: new Date(session.createdAt).toISOString(),
@@ -1651,7 +1656,7 @@ export class LocalAgentixRuntime {
       "Bundled compatibility runtime",
       existsSync(PATHS.hermesRoot) ? "pass" : "fail",
       PATHS.hermesRoot,
-      existsSync(PATHS.hermesRoot) ? undefined : "Reinstall Agentix or restore the bundled hermes-agent directory.",
+      existsSync(PATHS.hermesRoot) ? undefined : "Reinstall Agentix or restore the bundled compatibility runtime.",
     );
     add(
       "install.package",
@@ -2161,6 +2166,10 @@ export class LocalAgentixRuntime {
       stimulus: string;
       sessionId?: string;
       onDelta?: (delta: string) => void;
+      model?: string;
+      provider?: string;
+      baseUrl?: string;
+      toolsets?: unknown;
     },
   ): Promise<{ response: string; sessionId: string; status: string; taskIds: string[] }> {
     const result = await this.powerhouse.executeStimulus(opts);

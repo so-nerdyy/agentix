@@ -24,6 +24,10 @@ export interface ExecuteStimulusOptions {
   stimulus: string;
   sessionId?: string;
   onDelta?: (delta: string) => void;
+  model?: string;
+  provider?: string;
+  baseUrl?: string;
+  toolsets?: unknown;
 }
 
 export interface ExecuteStimulusResult {
@@ -324,6 +328,14 @@ export class Powerhouse {
   async executeStimulus(opts: ExecuteStimulusOptions): Promise<ExecuteStimulusResult> {
     this.start();
     const session = this.ensureSession(opts.sessionId);
+    if (opts.model || opts.provider || opts.baseUrl || opts.toolsets) {
+      this.sessions.updateMetadata(session.id, {
+        model: opts.model ?? session.metadata.model ?? null,
+        provider: opts.provider ?? session.metadata.provider ?? null,
+        baseUrl: opts.baseUrl ?? session.metadata.baseUrl ?? null,
+        toolsets: opts.toolsets ?? session.metadata.toolsets ?? null,
+      });
+    }
     const taskIds: string[] = [];
     const emitProgress = (message: string) => opts.onDelta?.(`[agentix] ${message}\n`);
 
@@ -337,6 +349,20 @@ export class Powerhouse {
     emitProgress("Planning task with Symphony...");
     const result = await this.symphony.run(opts.stimulus, {
       executeStep: async (step, planId) => {
+        if (opts.model || opts.provider || opts.baseUrl || opts.toolsets) {
+          step = {
+            ...step,
+            payload: {
+              ...step.payload,
+              execution: {
+                model: opts.model,
+                provider: opts.provider,
+                baseUrl: opts.baseUrl,
+                toolsets: opts.toolsets,
+              },
+            },
+          };
+        }
         emitProgress(`Running step ${step.id} (${step.kind})...`);
         const { task, result } = await this.executeStep(session.id, step, planId);
         taskIds.push(task.id);
