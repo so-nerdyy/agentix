@@ -93,6 +93,57 @@ describe("config", () => {
     expect(config.sessionToken).toBeNull();
   });
 
+  it("loads setup secrets and model defaults from workspace .env.local", async () => {
+    const workspace = tempDir();
+    dirs.push(workspace);
+    delete process.env.AGENTIX_MODEL;
+    delete process.env.AGENTIX_PROVIDER;
+    delete process.env.AGENTIX_BASE_URL;
+    delete process.env.AGENTIX_LLM_API_KEY;
+    delete process.env.AGENTIX_SESSION_TOKEN;
+    delete process.env.AGENTIX_DATA_DIR;
+    process.env.AGENTIX_WORKSPACE_DIR = workspace;
+    writeFileSync(
+      join(workspace, ".env.local"),
+      [
+        "AGENTIX_PROVIDER=custom",
+        "AGENTIX_MODEL=env-file-model",
+        "AGENTIX_BASE_URL=https://gateway.example/v1",
+        "AGENTIX_LLM_API_KEY=env-file-secret",
+        "AGENTIX_SESSION_TOKEN=env-file-session",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const configMod = await import("../../src/config/index.js");
+    const config = configMod.loadConfig();
+
+    expect(config.provider).toBe("custom");
+    expect(config.model).toBe("env-file-model");
+    expect(config.baseUrl).toBe("https://gateway.example/v1");
+    expect(config.llmApiKey).toBe("env-file-secret");
+    expect(config.sessionToken).toBe("env-file-session");
+  });
+
+  it("prefers process env over workspace .env.local", async () => {
+    const workspace = tempDir();
+    dirs.push(workspace);
+    process.env.AGENTIX_WORKSPACE_DIR = workspace;
+    process.env.AGENTIX_MODEL = "process-model";
+    writeFileSync(
+      join(workspace, ".env.local"),
+      "AGENTIX_MODEL=file-model\nAGENTIX_LLM_API_KEY=file-secret\n",
+      "utf-8",
+    );
+
+    const configMod = await import("../../src/config/index.js");
+    const config = configMod.loadConfig();
+
+    expect(config.model).toBe("process-model");
+    expect(config.llmApiKey).toBe("file-secret");
+  });
+
   it("treats undefined-like env strings as absent", async () => {
     const dir = tempDir();
     dirs.push(dir);

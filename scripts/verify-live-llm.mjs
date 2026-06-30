@@ -10,6 +10,10 @@ const dataDir = process.env.AGENTIX_DATA_DIR
   ? resolve(process.env.AGENTIX_DATA_DIR)
   : resolve(process.cwd(), "data");
 const configPath = join(dataDir, "config.json");
+const workspaceDir = process.env.AGENTIX_WORKSPACE_DIR
+  ? resolve(process.env.AGENTIX_WORKSPACE_DIR)
+  : process.cwd();
+const workspaceEnvPath = join(workspaceDir, ".env.local");
 
 function argValue(name) {
   const index = process.argv.indexOf(name);
@@ -17,9 +21,35 @@ function argValue(name) {
 }
 
 function envString(name) {
-  const value = process.env[name]?.trim();
+  const value = (process.env[name] ?? workspaceEnv[name])?.trim();
   if (!value || value === "undefined" || value === "null") return null;
   return value;
+}
+
+async function readEnvFile(file) {
+  if (!existsSync(file)) return {};
+  const values = {};
+  try {
+    const raw = await readFile(file, "utf-8");
+    for (const rawLine of raw.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#") || !line.includes("=")) continue;
+      const [rawKey, ...rawValue] = line.split("=");
+      const key = rawKey.trim();
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+      let value = rawValue.join("=").trim();
+      if (
+        (value.startsWith("\"") && value.endsWith("\"")) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      values[key] = value;
+    }
+  } catch {
+    return {};
+  }
+  return values;
 }
 
 async function readDiskConfig() {
@@ -31,6 +61,7 @@ async function readDiskConfig() {
   }
 }
 
+const workspaceEnv = await readEnvFile(workspaceEnvPath);
 const diskConfig = await readDiskConfig();
 const provider = (argValue("--provider") || envString("AGENTIX_PROVIDER") || diskConfig.provider || "auto")
   .trim()
