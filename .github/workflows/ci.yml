@@ -72,11 +72,11 @@ jobs:
         env:
           AGENTIX_SESSION_TOKEN: ci-token
 
-      - name: Build Hermes frontend image
+      - name: Build Agentix compatibility frontend image
         run: docker build -f hermes-agent/Dockerfile hermes-agent
 
-      - name: Validate Linux compose
+      - name: Validate compatibility Linux compose
         run: docker compose -f hermes-agent/docker-compose.yml config
 
-      - name: Validate Windows compose
+      - name: Validate compatibility Windows compose
         run: docker compose -f hermes-agent/docker-compose.windows.yml config
