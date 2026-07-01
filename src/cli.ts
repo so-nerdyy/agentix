@@ -148,7 +148,7 @@ async function main() {
         const bundle = getBackendRuntime().createSupportBundle();
         console.log(`Agentix v${pkg.version}`);
         console.log(`Project root: ${PATHS.projectRoot}`);
-        console.log(`Compatibility runtime root: ${PATHS.hermesRoot}`);
+        console.log(`Compatibility runtime root: ${PATHS.compatibilityRuntimeRoot}`);
         console.log(`Data dir: ${PATHS.dataDir}`);
         console.log(`Bridge entry: ${PATHS.bridgeEntry}`);
         console.log(`Inbox entry: ${PATHS.inboxEntry}`);

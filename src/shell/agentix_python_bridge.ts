@@ -29,7 +29,7 @@ export function resolvePythonCommand(): PythonCommand {
   );
 }
 
-export async function runHermesSubcommand(
+export async function runCompatibilitySubcommand(
   args: string[],
   opts: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<string> {
@@ -40,7 +40,7 @@ export async function runHermesSubcommand(
     cwd: PATHS.workspaceRoot,
     env: {
       ...process.env,
-      PYTHONPATH: PATHS.hermesRoot,
+      PYTHONPATH: PATHS.compatibilityRuntimeRoot,
       AGENTIX_FRONTEND: "hermes",
       AGENTIX_INSTALL_ROOT: PATHS.installRoot,
       AGENTIX_WORKSPACE_DIR: PATHS.workspaceRoot,
@@ -73,12 +73,17 @@ export async function runHermesSubcommand(
   }
 
   try {
-    for await (const chunk of child.stdout!) {
-      stdout += new TextDecoder().decode(chunk);
-    }
-    for await (const chunk of child.stderr!) {
-      stderr += new TextDecoder().decode(chunk);
-    }
+    const stdoutPump = (async () => {
+      for await (const chunk of child.stdout!) {
+        stdout += new TextDecoder().decode(chunk);
+      }
+    })();
+    const stderrPump = (async () => {
+      for await (const chunk of child.stderr!) {
+        stderr += new TextDecoder().decode(chunk);
+      }
+    })();
+    await Promise.all([stdoutPump, stderrPump]);
     await new Promise<void>((resolve) => child.on("close", resolve));
   } finally {
     clearTimeout(timeout);
@@ -97,10 +102,10 @@ export async function runHermesSubcommand(
   return stdout;
 }
 
-export async function hermesCommand(
+export async function compatibilityCommand(
   subcommand: string,
   args: string[] = [],
   timeoutMs = 30_000,
 ): Promise<string> {
-  return runHermesSubcommand([subcommand, ...args], { timeoutMs });
+  return runCompatibilitySubcommand([subcommand, ...args], { timeoutMs });
 }

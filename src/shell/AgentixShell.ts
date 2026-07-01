@@ -2,7 +2,7 @@ import * as readline from "readline";
 import { AgentixBackend } from "../agentix_backend.js";
 import { PATHS } from "../config/paths.js";
 
-export class HermesShell {
+export class AgentixShell {
   private backend = new AgentixBackend();
   private rl = readline.createInterface({
     input: process.stdin,
@@ -495,9 +495,9 @@ export class HermesShell {
   private showStatus(): void {
     console.log(`Session: ${this.sessionId}`);
     console.log(
-      `Bridge: ${process.env.AGENTIX_BRIDGE_URL || process.env.HERMES_BRIDGE_URL || "http://127.0.0.1:3456"}`,
+      `Bridge: ${process.env.AGENTIX_BRIDGE_URL || "http://127.0.0.1:3456"}`,
     );
-    console.log(`Agentix frontend root: ${PATHS.hermesRoot}`);
+    console.log(`Agentix frontend root: ${PATHS.compatibilityRuntimeRoot}`);
     console.log();
   }
 

@@ -55,7 +55,7 @@ const BACKEND_COMMANDS = new Set([
   "version",
 ]);
 
-const HERMES_COMMANDS = new Set([
+const FRONTEND_COMPAT_COMMANDS = new Set([
   "setup",
   "model",
   "options",
@@ -67,7 +67,7 @@ const HERMES_COMMANDS = new Set([
   "web",
 ]);
 
-const BRIDGELESS_HERMES_COMMANDS = new Set([
+const BRIDGELESS_FRONTEND_COMMANDS = new Set([
   "plugins",
   "skills",
   "fortune",
@@ -75,9 +75,19 @@ const BRIDGELESS_HERMES_COMMANDS = new Set([
 
 const AGENTIX_COMMAND_HELP = new Set(["gateway", "logs", "tools"]);
 
-const AGENTIX_HERMES_HOME = process.env.HERMES_HOME
-  ? resolve(process.env.HERMES_HOME)
-  : join(WORKSPACE_ROOT, ".agentix", "hermes");
+function resolveFrontendHome() {
+  if (process.env.AGENTIX_FRONTEND_HOME) {
+    return resolve(process.env.AGENTIX_FRONTEND_HOME);
+  }
+
+  const preferred = join(WORKSPACE_ROOT, ".agentix", "frontend");
+  if (existsSync(preferred)) {
+    return preferred;
+  }
+  return preferred;
+}
+
+const AGENTIX_FRONTEND_HOME = resolveFrontendHome();
 let activeBridgeUrl = null;
 
 function buildLauncherHelp() {
@@ -367,7 +377,7 @@ function buildCommandHelp(command) {
   }
 }
 
-function resolveHermesRoot() {
+function resolveCompatibilityFrontendRoot() {
   const candidates = [
     resolve(PROJECT_ROOT, "hermes-agent", "hermes-agent-upstream"),
     resolve(PROJECT_ROOT, "hermes-agent-upstream"),
@@ -383,9 +393,9 @@ function resolveHermesRoot() {
   return candidates[candidates.length - 1];
 }
 
-const HERMES_ROOT = resolveHermesRoot();
-const VENV_ROOT = resolve(
-  process.env.AGENTIX_HERMES_VENV || join(os.homedir(), ".agentix", "hermes-python"),
+const COMPAT_FRONTEND_ROOT = resolveCompatibilityFrontendRoot();
+const COMPAT_PYTHON_VENV_ROOT = resolve(
+  process.env.AGENTIX_PYTHON_VENV || join(os.homedir(), ".agentix", "python-frontend"),
 );
 
 function bridgeUrl() {
@@ -478,7 +488,7 @@ function parseScalar(value) {
   return trimmed.replace(/\s+#.*$/, "").trim();
 }
 
-function parseHermesModelConfig(file) {
+function parseFrontendModelConfig(file) {
   if (!existsSync(file)) {
     return {};
   }
@@ -552,15 +562,16 @@ function providerKeyCandidates(provider) {
 }
 
 function buildRuntimeEnv(extra = {}) {
-  const hermesEnv = parseEnvFile(join(AGENTIX_HERMES_HOME, ".env"));
+  const frontendEnv = parseEnvFile(join(AGENTIX_FRONTEND_HOME, ".env"));
   const workspaceEnv = parseEnvFile(join(WORKSPACE_ROOT, ".env.local"));
-  const modelConfig = parseHermesModelConfig(join(AGENTIX_HERMES_HOME, "config.yaml"));
+  const modelConfig = parseFrontendModelConfig(join(AGENTIX_FRONTEND_HOME, "config.yaml"));
   const env = {
-    ...hermesEnv,
+    ...frontendEnv,
     ...workspaceEnv,
     ...process.env,
     ...extra,
-    HERMES_HOME: process.env.HERMES_HOME || AGENTIX_HERMES_HOME,
+    HERMES_HOME: AGENTIX_FRONTEND_HOME,
+    AGENTIX_FRONTEND_HOME,
     AGENTIX_INSTALL_ROOT: PROJECT_ROOT,
     AGENTIX_WORKSPACE_DIR: WORKSPACE_ROOT,
   };
@@ -657,8 +668,8 @@ function bridgeControlCheck(timeoutMs = 3000, url = bridgeUrl()) {
 
 function venvPython() {
   return process.platform === "win32"
-    ? resolve(VENV_ROOT, "Scripts", "python.exe")
-    : resolve(VENV_ROOT, "bin", "python");
+    ? resolve(COMPAT_PYTHON_VENV_ROOT, "Scripts", "python.exe")
+    : resolve(COMPAT_PYTHON_VENV_ROOT, "bin", "python");
 }
 
 function pythonCandidates() {
@@ -689,24 +700,24 @@ function ensureVenv() {
     return venvPython();
   }
 
-  mkdirSync(VENV_ROOT, { recursive: true });
+  mkdirSync(COMPAT_PYTHON_VENV_ROOT, { recursive: true });
   const python = resolveSystemPython();
-  const created = spawnSync(python.command, [...python.args, "-m", "venv", VENV_ROOT], {
+  const created = spawnSync(python.command, [...python.args, "-m", "venv", COMPAT_PYTHON_VENV_ROOT], {
     cwd: PROJECT_ROOT,
     stdio: "inherit",
   });
   if (created.status !== 0) {
-    throw new Error("failed to create Hermes Python virtual environment");
+    throw new Error("failed to create Agentix compatibility Python virtual environment");
   }
   return venvPython();
 }
 
-function ensureHermesInstalled(pythonExe) {
+function ensureFrontendCompatibilityInstalled(pythonExe) {
   const check = spawnSync(pythonExe, ["-c", "import hermes_cli.main"], {
-    cwd: HERMES_ROOT,
+    cwd: COMPAT_FRONTEND_ROOT,
     env: {
       ...process.env,
-      PYTHONPATH: HERMES_ROOT,
+      PYTHONPATH: COMPAT_FRONTEND_ROOT,
     },
     stdio: "ignore",
   });
@@ -715,8 +726,8 @@ function ensureHermesInstalled(pythonExe) {
     return;
   }
 
-  const installed = spawnSync(pythonExe, ["-m", "pip", "install", "-e", HERMES_ROOT], {
-    cwd: HERMES_ROOT,
+  const installed = spawnSync(pythonExe, ["-m", "pip", "install", "-e", COMPAT_FRONTEND_ROOT], {
+    cwd: COMPAT_FRONTEND_ROOT,
     stdio: "inherit",
   });
   if (installed.status !== 0) {
@@ -756,15 +767,15 @@ async function ensureBridgeRunning() {
   }
 }
 
-async function spawnHermes(args) {
+async function spawnFrontendCompatibility(args) {
   const pythonExe = ensureVenv();
-  ensureHermesInstalled(pythonExe);
+  ensureFrontendCompatibilityInstalled(pythonExe);
 
   const child = spawn(pythonExe, ["-m", "hermes_cli.main", ...args], {
     cwd: WORKSPACE_ROOT,
     stdio: "inherit",
     env: buildRuntimeEnv({
-      PYTHONPATH: HERMES_ROOT,
+      PYTHONPATH: COMPAT_FRONTEND_ROOT,
       HERMES_BRIDGE_URL: bridgeUrl(),
       AGENTIX_BRIDGE_URL: bridgeUrl(),
       AGENTIX_FRONTEND: "hermes",
@@ -897,7 +908,6 @@ async function runAgentixUpdate(args = []) {
     console.log(`Reason: ${err instanceof Error ? err.message : String(err)}`);
     console.log("");
     console.log(`Manual upgrade: npm install -g ${pkg.name}`);
-    process.exitCode = 1;
     return;
   }
 
@@ -1092,15 +1102,15 @@ async function main() {
       console.log(buildCommandHelp(args[0]));
       return;
     }
-    if (HERMES_COMMANDS.has(args[0])) {
+    if (FRONTEND_COMPAT_COMMANDS.has(args[0])) {
       if (args[0] === "setup" || args[0] === "model" || args[0] === "options") {
         console.log(buildCommandHelp(args[0]));
         return;
       }
-      await spawnHermes([args[0], "--help"]);
+      await spawnFrontendCompatibility([args[0], "--help"]);
       return;
     }
-    await spawnHermes(["--help"]);
+    await spawnFrontendCompatibility(["--help"]);
     return;
   }
 
@@ -1109,12 +1119,12 @@ async function main() {
       console.log(buildCommandHelp(cmd));
       return;
     }
-    if (HERMES_COMMANDS.has(cmd)) {
+    if (FRONTEND_COMPAT_COMMANDS.has(cmd)) {
       if (cmd === "setup" || cmd === "model" || cmd === "options") {
         console.log(buildLauncherHelp());
         return;
       }
-      await spawnHermes([cmd, "--help"]);
+      await spawnFrontendCompatibility([cmd, "--help"]);
       return;
     }
   }
@@ -1124,13 +1134,13 @@ async function main() {
     return;
   }
 
-  if (cmd && HERMES_COMMANDS.has(cmd) && BRIDGELESS_HERMES_COMMANDS.has(cmd)) {
-    await spawnHermes([cmd, ...args]);
+  if (cmd && FRONTEND_COMPAT_COMMANDS.has(cmd) && BRIDGELESS_FRONTEND_COMMANDS.has(cmd)) {
+    await spawnFrontendCompatibility([cmd, ...args]);
     return;
   }
 
   await ensureBridgeRunning();
-  await spawnHermes(argv.filter(Boolean));
+  await spawnFrontendCompatibility(argv.filter(Boolean));
 }
 
 main().catch((err) => {

@@ -44,7 +44,7 @@ describe("release packaging files", () => {
     expect(smoke).toContain("tampered release artifact");
     expect(smoke).toContain("AGENTIX_RELEASE_BASE_URL");
     expect(smoke).toContain("verify-public-release.mjs");
-    expect(smoke).toContain("installHermesPythonDependencies");
+    expect(smoke).toContain("installCompatibilityPythonDependencies");
     expect(smoke).toContain("pip\", \"install\"");
     expect(verifier).toContain("verifyNpm");
     expect(verifier).toContain("verifyGitHubRelease");

@@ -18,7 +18,7 @@
 - Memory and sandbox artifacts are stored under the data directory
 - By default, `agentix` treats the current working directory as the workspace and stores state in `./data`
 - By default, Agentix setup writes secrets to `.env.local` and non-secret defaults to `data/config.json`
-- Set `AGENTIX_DATA_DIR` to move persistent state, `AGENTIX_HERMES_VENV` to move bundled compatibility internals, or `AGENTIX_PYTHON` to force a specific Python 3 executable
+- Set `AGENTIX_DATA_DIR` to move persistent state, `AGENTIX_PYTHON_VENV` to move bundled compatibility internals, or `AGENTIX_PYTHON` to force a specific Python 3 executable
 
 ## Agentix Command Surface
 

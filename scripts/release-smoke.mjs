@@ -189,8 +189,12 @@ async function removeDirWithRetries(dir) {
       return;
     } catch (err) {
       const code = err && typeof err === "object" && "code" in err ? err.code : "";
-      if (!["EBUSY", "EPERM", "ENOTEMPTY"].includes(String(code)) || attempt === maxAttempts) {
+      if (!["EBUSY", "EPERM", "ENOTEMPTY"].includes(String(code))) {
         throw err;
+      }
+      if (attempt === maxAttempts) {
+        log(`warning: could not remove busy smoke directory ${dir}; leaving it for OS cleanup`);
+        return;
       }
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 300 * attempt));
     }
@@ -414,8 +418,8 @@ async function smokeVersionedReleaseInstall(tarball, expectedSha256, tarballName
   }
 }
 
-async function installHermesPythonDependencies() {
-  log("installing Hermes Python dependencies for direct import checks");
+async function installCompatibilityPythonDependencies() {
+  log("installing compatibility Python dependencies for direct import checks");
   await run(python, ["-m", "pip", "install", "--disable-pip-version-check", "-e", join(installedPackageRoot, "hermes-agent")], {
     cwd: smokeRoot,
     timeoutMs: 240_000,
@@ -433,6 +437,21 @@ async function smokeCli() {
   assert(help.stdout.includes("tasks, task"), "agentix help missing task commands");
   assert(help.stdout.includes("approvals, approval"), "agentix help missing approval commands");
   assert(help.stdout.includes("readiness"), "agentix help missing readiness command");
+  assert(!help.stdout.includes("Nous"), "agentix help still mentions Nous branding");
+  assert(!help.stdout.includes("Portal"), "agentix help still mentions Portal branding");
+
+  const options = await run(agentixCommand, ["options"], { timeoutMs: 30_000 });
+  assert(options.stdout.includes("Kilo Gateway"), "agentix options missing Kilo Gateway setup guidance");
+  assert(options.stdout.includes("AGENTIX_LLM_API_KEY"), "agentix options missing Agentix API key env var");
+  assert(!options.stdout.includes("Nous"), "agentix options still mentions Nous branding");
+
+  const updateHelp = await run(agentixCommand, ["update", "--help"], { timeoutMs: 30_000 });
+  assert(updateHelp.stdout.includes("Usage: agentix update"), "agentix update help missing usage");
+  assert(updateHelp.stdout.includes("npm install -g"), "agentix update help missing npm upgrade path");
+
+  const updateCheck = await run(agentixCommand, ["update", "--check"], { timeoutMs: 60_000 });
+  assert(updateCheck.stdout.includes("Agentix update"), "agentix update --check missing Agentix header");
+  assert(!updateCheck.stdout.includes("Hermes"), "agentix update --check still mentions Hermes");
 
   const workspaceDir = join(smokeRoot, "workspace-cli");
   await mkdir(workspaceDir, { recursive: true });
@@ -502,6 +521,11 @@ async function smokeCli() {
     timeoutMs: 60_000,
   });
   assert(sessionCreate.stdout.includes("\"id\""), "installed backend sessions create command failed");
+  const boundedSessions = await run(agentixCommand, ["sessions", "list", "--limit", "1"], {
+    env: backendEnv,
+    timeoutMs: 60_000,
+  });
+  assert(boundedSessions.stdout.includes("Showing 1 session(s). Use --all for full list."), "installed sessions list did not stay bounded by default");
   const cronList = await run(agentixCommand, ["--agentix-cli", "cron", "list"], {
     env: backendEnv,
     timeoutMs: 60_000,
@@ -517,18 +541,18 @@ async function smokeReinstallPreservesWorkspace(tarball) {
   log("checking reinstall preserves workspace state");
   const workspaceDir = join(smokeRoot, "workspace-upgrade");
   const workspaceData = join(workspaceDir, "data");
-  const workspaceHermes = join(workspaceDir, ".agentix", "hermes");
+  const workspaceFrontend = join(workspaceDir, ".agentix", "frontend");
   await mkdir(workspaceData, { recursive: true });
-  await mkdir(workspaceHermes, { recursive: true });
+  await mkdir(workspaceFrontend, { recursive: true });
   await writeFile(join(workspaceData, "config.json"), JSON.stringify({
     provider: "openai",
     model: "preserved-upgrade-model",
     baseUrl: "http://127.0.0.1:5555/v1",
   }, null, 2) + "\n", "utf-8");
-  await writeFile(join(workspaceHermes, "config.yaml"), [
+  await writeFile(join(workspaceFrontend, "config.yaml"), [
     "model:",
     "  provider: openai",
-    "  default: preserved-hermes-model",
+    "  default: preserved-frontend-model",
     "  base_url: http://127.0.0.1:5555/v1",
     "",
   ].join("\n"), "utf-8");
@@ -546,7 +570,7 @@ async function smokeReinstallPreservesWorkspace(tarball) {
   const preserved = JSON.parse(readFileSync(join(workspaceData, "config.json"), "utf-8"));
   assert(preserved.model === "preserved-upgrade-model", "global reinstall mutated workspace model config");
   assert(preserved.provider === "openai", "global reinstall mutated workspace provider config");
-  assert(existsSync(join(workspaceHermes, "config.yaml")), "global reinstall removed Hermes workspace config");
+  assert(existsSync(join(workspaceFrontend, "config.yaml")), "global reinstall removed Agentix frontend workspace config");
 
   const shown = await run(agentixCommand, ["--agentix-cli", "config", "show"], {
     cwd: workspaceDir,
@@ -615,8 +639,8 @@ async function smokeServer() {
     assert(openapi.paths["/execute/stream"], "OpenAPI contract missing execute stream path");
 
     log("checking installed Agentix compatibility Python entrypoints");
-    await installHermesPythonDependencies();
-    const hermesEnv = {
+    await installCompatibilityPythonDependencies();
+    const compatibilityEnv = {
       ...serverEnv,
       AGENTIX_FRONTEND: "hermes",
       PYTHONPATH: [
@@ -627,17 +651,17 @@ async function smokeServer() {
 
     const syncWorkspace = join(smokeRoot, "workspace-sync");
     const syncData = join(syncWorkspace, "data");
-    const syncHermesHome = join(syncWorkspace, ".agentix", "hermes");
+    const syncFrontendHome = join(syncWorkspace, ".agentix", "frontend");
     await mkdir(syncData, { recursive: true });
-    await mkdir(syncHermesHome, { recursive: true });
-    await writeFile(join(syncHermesHome, "config.yaml"), [
+    await mkdir(syncFrontendHome, { recursive: true });
+    await writeFile(join(syncFrontendHome, "config.yaml"), [
       "model:",
       "  provider: openai",
       "  default: release-smoke-model",
       "  base_url: http://127.0.0.1:7777/v1",
       "",
     ].join("\n"), "utf-8");
-    await writeFile(join(syncHermesHome, ".env"), "OPENAI_API_KEY=release-smoke-secret\n", "utf-8");
+    await writeFile(join(syncFrontendHome, ".env"), "OPENAI_API_KEY=release-smoke-secret\n", "utf-8");
     const syncConfig = await run(python, [
       "-c",
       [
@@ -648,8 +672,8 @@ async function smokeServer() {
     ], {
       cwd: syncWorkspace,
       env: {
-        ...hermesEnv,
-        HERMES_HOME: syncHermesHome,
+        ...compatibilityEnv,
+        AGENTIX_FRONTEND_HOME: syncFrontendHome,
         AGENTIX_WORKSPACE_DIR: syncWorkspace,
         AGENTIX_DATA_DIR: syncData,
       },
@@ -668,7 +692,7 @@ async function smokeServer() {
       process.platform === "win32" ? `"${installedOneshotPrompt}"` : installedOneshotPrompt,
     ], {
       cwd: smokeRoot,
-      env: hermesEnv,
+      env: compatibilityEnv,
       timeoutMs: 120_000,
     });
     assert(installedOneshot.stdout.includes("Agentix is running with the Agentix shell and backend."), "installed agentix -z did not route through Agentix backend");
@@ -685,7 +709,7 @@ async function smokeServer() {
       "web",
     ], {
       cwd: smokeRoot,
-      env: hermesEnv,
+      env: compatibilityEnv,
       timeoutMs: 120_000,
     });
     assert(selectorOneshot.stdout.includes("Input: release-smoke-selector-delegation"), "installed agentix -z selector run did not preserve input");
@@ -701,14 +725,14 @@ async function smokeServer() {
 
     const installedUsage = await run(agentixCommand, ["usage"], {
       cwd: smokeRoot,
-      env: hermesEnv,
+      env: compatibilityEnv,
       timeoutMs: 120_000,
     });
     assert(installedUsage.stdout.includes("Agentix backend usage"), "installed agentix usage did not route through Agentix backend");
 
     const configSet = await run(agentixCommand, ["config", "set", "provider", "openai"], {
       cwd: smokeRoot,
-      env: hermesEnv,
+      env: compatibilityEnv,
       timeoutMs: 120_000,
     });
     const configSetResult = JSON.parse(configSet.stdout);
@@ -718,7 +742,7 @@ async function smokeServer() {
     );
     const configShow = await run(agentixCommand, ["config", "show"], {
       cwd: smokeRoot,
-      env: hermesEnv,
+      env: compatibilityEnv,
       timeoutMs: 120_000,
     });
     assert(configShow.stdout.includes("\"provider\": \"openai\""), "installed agentix config show did not read Agentix backend config");
@@ -728,7 +752,7 @@ async function smokeServer() {
       "from hermes_cli.oneshot import run_oneshot; raise SystemExit(run_oneshot('release smoke oneshot delegation'))",
     ], {
       cwd: smokeRoot,
-      env: hermesEnv,
+      env: compatibilityEnv,
       timeoutMs: 120_000,
     });
     assert(oneshot.stdout.includes("Agentix is running with the Agentix shell and backend."), "oneshot did not route through Agentix backend");
@@ -739,7 +763,7 @@ async function smokeServer() {
       "from tui_gateway.server import _AgentixTuiProxy; p=_AgentixTuiProxy('release-smoke-session'); r=p.run_conversation('release smoke tui proxy delegation'); print(r['final_response'])",
     ], {
       cwd: smokeRoot,
-      env: hermesEnv,
+      env: compatibilityEnv,
       timeoutMs: 120_000,
     });
     const tuiProxyOutput = `${tuiProxy.stdout}\n${tuiProxy.stderr}`;
@@ -758,7 +782,7 @@ async function smokeServer() {
       ].join("; "),
     ], {
       cwd: smokeRoot,
-      env: hermesEnv,
+      env: compatibilityEnv,
       timeoutMs: 120_000,
     });
     assert(cronAdapter.stdout.includes("Created Agentix scheduled job"), "Agentix cron compatibility adapter did not create an Agentix scheduler job");
@@ -766,7 +790,7 @@ async function smokeServer() {
 
     const gatewayList = await run(agentixCommand, ["gateway", "list"], {
       cwd: smokeRoot,
-      env: hermesEnv,
+      env: compatibilityEnv,
       timeoutMs: 120_000,
     });
     assert(gatewayList.stdout.includes("Platform") && gatewayList.stdout.includes("Messages"), "installed agentix gateway list did not print backend gateway table");
@@ -774,14 +798,14 @@ async function smokeServer() {
 
     const gatewayEnable = await run(agentixCommand, ["gateway", "enable", "webhook"], {
       cwd: smokeRoot,
-      env: hermesEnv,
+      env: compatibilityEnv,
       timeoutMs: 120_000,
     });
     assert(gatewayEnable.stdout.includes("Enabled Agentix gateway: webhook"), "installed agentix gateway enable did not route through Agentix backend");
 
     const gatewayMessage = await run(agentixCommand, ["gateway", "message", "webhook", "release", "smoke", "gateway", "delegation"], {
       cwd: smokeRoot,
-      env: hermesEnv,
+      env: compatibilityEnv,
       timeoutMs: 120_000,
     });
     assert(gatewayMessage.stdout.includes("\"ok\": true"), "installed agentix gateway message did not return ok");
@@ -797,7 +821,7 @@ async function smokeServer() {
       ].join("; "),
     ], {
       cwd: smokeRoot,
-      env: hermesEnv,
+      env: compatibilityEnv,
       timeoutMs: 120_000,
     });
     assert(memoryReset.stdout.includes("Removed"), "Agentix memory compatibility reset did not route through Agentix backend");

@@ -74,7 +74,7 @@ Agentix uses workspace-scoped configuration and environment variables:
 - `AGENTIX_SESSION_TOKEN` - optional admin Bearer token for dashboard/API/event access; workspace role tokens can also be created with the backend auth CLI
 - `AGENTIX_SESSION_TTL` - session retention
 - `AGENTIX_APPROVAL_TIMEOUT` - approval timeout
-- `AGENTIX_HERMES_VENV` - optional Python venv location for bundled compatibility internals
+- `AGENTIX_PYTHON_VENV` - optional Python venv location for bundled compatibility internals
 - `AGENTIX_PYTHON` - optional Python 3 executable override for bundled compatibility internals
 - `AGENTIX_SANDBOX_MODE` - `auto`, `docker`, or `local` sandbox execution mode
 - `AGENTIX_SANDBOX_DOCKER_IMAGE` - Docker image for containerized sandbox execution
@@ -87,7 +87,7 @@ By default, Agentix stores workspace runtime state under `data/`. `agentix setup
 - `src/` - Agentix backend, shell fallback, and bridge
 - `frontend/src/` - editable interactive dashboard source
 - `frontend/dist/` - generated dashboard served by the inbox server
-- `hermes-agent/` - bundled compatibility runtime used internally
+- `hermes-agent/` - vendored compatibility runtime used internally
 - `docs/` - install, operations, and security notes
 
 ## Development

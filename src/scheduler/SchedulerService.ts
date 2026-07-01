@@ -391,8 +391,8 @@ export class SchedulerService {
 function defaultScriptBaseDirs(): string[] {
   const dirs = [
     join(PATHS.dataDir, "scripts"),
-    process.env.HERMES_HOME ? join(process.env.HERMES_HOME, "scripts") : null,
-    join(homedir(), ".hermes", "scripts"),
+    process.env.AGENTIX_FRONTEND_HOME ? join(process.env.AGENTIX_FRONTEND_HOME, "scripts") : null,
+    join(homedir(), ".agentix", "scripts"),
   ].filter((dir): dir is string => Boolean(dir));
   return Array.from(new Set(dirs.map((dir) => resolve(dir))));
 }

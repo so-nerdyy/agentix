@@ -1,8 +1,8 @@
 // Shell entry point - starts the Agentix interactive shell.
-import { HermesShell } from "./HermesShell.js";
+import { AgentixShell } from "./AgentixShell.js";
 
 async function main() {
-  const shell = new HermesShell();
+  const shell = new AgentixShell();
   await shell.start();
 }
 

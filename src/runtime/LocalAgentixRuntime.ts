@@ -1623,7 +1623,7 @@ export class LocalAgentixRuntime {
       join(PATHS.installRoot, "frontend", "dist", "index.html"),
       join(PATHS.installRoot, "install.sh"),
       join(PATHS.installRoot, "install.ps1"),
-      join(PATHS.hermesRoot, "pyproject.toml"),
+      join(PATHS.compatibilityRuntimeRoot, "pyproject.toml"),
     ];
     const missingInstallAssets = requiredInstallAssets.filter((asset) => !existsSync(asset));
     const sandboxMode = process.env.AGENTIX_SANDBOX_MODE ?? "auto";
@@ -1652,11 +1652,11 @@ export class LocalAgentixRuntime {
       existsSync(PATHS.dataDir) ? undefined : "Run agentix setup or agentix server to initialize runtime directories.",
     );
     add(
-      "paths.hermes",
+      "paths.compatibility",
       "Bundled compatibility runtime",
-      existsSync(PATHS.hermesRoot) ? "pass" : "fail",
-      PATHS.hermesRoot,
-      existsSync(PATHS.hermesRoot) ? undefined : "Reinstall Agentix or restore the bundled compatibility runtime.",
+      existsSync(PATHS.compatibilityRuntimeRoot) ? "pass" : "fail",
+      PATHS.compatibilityRuntimeRoot,
+      existsSync(PATHS.compatibilityRuntimeRoot) ? undefined : "Reinstall Agentix or restore the bundled compatibility runtime.",
     );
     add(
       "install.package",
@@ -1821,7 +1821,7 @@ export class LocalAgentixRuntime {
     ) => ({ id, label, status: ok ? "pass" : "block", detail, requiredFor, ...(action ? { action } : {}) });
 
     const installAssets = byId.get("install.assets");
-    const hermes = byId.get("paths.hermes");
+    const compatibilityRuntime = byId.get("paths.compatibility");
     const piAgents = byId.get("agents.pi");
     const sandbox = byId.get("sandbox.isolation");
     const llmConfigured = Boolean(doctor.config?.llmApiKeyConfigured);
@@ -1844,12 +1844,12 @@ export class LocalAgentixRuntime {
         installAssets?.action,
       ),
       gate(
-        "frontend.hermes",
+        "frontend.compatibility",
         "Agentix compatibility runtime bundled",
-        hermes?.status === "pass",
-        hermes?.detail ?? "unknown",
+        compatibilityRuntime?.status === "pass",
+        compatibilityRuntime?.detail ?? "unknown",
         "private-beta",
-        hermes?.action,
+        compatibilityRuntime?.action,
       ),
       gate(
         "backend.pi_agents",

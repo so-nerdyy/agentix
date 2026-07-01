@@ -94,7 +94,7 @@ afterEach(() => {
 });
 
 describe("Powerhouse restored runtime", () => {
-  it("executes a normal Hermes message through Symphony and a Pi agent", async () => {
+  it("executes a normal Agentix message through Symphony and a Pi agent", async () => {
     const powerhouse = makePowerhouse();
 
     const result = await powerhouse.executeStimulus({
