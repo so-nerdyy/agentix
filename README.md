@@ -9,7 +9,7 @@ Agentix is an AI agent platform with an Agentix-owned shell, setup flow, dashboa
 ## Quick Start
 
 ```powershell
-npm install -g @so-nerdyy/agentix
+npm install -g @nerdyy/agentix
 agentix setup
 agentix
 ```
@@ -29,7 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh |
 Verified GitHub release install:
 
 ```sh
-AGENTIX_VERSION=2.1.2 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
+AGENTIX_VERSION=2.1.3 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
 ```
 
 From any project folder, `agentix` opens the interactive shell. Use `agentix dashboard` if you want the web control surface only, or `agentix server` if you want the backend bridge, event stream, and dashboard/API runtime. Open `http://127.0.0.1:3000/ui/` for the live control surface.
@@ -127,7 +127,7 @@ npm run release:verify -- --out data/release/public-release-proof.json
 agentix readiness
 ```
 
-`agentix readiness` stays at `private-beta-ready` until both proof files exist: one from a live model call, one from published npm/GitHub release verification. Public release also requires a public GitHub repository and an `NPM_TOKEN` with publish rights for `@so-nerdyy/agentix`.
+`agentix readiness` stays at `private-beta-ready` until both proof files exist: one from a live model call, one from published npm/GitHub release verification. Public release also requires a public GitHub repository and an `NPM_TOKEN` with publish rights for `@nerdyy/agentix`.
 
 ## Documentation
 

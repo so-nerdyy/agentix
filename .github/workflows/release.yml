@@ -77,7 +77,7 @@ jobs:
         shell: bash
         run: |
           if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
-            echo "NPM_TOKEN secret is required to publish @so-nerdyy/agentix."
+            echo "NPM_TOKEN secret is required to publish @nerdyy/agentix."
             exit 1
           fi
           npm whoami
