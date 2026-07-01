@@ -71,7 +71,9 @@ describe("release packaging files", () => {
     expect(releaseWorkflow).toContain("secrets.KILOCODE_API_KEY");
     expect(releaseWorkflow.indexOf("Publish to npm with provenance")).toBeLessThan(releaseWorkflow.indexOf("Upload release assets"));
     expect(releaseWorkflow).toContain("Validate npm authentication");
+    expect(releaseWorkflow).toContain("AGENTIX_HAS_LLM_KEY");
     expect(releaseWorkflow).toContain("npm run release:preflight -- --require-llm");
+    expect(releaseWorkflow).toContain("npm run release:preflight");
     expect(releaseWorkflow).toContain("NPM_TOKEN secret is required");
     expect(releaseWorkflow).toContain(".release/*-manifest.json");
     expect(releaseWorkflow).toContain("npm run release:verify -- --out data/release/public-release-proof.json");
