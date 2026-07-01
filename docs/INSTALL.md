@@ -84,7 +84,7 @@ npm test
 
 `npm run build` compiles the backend and rebuilds the static dashboard from `frontend/src` into `frontend/dist`.
 
-For release validation, run `npm run smoke:release` after build and tests. It packs and installs Agentix into an isolated prefix, checks installer SHA256 pass/fail behavior, starts the installed server, checks the dashboard/API, and verifies support-bundle generation. Run `npm run release:manifest` to produce a tarball plus SHA256 manifest for archival or verified installs. Before a public release claim, also run `npm run verify:llm -- --out data/release/live-llm-proof.json` with a real provider key and `npm run release:verify -- --out data/release/public-release-proof.json` after publishing; `agentix readiness` requires both proofs for `public-release-ready`.
+For release validation, run `npm run smoke:release` after build and tests. It packs and installs Agentix into an isolated prefix, checks installer SHA256 pass/fail behavior, starts the installed server, checks the dashboard/API, and verifies support-bundle generation. Run `npm run release:manifest` to produce a tarball plus SHA256 manifest for archival or verified installs. Before a public release claim, also run `npm run verify:llm -- --out data/release/live-llm-proof.json` with a real provider key and `npm run release:verify -- --out data/release/public-release-proof.json` after publishing; `agentix readiness` requires both proofs for `public-release-ready`. The public release proof must verify npm registry metadata, npm provenance attestation metadata, isolated `npm install -g`, GitHub release manifest/tarball SHA256, and installer dry-run.
 
 ## First Run
 
@@ -93,5 +93,5 @@ Use `agentix dashboard` to start the web control surface by itself. The full bac
 
 ## Update Path
 
-Use `agentix update` to check available releases and install instructions. The launcher preserves workspace config across upgrades.
+Use `agentix update` to check available releases, or `agentix update --install` to run the detected package-manager upgrade. The launcher preserves workspace config across upgrades.
 
