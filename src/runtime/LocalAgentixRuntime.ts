@@ -1831,8 +1831,8 @@ export class LocalAgentixRuntime {
     const gateStatus = (ok: boolean, warn = false): "pass" | "warn" | "block" => ok ? (warn ? "warn" : "pass") : "block";
     const releaseProof = this.readPublicReleaseProof(packageVersion);
     const llmProof = this.readLiveLlmProof(packageVersion);
-    const publicReleaseVerified = releaseProof.ok || process.env.AGENTIX_PUBLIC_RELEASE_VERIFIED === "1";
-    const liveLlmVerified = llmProof.ok || process.env.AGENTIX_LLM_LIVE_VERIFIED === "1";
+    const publicReleaseVerified = releaseProof.ok;
+    const liveLlmVerified = llmProof.ok;
 
     const gates = [
       gate(
@@ -1881,11 +1881,9 @@ export class LocalAgentixRuntime {
         liveLlmVerified,
         llmProof.ok
           ? `verified by ${llmProof.path}`
-          : liveLlmVerified
-            ? "external live LLM proof supplied by AGENTIX_LLM_LIVE_VERIFIED=1"
-            : llmConfigured
-              ? llmProof.detail
-              : "missing; deterministic fallback active",
+          : llmConfigured
+            ? llmProof.detail
+            : "missing; deterministic fallback active",
         "public-release",
         liveLlmVerified ? undefined : "Run agentix setup or export AGENTIX_LLM_API_KEY, then run npm run verify:llm -- --out data/release/live-llm-proof.json.",
       ),
@@ -1895,9 +1893,7 @@ export class LocalAgentixRuntime {
         publicReleaseVerified,
         releaseProof.ok
           ? `verified by ${releaseProof.path}`
-          : publicReleaseVerified
-            ? "external release proof supplied by AGENTIX_PUBLIC_RELEASE_VERIFIED=1"
-            : releaseProof.detail,
+          : releaseProof.detail,
         "external",
         publicReleaseVerified ? undefined : "Tag a release, publish with provenance, then verify npm install -g and curl install from public URLs.",
       ),

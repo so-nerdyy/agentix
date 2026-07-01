@@ -461,6 +461,51 @@ describe("Powerhouse restored runtime", () => {
     }
   });
 
+  it("does not accept environment flags as public-release proof", () => {
+    const previousReleaseFlag = process.env.AGENTIX_PUBLIC_RELEASE_VERIFIED;
+    const previousLlmFlag = process.env.AGENTIX_LLM_LIVE_VERIFIED;
+    const previousReleaseProof = process.env.AGENTIX_PUBLIC_RELEASE_PROOF;
+    const previousLlmProof = process.env.AGENTIX_LLM_PROOF;
+    process.env.AGENTIX_PUBLIC_RELEASE_VERIFIED = "1";
+    process.env.AGENTIX_LLM_LIVE_VERIFIED = "1";
+    delete process.env.AGENTIX_PUBLIC_RELEASE_PROOF;
+    delete process.env.AGENTIX_LLM_PROOF;
+    const runtime = new LocalAgentixRuntime();
+
+    try {
+      const readiness = runtime.readiness() as {
+        publicReleaseReady: boolean;
+        gates: Array<{ id: string; status: string }>;
+      };
+
+      expect(readiness.publicReleaseReady).toBe(false);
+      expect(readiness.gates.find((gate) => gate.id === "llm.live_key")?.status).toBe("block");
+      expect(readiness.gates.find((gate) => gate.id === "release.publish")?.status).toBe("block");
+    } finally {
+      runtime.shutdown();
+      if (previousReleaseFlag === undefined) {
+        delete process.env.AGENTIX_PUBLIC_RELEASE_VERIFIED;
+      } else {
+        process.env.AGENTIX_PUBLIC_RELEASE_VERIFIED = previousReleaseFlag;
+      }
+      if (previousLlmFlag === undefined) {
+        delete process.env.AGENTIX_LLM_LIVE_VERIFIED;
+      } else {
+        process.env.AGENTIX_LLM_LIVE_VERIFIED = previousLlmFlag;
+      }
+      if (previousReleaseProof === undefined) {
+        delete process.env.AGENTIX_PUBLIC_RELEASE_PROOF;
+      } else {
+        process.env.AGENTIX_PUBLIC_RELEASE_PROOF = previousReleaseProof;
+      }
+      if (previousLlmProof === undefined) {
+        delete process.env.AGENTIX_LLM_PROOF;
+      } else {
+        process.env.AGENTIX_LLM_PROOF = previousLlmProof;
+      }
+    }
+  });
+
   it("exposes audit-backed runtime logs", async () => {
     const runtime = new LocalAgentixRuntime();
 

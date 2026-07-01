@@ -71,6 +71,7 @@ Agentix uses workspace-scoped configuration and environment variables:
 - `AGENTIX_MODEL` - default model
 - `AGENTIX_BASE_URL` - optional OpenAI-compatible or provider-specific base URL
 - `AGENTIX_LLM_API_KEY` - runtime API key
+- `KILOCODE_API_KEY` - accepted alias for Kilo Gateway when `AGENTIX_PROVIDER=kilocode`
 - `AGENTIX_SESSION_TOKEN` - optional admin Bearer token for dashboard/API/event access; workspace role tokens can also be created with the backend auth CLI
 - `AGENTIX_SESSION_TTL` - session retention
 - `AGENTIX_APPROVAL_TIMEOUT` - approval timeout
@@ -80,6 +81,15 @@ Agentix uses workspace-scoped configuration and environment variables:
 - `AGENTIX_SANDBOX_DOCKER_IMAGE` - Docker image for containerized sandbox execution
 
 By default, Agentix stores workspace runtime state under `data/`. `agentix setup` and `agentix model` write API secrets to `.env.local` and sync non-secret provider/model/base URL defaults into `data/config.json`.
+
+Kilo Gateway first-class setup:
+
+```powershell
+agentix config set provider kilocode
+agentix config set model <kilo-model-id>
+agentix config set baseUrl https://api.kilo.ai/api/gateway
+$env:KILOCODE_API_KEY="<kilo-gateway-key>"
+```
 
 ## Project Layout
 

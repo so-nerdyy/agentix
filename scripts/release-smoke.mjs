@@ -442,16 +442,24 @@ async function smokeCli() {
 
   const options = await run(agentixCommand, ["options"], { timeoutMs: 30_000 });
   assert(options.stdout.includes("Kilo Gateway"), "agentix options missing Kilo Gateway setup guidance");
+  assert(options.stdout.includes("kilocode"), "agentix options missing first-class kilocode provider");
+  assert(options.stdout.includes("https://api.kilo.ai/api/gateway"), "agentix options missing Kilo Gateway base URL");
   assert(options.stdout.includes("AGENTIX_LLM_API_KEY"), "agentix options missing Agentix API key env var");
+  assert(options.stdout.includes("KILOCODE_API_KEY"), "agentix options missing Kilo Gateway API key alias");
   assert(!options.stdout.includes("Nous"), "agentix options still mentions Nous branding");
 
   const updateHelp = await run(agentixCommand, ["update", "--help"], { timeoutMs: 30_000 });
   assert(updateHelp.stdout.includes("Usage: agentix update"), "agentix update help missing usage");
+  assert(updateHelp.stdout.includes("--install"), "agentix update help missing auto-install option");
   assert(updateHelp.stdout.includes("npm install -g"), "agentix update help missing npm upgrade path");
 
   const updateCheck = await run(agentixCommand, ["update", "--check"], { timeoutMs: 60_000 });
   assert(updateCheck.stdout.includes("Agentix update"), "agentix update --check missing Agentix header");
   assert(!updateCheck.stdout.includes("Hermes"), "agentix update --check still mentions Hermes");
+
+  const modelHelp = await run(agentixCommand, ["model", "--help"], { timeoutMs: 30_000 });
+  assert(modelHelp.stdout.includes("agentix model [--verify]"), "agentix model help missing live verify option");
+  assert(modelHelp.stdout.includes("https://api.kilo.ai/api/gateway"), "agentix model help missing Kilo Gateway base URL");
 
   const workspaceDir = join(smokeRoot, "workspace-cli");
   await mkdir(workspaceDir, { recursive: true });

@@ -21,6 +21,29 @@ export interface AgentixConfig {
 
 const WORKSPACE_ENV = parseEnvFile(join(PATHS.workspaceRoot, ".env.local"));
 
+function firstEnvString(keys: string[]): string | null {
+  for (const key of keys) {
+    const value = envString(key);
+    if (value) return value;
+  }
+  return null;
+}
+
+function providerApiKeyCandidates(provider: string | null, baseUrl: string | null): string[] {
+  const normalizedProvider = (provider ?? "").toLowerCase();
+  const normalizedBaseUrl = (baseUrl ?? "").toLowerCase();
+  if (normalizedProvider.includes("kilo") || normalizedBaseUrl.includes("api.kilo.ai")) {
+    return ["AGENTIX_LLM_API_KEY", "KILOCODE_API_KEY", "KILO_API_KEY", "OPENAI_API_KEY"];
+  }
+  if (normalizedProvider.includes("anthropic") || normalizedProvider.includes("claude")) {
+    return ["AGENTIX_LLM_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN"];
+  }
+  if (normalizedProvider.includes("openrouter")) {
+    return ["AGENTIX_LLM_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"];
+  }
+  return ["AGENTIX_LLM_API_KEY"];
+}
+
 const DEFAULTS: AgentixConfig = {
   model: envString("AGENTIX_MODEL") ?? "claude-3-5-sonnet",
   provider: envString("AGENTIX_PROVIDER") ?? "auto",
@@ -69,7 +92,12 @@ function parseEnvFile(file: string): Record<string, string> {
 }
 
 function mergeFromDisk(): AgentixConfig {
-  if (!existsSync(PATHS.configFile)) return { ...DEFAULTS };
+  if (!existsSync(PATHS.configFile)) {
+    return {
+      ...DEFAULTS,
+      llmApiKey: firstEnvString(providerApiKeyCandidates(DEFAULTS.provider, DEFAULTS.baseUrl)),
+    };
+  }
   try {
     const raw = readFileSync(PATHS.configFile, "utf-8");
     const parsed = JSON.parse(raw) as Partial<AgentixConfig>;
@@ -79,14 +107,20 @@ function mergeFromDisk(): AgentixConfig {
       sessionToken: _omitSessionToken,
       ...rest
     } = parsed;
-    return {
+    const merged = {
       ...DEFAULTS,
       ...rest,
-      llmApiKey: DEFAULTS.llmApiKey,
       sessionToken: DEFAULTS.sessionToken,
     };
+    return {
+      ...merged,
+      llmApiKey: firstEnvString(providerApiKeyCandidates(merged.provider, merged.baseUrl)),
+    };
   } catch {
-    return { ...DEFAULTS };
+    return {
+      ...DEFAULTS,
+      llmApiKey: firstEnvString(providerApiKeyCandidates(DEFAULTS.provider, DEFAULTS.baseUrl)),
+    };
   }
 }
 

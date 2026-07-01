@@ -75,6 +75,8 @@ const timeoutMs = Number(argValue("--timeout-ms") || envString("AGENTIX_LLM_VERI
 
 const openAiDefaults = {
   openai: "https://api.openai.com/v1",
+  kilo: "https://api.kilo.ai/api/gateway",
+  kilocode: "https://api.kilo.ai/api/gateway",
   openrouter: "https://openrouter.ai/api/v1",
   deepseek: "https://api.deepseek.com/v1",
   groq: "https://api.groq.com/openai/v1",
@@ -84,6 +86,16 @@ const openAiDefaults = {
   lmstudio: "http://127.0.0.1:1234/v1",
   "ollama-cloud": "https://ollama.com/v1",
 };
+
+function providerKeyCandidates(resolvedProvider, resolvedBaseUrl = "") {
+  const normalizedBaseUrl = String(resolvedBaseUrl).toLowerCase();
+  if (resolvedProvider === "kilo" || resolvedProvider === "kilocode" || normalizedBaseUrl.includes("api.kilo.ai")) {
+    return ["AGENTIX_LLM_API_KEY", "KILOCODE_API_KEY", "KILO_API_KEY", "OPENAI_API_KEY"];
+  }
+  if (resolvedProvider === "openrouter") return ["AGENTIX_LLM_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"];
+  if (resolvedProvider === "anthropic") return ["AGENTIX_LLM_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN"];
+  return ["AGENTIX_LLM_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"];
+}
 
 function resolveProvider() {
   if (provider && provider !== "auto") return provider;
@@ -115,14 +127,15 @@ async function fetchWithTimeout(url, options) {
 async function verifyOpenAICompatible(resolvedProvider) {
   const resolvedBaseUrl = (baseUrl || openAiDefaults[resolvedProvider] || "").replace(/\/+$/, "");
   if (!resolvedBaseUrl) throw new Error(`no base URL configured for provider ${resolvedProvider}`);
-  if (!apiKey && !isLocalProvider(resolvedProvider, resolvedBaseUrl)) {
+  const resolvedApiKey = apiKey || providerKeyCandidates(resolvedProvider, resolvedBaseUrl).map(envString).find(Boolean) || null;
+  if (!resolvedApiKey && !isLocalProvider(resolvedProvider, resolvedBaseUrl)) {
     throw new Error("AGENTIX_LLM_API_KEY is not configured");
   }
   const response = await fetchWithTimeout(`${resolvedBaseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+      ...(resolvedApiKey ? { Authorization: `Bearer ${resolvedApiKey}` } : {}),
     },
     body: JSON.stringify({
       model,
@@ -141,13 +154,14 @@ async function verifyOpenAICompatible(resolvedProvider) {
 }
 
 async function verifyAnthropic() {
-  if (!apiKey) throw new Error("AGENTIX_LLM_API_KEY is not configured");
+  const resolvedApiKey = apiKey || providerKeyCandidates("anthropic").map(envString).find(Boolean) || null;
+  if (!resolvedApiKey) throw new Error("AGENTIX_LLM_API_KEY is not configured");
   const resolvedBaseUrl = (baseUrl || "https://api.anthropic.com").replace(/\/+$/, "").replace(/\/v1$/, "");
   const response = await fetchWithTimeout(`${resolvedBaseUrl}/v1/messages`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": apiKey,
+      "x-api-key": resolvedApiKey,
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({

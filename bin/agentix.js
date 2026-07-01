@@ -171,7 +171,7 @@ function buildCommandHelp(command) {
         "Usage: agentix model",
         "",
         "Configures Agentix provider/model/base URL/API key for this workspace.",
-        "For Kilo Gateway, use provider `custom`, the Kilo model id, and the Kilo /v1 base URL.",
+        "For Kilo Gateway, use provider `kilocode`, the Kilo model id, and base URL `https://api.kilo.ai/api/gateway`.",
       ].join("\n");
     case "options":
       return [
@@ -181,9 +181,9 @@ function buildCommandHelp(command) {
       ].join("\n");
     case "update":
       return [
-        "Usage: agentix update [--check]",
+        "Usage: agentix update [--check|--install]",
         "",
-        "Checks npm for Agentix updates and prints install commands.",
+        "Checks npm for Agentix updates and can install the latest global package.",
         "Use `npm install -g @so-nerdyy/agentix` or the verified curl installer to upgrade.",
       ].join("\n");
     case "server":
@@ -537,6 +537,9 @@ function parseFrontendModelConfig(file) {
 
 function providerKeyCandidates(provider) {
   const normalized = String(provider || "").toLowerCase();
+  if (normalized.includes("kilo")) {
+    return ["KILOCODE_API_KEY", "KILO_API_KEY", "AGENTIX_LLM_API_KEY", "OPENAI_API_KEY"];
+  }
   if (normalized.includes("anthropic") || normalized.includes("claude")) {
     return ["ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN"];
   }
@@ -558,7 +561,7 @@ function providerKeyCandidates(provider) {
   if (normalized.includes("xai") || normalized.includes("grok")) {
     return ["XAI_API_KEY", "OPENAI_API_KEY"];
   }
-  return ["OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"];
+  return ["AGENTIX_LLM_API_KEY", "KILOCODE_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"];
 }
 
 function buildRuntimeEnv(extra = {}) {
@@ -589,7 +592,10 @@ function buildRuntimeEnv(extra = {}) {
     env.AGENTIX_BASE_URL = env.OPENAI_BASE_URL;
   }
   if (!env.AGENTIX_LLM_API_KEY) {
-    for (const keyName of providerKeyCandidates(env.AGENTIX_PROVIDER || modelConfig.provider)) {
+    const providerForKeys = env.AGENTIX_BASE_URL?.includes("api.kilo.ai")
+      ? "kilocode"
+      : env.AGENTIX_PROVIDER || modelConfig.provider;
+    for (const keyName of providerKeyCandidates(providerForKeys)) {
       if (env[keyName]) {
         env.AGENTIX_LLM_API_KEY = env[keyName];
         break;
@@ -829,6 +835,7 @@ async function spawnNodeShell() {
 
 function printAgentixOptions(topic = "all") {
   const providers = [
+    ["kilocode", "Kilo Gateway OpenAI-compatible endpoint"],
     ["custom", "OpenAI-compatible gateways, including Kilo Gateway"],
     ["openai", "OpenAI API-compatible default endpoint"],
     ["anthropic", "Anthropic Messages API"],
@@ -853,7 +860,7 @@ function printAgentixOptions(topic = "all") {
   }
   if (topic === "models" || topic === "all") {
     console.log("Model examples:");
-    console.log("  Kilo Gateway: use the model id shown by Kilo");
+    console.log("  Kilo Gateway: provider kilocode, base URL https://api.kilo.ai/api/gateway, model id from Kilo");
     console.log("  OpenAI:       gpt-4o-mini, gpt-4.1-mini, gpt-5-codex-compatible ids when available");
     console.log("  Anthropic:   claude-3-5-sonnet-latest or your configured model id");
     console.log("  Local:       whatever your local /v1/models endpoint exposes");
@@ -861,10 +868,11 @@ function printAgentixOptions(topic = "all") {
   }
   if (topic === "env" || topic === "all") {
     console.log("Environment variables:");
-    console.log("  AGENTIX_PROVIDER=custom");
+    console.log("  AGENTIX_PROVIDER=kilocode");
     console.log("  AGENTIX_MODEL=<model-id>");
-    console.log("  AGENTIX_BASE_URL=https://<gateway>/v1");
+    console.log("  AGENTIX_BASE_URL=https://api.kilo.ai/api/gateway");
     console.log("  AGENTIX_LLM_API_KEY=<provider-or-gateway-key>");
+    console.log("  KILOCODE_API_KEY=<kilo-gateway-key>  # accepted alias");
     console.log("  AGENTIX_BRIDGE_URL=http://127.0.0.1:<port>  # optional explicit bridge");
     console.log("");
   }
@@ -883,6 +891,15 @@ async function runAgentixUpdate(args = []) {
     console.log(buildCommandHelp("update"));
     return;
   }
+  const installRequested = args.includes("--install") || args.includes("--upgrade");
+
+  const installCommand = () => {
+    const userAgent = String(process.env.npm_config_user_agent || "").toLowerCase();
+    if (userAgent.includes("pnpm")) return { command: "pnpm", args: ["add", "-g", `${pkg.name}@latest`] };
+    if (userAgent.includes("yarn")) return { command: "yarn", args: ["global", "add", `${pkg.name}@latest`] };
+    if (userAgent.includes("bun")) return { command: "bun", args: ["add", "-g", `${pkg.name}@latest`] };
+    return { command: process.platform === "win32" ? "npm.cmd" : "npm", args: ["install", "-g", `${pkg.name}@latest`] };
+  };
 
   const registryUrl = `https://registry.npmjs.org/${encodeURIComponent(pkg.name)}`;
   let latest = null;
@@ -919,12 +936,35 @@ async function runAgentixUpdate(args = []) {
     return;
   }
   console.log("Status:    update available");
+  if (installRequested) {
+    const update = installCommand();
+    console.log("");
+    console.log(`Running: ${update.command} ${update.args.join(" ")}`);
+    const child = spawn(update.command, update.args, {
+      cwd: WORKSPACE_ROOT,
+      stdio: "inherit",
+      shell: process.platform === "win32" && update.command.endsWith(".cmd"),
+    });
+    await new Promise((resolveExit) => {
+      child.on("close", (code) => {
+        if (code === 0) {
+          resolveExit();
+          return;
+        }
+        process.exit(code ?? 1);
+      });
+    });
+    return;
+  }
   console.log("");
   console.log("Upgrade:");
   console.log(`  npm install -g ${pkg.name}`);
   console.log("");
   console.log("Verified installer:");
   console.log("  curl -fsSL <release-install-url> | sh");
+  console.log("");
+  console.log("Auto-install:");
+  console.log("  agentix update --install");
 }
 
 function writeWorkspaceConfig({ provider, model, baseUrl }) {
@@ -988,13 +1028,21 @@ async function promptForConfig(section = "all") {
     const value = (await rl.question(`${label}${suffix}: `)).trim();
     return value || fallback;
   };
+  const defaultBaseUrl = (provider) => {
+    const normalized = String(provider || "").toLowerCase();
+    if (normalized === "openai") return "https://api.openai.com/v1";
+    if (normalized === "kilocode" || normalized === "kilo") return "https://api.kilo.ai/api/gateway";
+    if (normalized === "openrouter") return "https://openrouter.ai/api/v1";
+    if (normalized === "local") return "http://127.0.0.1:11434/v1";
+    return "";
+  };
 
   try {
     const currentEnv = {
-      provider: process.env.AGENTIX_PROVIDER || "custom",
+      provider: process.env.AGENTIX_PROVIDER || "kilocode",
       model: process.env.AGENTIX_MODEL || "",
       baseUrl: process.env.AGENTIX_BASE_URL || "",
-      apiKey: process.env.AGENTIX_LLM_API_KEY || "",
+      apiKey: process.env.AGENTIX_LLM_API_KEY || process.env.KILOCODE_API_KEY || "",
     };
     console.log(`Agentix setup`);
     console.log(`Workspace: ${WORKSPACE_ROOT}`);
@@ -1006,9 +1054,9 @@ async function promptForConfig(section = "all") {
     let apiKey = currentEnv.apiKey;
 
     if (section === "all" || section === "model") {
-      provider = await ask("Provider (custom/openai/anthropic/openrouter/local)", provider);
-      model = await ask("Model", model || (provider === "custom" ? "kilo-model" : "gpt-4o-mini"));
-      baseUrl = await ask("Base URL", baseUrl || (provider === "openai" ? "https://api.openai.com/v1" : ""));
+      provider = await ask("Provider (kilocode/custom/openai/anthropic/openrouter/local)", provider);
+      model = await ask("Model", model || (["kilocode", "kilo"].includes(provider.toLowerCase()) ? "moonshotai/kimi-k2" : "gpt-4o-mini"));
+      baseUrl = await ask("Base URL", baseUrl || defaultBaseUrl(provider));
       apiKey = await ask("API key", apiKey);
     }
 
@@ -1026,6 +1074,25 @@ async function promptForConfig(section = "all") {
   } finally {
     rl?.close();
   }
+}
+
+async function verifyCurrentModel(args = []) {
+  const script = resolve(PROJECT_ROOT, "scripts", "verify-live-llm.mjs");
+  const forwarded = args.filter((arg) => arg !== "--verify");
+  const child = spawn(process.execPath, [script, ...forwarded], {
+    cwd: WORKSPACE_ROOT,
+    stdio: "inherit",
+    env: buildRuntimeEnv(),
+  });
+  await new Promise((resolveExit) => {
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolveExit();
+        return;
+      }
+      process.exit(code ?? 1);
+    });
+  });
 }
 
 async function main() {
@@ -1067,11 +1134,16 @@ async function main() {
   if (cmd === "model") {
     if (args.includes("--help") || args.includes("-h")) {
       console.log([
-        "Usage: agentix model",
+        "Usage: agentix model [--verify]",
         "",
         "Configures Agentix provider/model/base URL/API key for this workspace.",
-        "For Kilo Gateway, use provider `custom`, the Kilo model id, and the Kilo /v1 base URL.",
+        "For Kilo Gateway, use provider `kilocode`, the Kilo model id, and base URL `https://api.kilo.ai/api/gateway`.",
+        "Use `agentix model --verify` to run a live provider handshake with the current config.",
       ].join("\n"));
+      return;
+    }
+    if (args.includes("--verify")) {
+      await verifyCurrentModel(args);
       return;
     }
     await promptForConfig("model");

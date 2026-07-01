@@ -13,6 +13,8 @@ export interface LLMCompletion {
 
 const OPENAI_COMPATIBLE_DEFAULTS: Record<string, string> = {
   openai: "https://api.openai.com/v1",
+  kilo: "https://api.kilo.ai/api/gateway",
+  kilocode: "https://api.kilo.ai/api/gateway",
   openrouter: "https://openrouter.ai/api/v1",
   deepseek: "https://api.deepseek.com/v1",
   groq: "https://api.groq.com/openai/v1",

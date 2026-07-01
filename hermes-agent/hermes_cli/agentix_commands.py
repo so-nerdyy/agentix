@@ -59,8 +59,11 @@ def _data_dir() -> Path:
     return Path(os.environ.get("AGENTIX_DATA_DIR") or (_workspace_dir() / "data")).resolve()
 
 
-def _provider_key_candidates(provider: str) -> list[str]:
+def _provider_key_candidates(provider: str, base_url: str = "") -> list[str]:
     normalized = (provider or "").lower()
+    normalized_base_url = (base_url or "").lower()
+    if "kilo" in normalized or "api.kilo.ai" in normalized_base_url:
+        return ["KILOCODE_API_KEY", "KILO_API_KEY", "AGENTIX_LLM_API_KEY", "OPENAI_API_KEY"]
     if "anthropic" in normalized or "claude" in normalized:
         return ["ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN"]
     if "openrouter" in normalized:
@@ -75,7 +78,7 @@ def _provider_key_candidates(provider: str) -> list[str]:
         return ["MISTRAL_API_KEY", "OPENAI_API_KEY"]
     if "xai" in normalized or "grok" in normalized:
         return ["XAI_API_KEY", "OPENAI_API_KEY"]
-    return ["OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"]
+    return ["AGENTIX_LLM_API_KEY", "KILOCODE_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"]
 
 
 def sync_agentix_runtime_config() -> dict[str, Any]:
@@ -98,7 +101,7 @@ def sync_agentix_runtime_config() -> dict[str, Any]:
     base_url = str(model_cfg.get("base_url") or "").strip()
 
     key = ""
-    for key_name in _provider_key_candidates(provider):
+    for key_name in _provider_key_candidates(provider, base_url):
         key = get_env_value(key_name) or os.environ.get(key_name, "")
         if key:
             break
