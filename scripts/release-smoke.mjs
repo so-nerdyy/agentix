@@ -643,6 +643,9 @@ async function smokeServer() {
     const ui = await fetchText(`${inboxUrl}/ui/`);
     assert(ui.includes("Agentix Control"), "dashboard HTML missing Agentix Control");
     assert(ui.includes("Command palette"), "dashboard HTML missing command palette");
+    assert(!ui.includes("Hermes frontend"), "dashboard HTML exposes Hermes frontend branding");
+    assert(!ui.includes("Nous"), "dashboard HTML exposes Nous branding");
+    assert(!ui.includes("Portal"), "dashboard HTML exposes Portal branding");
     const openapi = await fetchJson(`${inboxUrl}/openapi.json`);
     assert(openapi.openapi === "3.1.0", "inbox OpenAPI contract missing");
     assert(openapi.paths["/execute/stream"], "OpenAPI contract missing execute stream path");
