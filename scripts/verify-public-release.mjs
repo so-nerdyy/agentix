@@ -100,11 +100,14 @@ async function verifyNpm(packageName, version) {
   if (!metadata.dist?.integrity && !metadata.dist?.shasum) fail("npm metadata missing dist integrity/shasum");
   const attestationsUrl = metadata.dist?.attestations?.url ?? null;
   if (!attestationsUrl) fail("npm metadata missing dist.attestations.url; publish must use npm provenance");
+  const provenancePredicate = metadata.dist?.attestations?.provenance?.predicateType ?? "";
+  if (!String(provenancePredicate).startsWith("https://slsa.dev/provenance/")) {
+    fail(`npm metadata missing SLSA provenance predicate: ${String(provenancePredicate || "none")}`);
+  }
   log(`checking npm provenance attestations ${attestationsUrl}`);
   const attestations = await fetchJson(attestationsUrl);
-  const attestationText = JSON.stringify(attestations);
-  if (!attestationText.includes("https://slsa.dev/provenance/")) {
-    fail("npm attestations missing SLSA provenance predicate");
+  if (!Array.isArray(attestations.attestations) || attestations.attestations.length === 0) {
+    fail("npm attestations endpoint returned no attestations");
   }
   return {
     tarball: metadata.dist.tarball,
@@ -112,6 +115,8 @@ async function verifyNpm(packageName, version) {
     shasum: metadata.dist.shasum ?? null,
     attestations: {
       url: attestationsUrl,
+      predicateType: provenancePredicate,
+      count: attestations.attestations.length,
       provenance: true,
     },
   };

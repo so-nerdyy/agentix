@@ -303,6 +303,7 @@ describe("Powerhouse restored runtime", () => {
         tarball: `https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/-/${artifactBase}-${pkg.version}.tgz`,
         attestations: {
           url: `https://registry.npmjs.org/-/npm/v1/attestations/${encodeURIComponent(pkg.name)}@${pkg.version}`,
+          predicateType: "https://slsa.dev/provenance/v1",
           provenance: true,
         },
       },
@@ -395,6 +396,7 @@ describe("Powerhouse restored runtime", () => {
         tarball: `https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/-/${artifactBase}-${pkg.version}.tgz`,
         attestations: {
           url: `https://registry.npmjs.org/-/npm/v1/attestations/${encodeURIComponent(pkg.name)}@${pkg.version}`,
+          predicateType: "https://slsa.dev/provenance/v1",
           provenance: true,
         },
       },
@@ -532,6 +534,7 @@ describe("Powerhouse restored runtime", () => {
         tarball: `https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/-/${artifactBase}-${pkg.version}.tgz`,
         attestations: {
           url: `https://registry.npmjs.org/-/npm/v1/attestations/${encodeURIComponent(pkg.name)}@${pkg.version}`,
+          predicateType: "https://slsa.dev/provenance/v1",
           provenance: true,
         },
       },

@@ -2011,7 +2011,7 @@ export class LocalAgentixRuntime {
         installerDryRun?: boolean;
         verifiedAt?: string;
         release?: { sha256?: string; manifestUrl?: string; tarballUrl?: string };
-        npm?: { attestations?: { url?: string; provenance?: boolean } };
+        npm?: { attestations?: { url?: string; predicateType?: string; provenance?: boolean } };
         npmInstall?: { agentixVersion?: string; helpChecked?: boolean };
       };
       if (!proof.ok) {
@@ -2031,6 +2031,9 @@ export class LocalAgentixRuntime {
       }
       if (!proof.npm.attestations?.url || proof.npm.attestations.provenance !== true) {
         return { ok: false, path: proofPath, detail: "proof missing npm provenance attestation verification" };
+      }
+      if (!proof.npm.attestations.predicateType?.startsWith("https://slsa.dev/provenance/")) {
+        return { ok: false, path: proofPath, detail: "proof missing SLSA provenance predicate" };
       }
       if (!proof.npmInstall?.agentixVersion || !proof.npmInstall.helpChecked) {
         return { ok: false, path: proofPath, detail: "proof missing npm global install verification" };
