@@ -44,7 +44,13 @@ jobs:
       - name: Release preflight
         if: startsWith(github.ref, 'refs/tags/')
         timeout-minutes: 5
-        run: npm run release:preflight -- --require-llm
+        shell: bash
+        run: |
+          if [ "${AGENTIX_HAS_LLM_KEY}" = "true" ]; then
+            npm run release:preflight -- --require-llm
+          else
+            npm run release:preflight
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
