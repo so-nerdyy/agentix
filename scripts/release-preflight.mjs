@@ -100,7 +100,7 @@ if (!token) {
 }
 
 if (!pkg.name.startsWith("@")) {
-  add(results, "package.scope", false, `${pkg.name} is unscoped`, "Use a scoped npm package you control, e.g. @so-nerdyy/agentix.");
+  add(results, "package.scope", false, `${pkg.name} is unscoped`, "Use a scoped npm package you control, e.g. @nerdyy/agentix.");
 } else {
   add(results, "package.scope", true, pkg.name);
 }

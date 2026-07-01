@@ -25,6 +25,9 @@ describe("release packaging files", () => {
     expect(pkg.scripts["release:verify"]).toBe("node scripts/verify-public-release.mjs");
     expect(pkg.scripts["verify:llm"]).toBe("node scripts/verify-live-llm.mjs");
     expect(pkg.files).toContain("scripts");
+    expect(pkg.name).toBe("@nerdyy/agentix");
+    expect(shell).toContain("DEFAULT_PACKAGE=\"@nerdyy/agentix\"");
+    expect(powershell).toContain("$Package = \"@nerdyy/agentix\"");
     expect(shell).toContain("AGENTIX_EXPECTED_SHA256");
     expect(shell).toContain("AGENTIX_VERSION");
     expect(shell).toContain("Checksum mismatch");
@@ -65,6 +68,7 @@ describe("release packaging files", () => {
     expect(llmVerifier).toContain("/v1/messages");
     expect(smoke).toContain("public-release-proof.json");
     expect(releaseWorkflow).toContain("npm publish --provenance");
+    expect(releaseWorkflow).toContain("@nerdyy/agentix");
     expect(releaseWorkflow).toContain("concurrency:");
     expect(releaseWorkflow).toContain("timeout-minutes: 60");
     expect(releaseWorkflow).toContain("timeout-minutes: 25");

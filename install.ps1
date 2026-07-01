@@ -36,11 +36,11 @@ function Get-AgentixFileSha256($Path) {
 }
 
 if ([string]::IsNullOrWhiteSpace($Package)) {
-  $Package = "@so-nerdyy/agentix"
+  $Package = "@nerdyy/agentix"
 }
 
 if ([string]::IsNullOrWhiteSpace($ReleaseArtifactBase)) {
-  $ReleaseArtifactBase = "so-nerdyy-agentix"
+  $ReleaseArtifactBase = "nerdyy-agentix"
 }
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
@@ -59,7 +59,7 @@ if ($NodeMajor -lt 18) {
 
 $TempDir = $null
 try {
-  if (-not [string]::IsNullOrWhiteSpace($Version) -and $Package -eq "@so-nerdyy/agentix") {
+  if (-not [string]::IsNullOrWhiteSpace($Version) -and $Package -eq "@nerdyy/agentix") {
     $TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("agentix-install-" + [System.Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Force -Path $TempDir | Out-Null
     if ([string]::IsNullOrWhiteSpace($ReleaseBaseUrl)) {
@@ -118,6 +118,6 @@ if (-not $SkipSetup) {
 Write-Host "  agentix"
 Write-Host ""
 Write-Host "Use AGENTIX_PACKAGE to install a tag or tarball, for example:"
-Write-Host "  `$env:AGENTIX_PACKAGE='@so-nerdyy/agentix@2.1.0'; irm <url>/install.ps1 | iex"
+Write-Host "  `$env:AGENTIX_PACKAGE='@nerdyy/agentix@2.1.3'; irm <url>/install.ps1 | iex"
 Write-Host "Use AGENTIX_VERSION to install a verified GitHub release tarball:"
 Write-Host "  `$env:AGENTIX_VERSION='2.1.0'; irm https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.ps1 | iex"

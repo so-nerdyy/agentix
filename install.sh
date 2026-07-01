@@ -1,11 +1,11 @@
 #!/usr/bin/env sh
 set -eu
 
-DEFAULT_PACKAGE="@so-nerdyy/agentix"
+DEFAULT_PACKAGE="@nerdyy/agentix"
 PACKAGE="${AGENTIX_PACKAGE:-$DEFAULT_PACKAGE}"
 VERSION="${AGENTIX_VERSION:-}"
 RELEASE_BASE_URL="${AGENTIX_RELEASE_BASE_URL:-}"
-RELEASE_ARTIFACT_BASE="${AGENTIX_RELEASE_ARTIFACT_BASE:-so-nerdyy-agentix}"
+RELEASE_ARTIFACT_BASE="${AGENTIX_RELEASE_ARTIFACT_BASE:-nerdyy-agentix}"
 DRY_RUN="${AGENTIX_DRY_RUN:-0}"
 SKIP_SETUP="${AGENTIX_SKIP_SETUP:-0}"
 EXPECTED_SHA256="${AGENTIX_EXPECTED_SHA256:-}"
@@ -21,7 +21,7 @@ usage() {
 Install Agentix globally with npm.
 
 Environment:
-  AGENTIX_PACKAGE     Package, version, or tarball to install. Default: @so-nerdyy/agentix
+  AGENTIX_PACKAGE     Package, version, or tarball to install. Default: @nerdyy/agentix
   AGENTIX_VERSION     Download and verify a GitHub release asset, for example 2.1.0.
   AGENTIX_RELEASE_BASE_URL  Override release asset base URL.
   AGENTIX_RELEASE_ARTIFACT_BASE  Override release manifest basename.
@@ -31,7 +31,7 @@ Environment:
 
 Examples:
   curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
-  AGENTIX_PACKAGE=@so-nerdyy/agentix@2.1.0 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
+  AGENTIX_PACKAGE=@nerdyy/agentix@2.1.3 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
   AGENTIX_VERSION=2.1.0 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
 EOF
 }
@@ -108,6 +108,6 @@ if [ "$SKIP_SETUP" != "1" ]; then
 fi
 printf '  agentix\n\n'
 printf 'Use AGENTIX_PACKAGE to install a tag or tarball, for example:\n'
-printf '  AGENTIX_PACKAGE=@so-nerdyy/agentix@2.1.0 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh\n'
+printf '  AGENTIX_PACKAGE=@nerdyy/agentix@2.1.3 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh\n'
 printf 'Use AGENTIX_VERSION to install a verified GitHub release tarball:\n'
 printf '  AGENTIX_VERSION=2.1.0 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh\n'
