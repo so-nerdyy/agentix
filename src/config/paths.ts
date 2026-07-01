@@ -12,7 +12,7 @@ export const WORKSPACE_ROOT = process.env.AGENTIX_WORKSPACE_DIR
   : process.cwd();
 export const PROJECT_ROOT = WORKSPACE_ROOT;
 
-function resolveHermesRoot(): string {
+function resolveCompatibilityRuntimeRoot(): string {
   const candidates = [
     resolve(INSTALL_ROOT, "hermes-agent", "hermes-agent-upstream"),
     resolve(INSTALL_ROOT, "hermes-agent-upstream"),
@@ -28,7 +28,7 @@ function resolveHermesRoot(): string {
   return candidates[candidates.length - 1]!;
 }
 
-export const HERMES_ROOT = resolveHermesRoot();
+export const COMPATIBILITY_RUNTIME_ROOT = resolveCompatibilityRuntimeRoot();
 
 export const DATA_DIR = process.env.AGENTIX_DATA_DIR
   ? resolve(process.env.AGENTIX_DATA_DIR)
@@ -41,10 +41,9 @@ export const PATHS = {
   projectRoot: PROJECT_ROOT,
   workspaceRoot: WORKSPACE_ROOT,
   dataDir: DATA_DIR,
-  hermesRoot: HERMES_ROOT,
-  hermesAgent: HERMES_ROOT,
-  hermesCLI: resolve(HERMES_ROOT, "cli.py"),
-  hermesCliMain: resolve(HERMES_ROOT, "hermes_cli", "main.py"),
+  compatibilityRuntimeRoot: COMPATIBILITY_RUNTIME_ROOT,
+  compatibilityCLI: resolve(COMPATIBILITY_RUNTIME_ROOT, "cli.py"),
+  compatibilityCliMain: resolve(COMPATIBILITY_RUNTIME_ROOT, "hermes_cli", "main.py"),
   distShell: resolve(INSTALL_ROOT, "dist", "shell"),
   bridgeEntry: resolve(INSTALL_ROOT, "dist", "bridge", "entry.js"),
   inboxEntry: resolve(INSTALL_ROOT, "dist", "config", "InboxServer.js"),

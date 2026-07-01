@@ -24,6 +24,10 @@ export interface ExecuteStimulusOptions {
   stimulus: string;
   sessionId?: string;
   onDelta?: (delta: string) => void;
+  model?: string;
+  provider?: string;
+  baseUrl?: string;
+  toolsets?: unknown;
 }
 
 export interface ExecuteStimulusResult {
@@ -77,19 +81,24 @@ export class Powerhouse {
     });
   }
 
-  start(): void {
+  start(opts: { recover?: boolean } = {}): void {
     if (this.started) return;
+    const recover = opts.recover ?? true;
     EventBus.emit("powerhouse:starting", {});
-    this.sessions.recover();
-    const recoveredTasks = this.taskStore.recoverOpen().map((task) => {
-      if (task.status === "running") {
-        task.status = "queued";
-        task.startedAt = undefined;
-        this.taskStore.upsert(task);
-      }
-      return task;
-    });
-    this.queue.hydrate(recoveredTasks);
+    const recoveredTasks = recover
+      ? this.taskStore.recoverOpen().map((task) => {
+          if (task.status === "running") {
+            task.status = "queued";
+            task.startedAt = undefined;
+            this.taskStore.upsert(task);
+          }
+          return task;
+        })
+      : [];
+    if (recover) {
+      this.sessions.recover();
+      this.queue.hydrate(recoveredTasks);
+    }
     this.registerDefaultAgents();
     for (const task of recoveredTasks) {
       if (task.status === "awaiting-approval") {
@@ -105,7 +114,10 @@ export class Powerhouse {
     });
     EventBus.emit("powerhouse:started", {});
     if (recoveredTasks.length > 0) {
-      void this.resumeRecoveredWork(recoveredTasks);
+      const recovery = setTimeout(() => {
+        void this.resumeRecoveredWork(recoveredTasks);
+      }, 0);
+      recovery.unref?.();
     }
   }
 
@@ -316,6 +328,14 @@ export class Powerhouse {
   async executeStimulus(opts: ExecuteStimulusOptions): Promise<ExecuteStimulusResult> {
     this.start();
     const session = this.ensureSession(opts.sessionId);
+    if (opts.model || opts.provider || opts.baseUrl || opts.toolsets) {
+      this.sessions.updateMetadata(session.id, {
+        model: opts.model ?? session.metadata.model ?? null,
+        provider: opts.provider ?? session.metadata.provider ?? null,
+        baseUrl: opts.baseUrl ?? session.metadata.baseUrl ?? null,
+        toolsets: opts.toolsets ?? session.metadata.toolsets ?? null,
+      });
+    }
     const taskIds: string[] = [];
     const emitProgress = (message: string) => opts.onDelta?.(`[agentix] ${message}\n`);
 
@@ -329,6 +349,20 @@ export class Powerhouse {
     emitProgress("Planning task with Symphony...");
     const result = await this.symphony.run(opts.stimulus, {
       executeStep: async (step, planId) => {
+        if (opts.model || opts.provider || opts.baseUrl || opts.toolsets) {
+          step = {
+            ...step,
+            payload: {
+              ...step.payload,
+              execution: {
+                model: opts.model,
+                provider: opts.provider,
+                baseUrl: opts.baseUrl,
+                toolsets: opts.toolsets,
+              },
+            },
+          };
+        }
         emitProgress(`Running step ${step.id} (${step.kind})...`);
         const { task, result } = await this.executeStep(session.id, step, planId);
         taskIds.push(task.id);
@@ -673,7 +707,7 @@ export class Powerhouse {
       const existing = this.sessions.get(sessionId);
       if (existing) return existing;
     }
-    return this.createSession({ source: "hermes-frontend" });
+    return this.createSession({ source: "agentix-shell" });
   }
 
   private createTask(sessionId: string, step: PlanStep, planId: string): Task {
@@ -724,7 +758,7 @@ export class Powerhouse {
     return pending
       .map((task) => [
         `Approval required for ${task.kind} task ${task.id}.`,
-        "Use the Hermes approval command or call the Agentix approval endpoint to continue.",
+        "Use the Agentix approval command or call the Agentix approval endpoint to continue.",
         `Payload: ${JSON.stringify(task.payload, null, 2)}`,
       ].join("\n"))
       .join("\n\n");

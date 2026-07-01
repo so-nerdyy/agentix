@@ -78,4 +78,28 @@ describe("LLMClient", () => {
       }),
     );
   });
+
+  it("defaults Kilo Gateway provider to its OpenAI-compatible endpoint", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ message: { content: "kilo reply" } }],
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new LLMClient({
+      ...baseConfig,
+      provider: "kilocode",
+      baseUrl: null,
+    }).complete([{ role: "user", content: "hello" }]);
+
+    expect(result).toEqual({ ok: true, text: "kilo reply" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.kilo.ai/api/gateway/chat/completions",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer test-key",
+        }),
+      }),
+    );
+  });
 });

@@ -114,13 +114,24 @@ class AgentixBackend:
         stimulus: str,
         session_id: Optional[str] = None,
         stream_callback: Optional[Callable[[str], None]] = None,
-        **_: Any,
+        model: Optional[str] = None,
+        provider: Optional[str] = None,
+        toolsets: Any = None,
+        **extra: Any,
     ) -> str:
         body: Dict[str, Any] = {"stimulus": stimulus}
         if session_id:
             body["sessionId"] = session_id
-        if self.model:
-            body["model"] = self.model
+        selected_model = model or self.model
+        if selected_model:
+            body["model"] = selected_model
+        if provider:
+            body["provider"] = provider
+        if toolsets:
+            body["toolsets"] = toolsets
+        for key in ("baseUrl", "base_url"):
+            if extra.get(key):
+                body["baseUrl"] = extra[key]
 
         req = urllib.request.Request(
             f"{_get_bridge_url()}/execute/stream",
@@ -187,10 +198,19 @@ class AgentixBackend:
     def get_session(self, session_id: str) -> Any:
         return self._get(f"/sessions/{quote(session_id)}")
 
-    def create_session(self, model: Optional[str] = None) -> Any:
+    def create_session(
+        self,
+        model: Optional[str] = None,
+        provider: Optional[str] = None,
+        toolsets: Any = None,
+    ) -> Any:
         body: Dict[str, Any] = {}
         if model:
             body["model"] = model
+        if provider:
+            body["provider"] = provider
+        if toolsets:
+            body["toolsets"] = toolsets
         return self._post("/sessions", body)
 
     def delete_session(self, session_id: str) -> None:

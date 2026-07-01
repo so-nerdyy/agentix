@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdirSync, readFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { spawn, spawnSync } from "child_process";
 import { createRequire } from "module";
 import { fileURLToPath } from "url";
@@ -22,7 +22,18 @@ const BACKEND_COMMANDS = new Set([
   "ui",
   "web",
   "support",
+  "update",
+  "doctor",
+  "status",
   "readiness",
+  "usage",
+  "config",
+  "sessions",
+  "memory",
+  "cron",
+  "scheduler",
+  "gateway",
+  "logs",
   "plans",
   "plan",
   "tasks",
@@ -35,6 +46,7 @@ const BACKEND_COMMANDS = new Set([
   "agents",
   "auth",
   "mods",
+  "tools",
   "plugin",
   "extension",
   "broadcast",
@@ -43,42 +55,39 @@ const BACKEND_COMMANDS = new Set([
   "version",
 ]);
 
-const HERMES_COMMANDS = new Set([
+const FRONTEND_COMPAT_COMMANDS = new Set([
   "setup",
   "model",
-  "update",
-  "doctor",
-  "status",
-  "usage",
+  "options",
   "insights",
-  "cron",
-  "gateway",
-  "sessions",
   "skills",
-  "tools",
-  "memory",
-  "logs",
-  "config",
   "plugins",
   "fortune",
   "dashboard",
   "web",
 ]);
 
-const BRIDGELESS_HERMES_COMMANDS = new Set([
-  "setup",
-  "model",
-  "update",
+const BRIDGELESS_FRONTEND_COMMANDS = new Set([
   "plugins",
   "skills",
   "fortune",
 ]);
 
-const AGENTIX_COMMAND_HELP = new Set(["gateway", "logs"]);
+const AGENTIX_COMMAND_HELP = new Set(["gateway", "logs", "tools"]);
 
-const AGENTIX_HERMES_HOME = process.env.HERMES_HOME
-  ? resolve(process.env.HERMES_HOME)
-  : join(WORKSPACE_ROOT, ".agentix", "hermes");
+function resolveFrontendHome() {
+  if (process.env.AGENTIX_FRONTEND_HOME) {
+    return resolve(process.env.AGENTIX_FRONTEND_HOME);
+  }
+
+  const preferred = join(WORKSPACE_ROOT, ".agentix", "frontend");
+  if (existsSync(preferred)) {
+    return preferred;
+  }
+  return preferred;
+}
+
+const AGENTIX_FRONTEND_HOME = resolveFrontendHome();
 let activeBridgeUrl = null;
 
 function buildLauncherHelp() {
@@ -86,17 +95,18 @@ function buildLauncherHelp() {
     `Agentix v${pkg.version}`,
     "",
     "Usage:",
-    "  agentix                 open the Hermes-style interactive shell",
+    "  agentix                 open the Agentix interactive shell",
     "  agentix <command>       run a shell or backend command",
     "",
-    "Hermes shell commands:",
+    "Agentix commands:",
     "  setup                   first-run setup wizard",
     "  model                   configure provider/model",
+    "  options                 list provider/model/setup options",
     "  update                  check for updates",
     "  doctor                  validate config/runtime health",
     "  status                  summarize backend health and runtime counts",
     "  usage                   inspect Agentix backend runtime usage",
-    "  insights                inspect Hermes session analytics",
+    "  insights                inspect session analytics",
     "  cron                    manage scheduled jobs",
     "  gateway                 manage integrations",
     "  sessions                inspect sessions",
@@ -130,12 +140,52 @@ function buildLauncherHelp() {
     "",
     "Tips:",
     "  agentix help <command>   show command-specific help when available",
-    "  agentix --agentix-cli    bypass the Hermes shell and use the backend CLI directly",
+    "  agentix --agentix-cli    bypass the Agentix shell and use the backend CLI directly",
+  ].join("\n");
+}
+
+function buildSetupHelp() {
+  return [
+    "Usage: agentix setup [model|options]",
+    "",
+    "Configures Agentix for the current workspace.",
+    "Secrets are written to .env.local; non-secret defaults are synced to data/config.json.",
+    "",
+    "Sections:",
+    "  model      configure provider, model, base URL, and API key",
+    "  options    list provider/model/environment options",
+    "",
+    "Examples:",
+    "  agentix setup",
+    "  agentix setup model",
+    "  agentix setup options",
   ].join("\n");
 }
 
 function buildCommandHelp(command) {
   switch (command) {
+    case "setup":
+      return buildSetupHelp();
+    case "model":
+      return [
+        "Usage: agentix model",
+        "",
+        "Configures Agentix provider/model/base URL/API key for this workspace.",
+        "For Kilo Gateway, use provider `kilocode`, the Kilo model id, and base URL `https://api.kilo.ai/api/gateway`.",
+      ].join("\n");
+    case "options":
+      return [
+        "Usage: agentix options [providers|models|env|commands]",
+        "",
+        "Lists Agentix setup/provider/model/environment options.",
+      ].join("\n");
+    case "update":
+      return [
+        "Usage: agentix update [--check|--install]",
+        "",
+        "Checks npm for Agentix updates and can install the latest global package.",
+        "Use `npm install -g @so-nerdyy/agentix` or the verified curl installer to upgrade.",
+      ].join("\n");
     case "server":
       return [
         "Usage: agentix server",
@@ -143,6 +193,49 @@ function buildCommandHelp(command) {
         "Starts the backend bridge/API and inbox server.",
         "The server exposes the Agentix runtime, dashboard APIs, scheduler, logs,",
         "memory, healing, support bundle, and event stream endpoints.",
+      ].join("\n");
+    case "doctor":
+      return [
+        "Usage: agentix doctor [--json|--full]",
+        "",
+        "Runs Agentix backend diagnostics for the current workspace.",
+      ].join("\n");
+    case "status":
+      return [
+        "Usage: agentix status [--json]",
+        "",
+        "Shows a concise Agentix backend health summary.",
+      ].join("\n");
+    case "usage":
+      return [
+        "Usage: agentix usage",
+        "",
+        "Prints Agentix backend runtime usage counters.",
+      ].join("\n");
+    case "config":
+      return [
+        "Usage: agentix config [show|check|path|set <key> <value>]",
+        "",
+        "Inspects or updates Agentix workspace backend config.",
+      ].join("\n");
+    case "sessions":
+      return [
+        "Usage: agentix sessions [list|create [model]|inspect <id>|rename <id> <title>|delete <id>|prune [days]|optimize]",
+        "",
+        "Manages Agentix workspace sessions.",
+      ].join("\n");
+    case "memory":
+      return [
+        "Usage: agentix memory [status|list [session-id]|search <query>|consolidate [session-id]|reset [all|memory|user] [session-id]]",
+        "",
+        "Inspects and manages Agentix memory.",
+      ].join("\n");
+    case "cron":
+    case "scheduler":
+      return [
+        "Usage: agentix cron [list|create|run|pause|resume|delete|history] ...",
+        "",
+        "Manages Agentix scheduled jobs.",
       ].join("\n");
     case "dashboard":
     case "ui":
@@ -252,6 +345,7 @@ function buildCommandHelp(command) {
         "Created workspace tokens are shown once and stored hashed under data/auth/.",
       ].join("\n");
     case "mods":
+    case "tools":
     case "plugin":
     case "extension":
       return [
@@ -270,7 +364,7 @@ function buildCommandHelp(command) {
       return [
         "Usage: agentix",
         "",
-        "Open the Hermes-style interactive shell from the current folder.",
+        "Open the Agentix interactive shell from the current folder.",
       ].join("\n");
     case "version":
       return [
@@ -283,7 +377,7 @@ function buildCommandHelp(command) {
   }
 }
 
-function resolveHermesRoot() {
+function resolveCompatibilityFrontendRoot() {
   const candidates = [
     resolve(PROJECT_ROOT, "hermes-agent", "hermes-agent-upstream"),
     resolve(PROJECT_ROOT, "hermes-agent-upstream"),
@@ -299,9 +393,9 @@ function resolveHermesRoot() {
   return candidates[candidates.length - 1];
 }
 
-const HERMES_ROOT = resolveHermesRoot();
-const VENV_ROOT = resolve(
-  process.env.AGENTIX_HERMES_VENV || join(os.homedir(), ".agentix", "hermes-python"),
+const COMPAT_FRONTEND_ROOT = resolveCompatibilityFrontendRoot();
+const COMPAT_PYTHON_VENV_ROOT = resolve(
+  process.env.AGENTIX_PYTHON_VENV || join(os.homedir(), ".agentix", "python-frontend"),
 );
 
 function bridgeUrl() {
@@ -310,13 +404,12 @@ function bridgeUrl() {
   }
   return (
     process.env.AGENTIX_BRIDGE_URL ||
-    process.env.HERMES_BRIDGE_URL ||
     "http://127.0.0.1:3456"
   );
 }
 
 function explicitBridgeUrlConfigured() {
-  return Boolean(process.env.AGENTIX_BRIDGE_URL || process.env.HERMES_BRIDGE_URL);
+  return Boolean(process.env.AGENTIX_BRIDGE_URL);
 }
 
 function portFromBridgeUrl(url) {
@@ -395,7 +488,7 @@ function parseScalar(value) {
   return trimmed.replace(/\s+#.*$/, "").trim();
 }
 
-function parseHermesModelConfig(file) {
+function parseFrontendModelConfig(file) {
   if (!existsSync(file)) {
     return {};
   }
@@ -444,6 +537,9 @@ function parseHermesModelConfig(file) {
 
 function providerKeyCandidates(provider) {
   const normalized = String(provider || "").toLowerCase();
+  if (normalized.includes("kilo")) {
+    return ["KILOCODE_API_KEY", "KILO_API_KEY", "AGENTIX_LLM_API_KEY", "OPENAI_API_KEY"];
+  }
   if (normalized.includes("anthropic") || normalized.includes("claude")) {
     return ["ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN"];
   }
@@ -465,19 +561,20 @@ function providerKeyCandidates(provider) {
   if (normalized.includes("xai") || normalized.includes("grok")) {
     return ["XAI_API_KEY", "OPENAI_API_KEY"];
   }
-  return ["OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"];
+  return ["AGENTIX_LLM_API_KEY", "KILOCODE_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"];
 }
 
 function buildRuntimeEnv(extra = {}) {
-  const hermesEnv = parseEnvFile(join(AGENTIX_HERMES_HOME, ".env"));
+  const frontendEnv = parseEnvFile(join(AGENTIX_FRONTEND_HOME, ".env"));
   const workspaceEnv = parseEnvFile(join(WORKSPACE_ROOT, ".env.local"));
-  const modelConfig = parseHermesModelConfig(join(AGENTIX_HERMES_HOME, "config.yaml"));
+  const modelConfig = parseFrontendModelConfig(join(AGENTIX_FRONTEND_HOME, "config.yaml"));
   const env = {
-    ...hermesEnv,
+    ...frontendEnv,
     ...workspaceEnv,
     ...process.env,
     ...extra,
-    HERMES_HOME: process.env.HERMES_HOME || AGENTIX_HERMES_HOME,
+    HERMES_HOME: AGENTIX_FRONTEND_HOME,
+    AGENTIX_FRONTEND_HOME,
     AGENTIX_INSTALL_ROOT: PROJECT_ROOT,
     AGENTIX_WORKSPACE_DIR: WORKSPACE_ROOT,
   };
@@ -495,7 +592,10 @@ function buildRuntimeEnv(extra = {}) {
     env.AGENTIX_BASE_URL = env.OPENAI_BASE_URL;
   }
   if (!env.AGENTIX_LLM_API_KEY) {
-    for (const keyName of providerKeyCandidates(env.AGENTIX_PROVIDER || modelConfig.provider)) {
+    const providerForKeys = env.AGENTIX_BASE_URL?.includes("api.kilo.ai")
+      ? "kilocode"
+      : env.AGENTIX_PROVIDER || modelConfig.provider;
+    for (const keyName of providerKeyCandidates(providerForKeys)) {
       if (env[keyName]) {
         env.AGENTIX_LLM_API_KEY = env[keyName];
         break;
@@ -542,10 +642,40 @@ async function waitForBridgeHealth(timeoutMs = 10000, url = bridgeUrl()) {
   return false;
 }
 
+function bridgeControlCheck(timeoutMs = 3000, url = bridgeUrl()) {
+  return new Promise((resolveReady) => {
+    let settled = false;
+    const finish = (ready) => {
+      if (settled) return;
+      settled = true;
+      resolveReady(ready);
+    };
+    const target = new URL("/config", url);
+    const req = http.request(target, {
+      method: "GET",
+      timeout: timeoutMs,
+      headers: process.env.AGENTIX_SESSION_TOKEN
+        ? { Authorization: `Bearer ${process.env.AGENTIX_SESSION_TOKEN}` }
+        : {},
+    }, (res) => {
+      const ready = res.statusCode === 200;
+      res.resume();
+      res.on("end", () => finish(ready));
+      res.on("error", () => finish(false));
+    });
+    req.on("error", () => finish(false));
+    req.on("timeout", () => {
+      req.destroy();
+      finish(false);
+    });
+    req.end();
+  });
+}
+
 function venvPython() {
   return process.platform === "win32"
-    ? resolve(VENV_ROOT, "Scripts", "python.exe")
-    : resolve(VENV_ROOT, "bin", "python");
+    ? resolve(COMPAT_PYTHON_VENV_ROOT, "Scripts", "python.exe")
+    : resolve(COMPAT_PYTHON_VENV_ROOT, "bin", "python");
 }
 
 function pythonCandidates() {
@@ -567,7 +697,7 @@ function resolveSystemPython() {
     if (check.status === 0) return candidate;
   }
   throw new Error(
-    "Python 3 is required for the Hermes frontend. Set AGENTIX_PYTHON to a Python 3 executable if auto-detection fails.",
+    "Python 3 is required for bundled Agentix compatibility commands. Set AGENTIX_PYTHON to a Python 3 executable if auto-detection fails.",
   );
 }
 
@@ -576,24 +706,24 @@ function ensureVenv() {
     return venvPython();
   }
 
-  mkdirSync(VENV_ROOT, { recursive: true });
+  mkdirSync(COMPAT_PYTHON_VENV_ROOT, { recursive: true });
   const python = resolveSystemPython();
-  const created = spawnSync(python.command, [...python.args, "-m", "venv", VENV_ROOT], {
+  const created = spawnSync(python.command, [...python.args, "-m", "venv", COMPAT_PYTHON_VENV_ROOT], {
     cwd: PROJECT_ROOT,
     stdio: "inherit",
   });
   if (created.status !== 0) {
-    throw new Error("failed to create Hermes Python virtual environment");
+    throw new Error("failed to create Agentix compatibility Python virtual environment");
   }
   return venvPython();
 }
 
-function ensureHermesInstalled(pythonExe) {
+function ensureFrontendCompatibilityInstalled(pythonExe) {
   const check = spawnSync(pythonExe, ["-c", "import hermes_cli.main"], {
-    cwd: HERMES_ROOT,
+    cwd: COMPAT_FRONTEND_ROOT,
     env: {
       ...process.env,
-      PYTHONPATH: HERMES_ROOT,
+      PYTHONPATH: COMPAT_FRONTEND_ROOT,
     },
     stdio: "ignore",
   });
@@ -602,17 +732,17 @@ function ensureHermesInstalled(pythonExe) {
     return;
   }
 
-  const installed = spawnSync(pythonExe, ["-m", "pip", "install", "-e", HERMES_ROOT], {
-    cwd: HERMES_ROOT,
+  const installed = spawnSync(pythonExe, ["-m", "pip", "install", "-e", COMPAT_FRONTEND_ROOT], {
+    cwd: COMPAT_FRONTEND_ROOT,
     stdio: "inherit",
   });
   if (installed.status !== 0) {
-    throw new Error("failed to install Hermes frontend dependencies");
+    throw new Error("failed to install Agentix compatibility dependencies");
   }
 }
 
 async function ensureBridgeRunning() {
-  if (await healthCheck()) {
+  if ((await healthCheck()) && (await bridgeControlCheck())) {
     return;
   }
 
@@ -635,7 +765,7 @@ async function ensureBridgeRunning() {
   });
   child.unref();
 
-  if (!(await waitForBridgeHealth(10000, url))) {
+  if (!(await waitForBridgeHealth(10000, url)) || !(await bridgeControlCheck(10000, url))) {
     if (!explicitBridgeUrlConfigured() && url !== preferredUrl) {
       throw new Error(`Agentix bridge failed to start on fallback port ${port}`);
     }
@@ -643,15 +773,15 @@ async function ensureBridgeRunning() {
   }
 }
 
-async function spawnHermes(args) {
+async function spawnFrontendCompatibility(args) {
   const pythonExe = ensureVenv();
-  ensureHermesInstalled(pythonExe);
+  ensureFrontendCompatibilityInstalled(pythonExe);
 
   const child = spawn(pythonExe, ["-m", "hermes_cli.main", ...args], {
     cwd: WORKSPACE_ROOT,
     stdio: "inherit",
     env: buildRuntimeEnv({
-      PYTHONPATH: HERMES_ROOT,
+      PYTHONPATH: COMPAT_FRONTEND_ROOT,
       HERMES_BRIDGE_URL: bridgeUrl(),
       AGENTIX_BRIDGE_URL: bridgeUrl(),
       AGENTIX_FRONTEND: "hermes",
@@ -690,6 +820,281 @@ async function spawnNodeCli(args) {
   });
 }
 
+async function spawnNodeShell() {
+  await ensureBridgeRunning();
+  const child = spawn(process.execPath, [resolve(PROJECT_ROOT, "dist", "shell", "entry.js")], {
+    cwd: WORKSPACE_ROOT,
+    stdio: "inherit",
+    env: buildRuntimeEnv({
+      AGENTIX_BRIDGE_URL: bridgeUrl(),
+      HERMES_BRIDGE_URL: bridgeUrl(),
+    }),
+  });
+  await new Promise((resolveExit) => child.on("close", resolveExit));
+}
+
+function printAgentixOptions(topic = "all") {
+  const providers = [
+    ["kilocode", "Kilo Gateway OpenAI-compatible endpoint"],
+    ["custom", "OpenAI-compatible gateways, including Kilo Gateway"],
+    ["openai", "OpenAI API-compatible default endpoint"],
+    ["anthropic", "Anthropic Messages API"],
+    ["openrouter", "OpenRouter OpenAI-compatible endpoint"],
+    ["local", "Local OpenAI-compatible server such as Ollama/vLLM/LM Studio"],
+  ];
+  const examples = [
+    "agentix setup",
+    "agentix model",
+    "agentix options providers",
+    "agentix options env",
+    "agentix server",
+    "agentix",
+  ];
+
+  if (topic === "providers" || topic === "all") {
+    console.log("Providers:");
+    for (const [name, description] of providers) {
+      console.log(`  ${name.padEnd(10)} ${description}`);
+    }
+    console.log("");
+  }
+  if (topic === "models" || topic === "all") {
+    console.log("Model examples:");
+    console.log("  Kilo Gateway: provider kilocode, base URL https://api.kilo.ai/api/gateway, model id from Kilo");
+    console.log("  OpenAI:       gpt-4o-mini, gpt-4.1-mini, gpt-5-codex-compatible ids when available");
+    console.log("  Anthropic:   claude-3-5-sonnet-latest or your configured model id");
+    console.log("  Local:       whatever your local /v1/models endpoint exposes");
+    console.log("");
+  }
+  if (topic === "env" || topic === "all") {
+    console.log("Environment variables:");
+    console.log("  AGENTIX_PROVIDER=kilocode");
+    console.log("  AGENTIX_MODEL=<model-id>");
+    console.log("  AGENTIX_BASE_URL=https://api.kilo.ai/api/gateway");
+    console.log("  AGENTIX_LLM_API_KEY=<provider-or-gateway-key>");
+    console.log("  KILOCODE_API_KEY=<kilo-gateway-key>  # accepted alias");
+    console.log("  AGENTIX_BRIDGE_URL=http://127.0.0.1:<port>  # optional explicit bridge");
+    console.log("");
+  }
+  if (topic === "commands" || topic === "all") {
+    console.log("Common commands:");
+    for (const example of examples) console.log(`  ${example}`);
+    console.log("");
+  }
+  if (!["providers", "models", "env", "commands", "all"].includes(topic)) {
+    console.log("Usage: agentix options [providers|models|env|commands]");
+  }
+}
+
+async function runAgentixUpdate(args = []) {
+  if (args.includes("--help") || args.includes("-h")) {
+    console.log(buildCommandHelp("update"));
+    return;
+  }
+  const installRequested = args.includes("--install") || args.includes("--upgrade");
+
+  const installCommand = () => {
+    const userAgent = String(process.env.npm_config_user_agent || "").toLowerCase();
+    if (userAgent.includes("pnpm")) return { command: "pnpm", args: ["add", "-g", `${pkg.name}@latest`] };
+    if (userAgent.includes("yarn")) return { command: "yarn", args: ["global", "add", `${pkg.name}@latest`] };
+    if (userAgent.includes("bun")) return { command: "bun", args: ["add", "-g", `${pkg.name}@latest`] };
+    return { command: process.platform === "win32" ? "npm.cmd" : "npm", args: ["install", "-g", `${pkg.name}@latest`] };
+  };
+
+  const registryUrl = `https://registry.npmjs.org/${encodeURIComponent(pkg.name)}`;
+  let latest = null;
+  try {
+    const res = await fetch(registryUrl, { headers: { Accept: "application/json" } });
+    if (res.status === 404) {
+      console.log("Agentix update");
+      console.log(`Installed: ${pkg.version}`);
+      console.log("Latest:    not published on npm yet");
+      console.log("Status:    local/source install");
+      console.log("");
+      console.log(`Once published: npm install -g ${pkg.name}`);
+      return;
+    }
+    if (!res.ok) {
+      throw new Error(`npm registry returned ${res.status}`);
+    }
+    const metadata = await res.json();
+    latest = metadata?.["dist-tags"]?.latest || null;
+  } catch (err) {
+    console.log("Agentix update check failed.");
+    console.log(`Installed: ${pkg.version}`);
+    console.log(`Reason: ${err instanceof Error ? err.message : String(err)}`);
+    console.log("");
+    console.log(`Manual upgrade: npm install -g ${pkg.name}`);
+    return;
+  }
+
+  console.log("Agentix update");
+  console.log(`Installed: ${pkg.version}`);
+  console.log(`Latest:    ${latest || "unknown"}`);
+  if (!latest || latest === pkg.version) {
+    console.log("Status:    up to date");
+    return;
+  }
+  console.log("Status:    update available");
+  if (installRequested) {
+    const update = installCommand();
+    console.log("");
+    console.log(`Running: ${update.command} ${update.args.join(" ")}`);
+    const child = spawn(update.command, update.args, {
+      cwd: WORKSPACE_ROOT,
+      stdio: "inherit",
+      shell: process.platform === "win32" && update.command.endsWith(".cmd"),
+    });
+    await new Promise((resolveExit) => {
+      child.on("close", (code) => {
+        if (code === 0) {
+          resolveExit();
+          return;
+        }
+        process.exit(code ?? 1);
+      });
+    });
+    return;
+  }
+  console.log("");
+  console.log("Upgrade:");
+  console.log(`  npm install -g ${pkg.name}`);
+  console.log("");
+  console.log("Verified installer:");
+  console.log("  curl -fsSL <release-install-url> | sh");
+  console.log("");
+  console.log("Auto-install:");
+  console.log("  agentix update --install");
+}
+
+function writeWorkspaceConfig({ provider, model, baseUrl }) {
+  const dataDir = join(WORKSPACE_ROOT, "data");
+  mkdirSync(dataDir, { recursive: true });
+  const configFile = join(dataDir, "config.json");
+  let existing = {};
+  if (existsSync(configFile)) {
+    try {
+      existing = JSON.parse(readFileSync(configFile, "utf8"));
+    } catch {
+      existing = {};
+    }
+  }
+  const next = {
+    ...existing,
+    provider,
+    model,
+    baseUrl: baseUrl || null,
+  };
+  delete next.llmApiKey;
+  delete next.sessionToken;
+  writeFileSync(configFile, JSON.stringify(next, null, 2), "utf8");
+  return configFile;
+}
+
+function writeWorkspaceEnv({ provider, model, baseUrl, apiKey }) {
+  const envFile = join(WORKSPACE_ROOT, ".env.local");
+  const current = parseEnvFile(envFile);
+  const next = {
+    ...current,
+    AGENTIX_PROVIDER: provider,
+    AGENTIX_MODEL: model,
+    AGENTIX_BASE_URL: baseUrl,
+    AGENTIX_LLM_API_KEY: apiKey,
+  };
+  const content = Object.entries(next)
+    .filter(([, value]) => String(value ?? "").trim() !== "")
+    .map(([key, value]) => `${key}=${String(value).replace(/\r?\n/g, "")}`)
+    .join("\n") + "\n";
+  writeFileSync(envFile, content, "utf8");
+  return envFile;
+}
+
+async function promptForConfig(section = "all") {
+  const pipedAnswers = process.stdin.isTTY
+    ? null
+    : readFileSync(0, "utf8").split(/\r?\n/);
+  let pipedIndex = 0;
+  const { createInterface } = await import("node:readline/promises");
+  const rl = pipedAnswers
+    ? null
+    : createInterface({ input: process.stdin, output: process.stdout });
+  const ask = async (label, fallback = "") => {
+    const suffix = fallback ? ` [${fallback}]` : "";
+    if (pipedAnswers) {
+      const value = (pipedAnswers[pipedIndex++] || "").trim();
+      console.log(`${label}${suffix}: ${value ? "(provided)" : ""}`);
+      return value || fallback;
+    }
+    const value = (await rl.question(`${label}${suffix}: `)).trim();
+    return value || fallback;
+  };
+  const defaultBaseUrl = (provider) => {
+    const normalized = String(provider || "").toLowerCase();
+    if (normalized === "openai") return "https://api.openai.com/v1";
+    if (normalized === "kilocode" || normalized === "kilo") return "https://api.kilo.ai/api/gateway";
+    if (normalized === "openrouter") return "https://openrouter.ai/api/v1";
+    if (normalized === "local") return "http://127.0.0.1:11434/v1";
+    return "";
+  };
+
+  try {
+    const currentEnv = {
+      provider: process.env.AGENTIX_PROVIDER || "kilocode",
+      model: process.env.AGENTIX_MODEL || "",
+      baseUrl: process.env.AGENTIX_BASE_URL || "",
+      apiKey: process.env.AGENTIX_LLM_API_KEY || process.env.KILOCODE_API_KEY || "",
+    };
+    console.log(`Agentix setup`);
+    console.log(`Workspace: ${WORKSPACE_ROOT}`);
+    console.log("");
+
+    let provider = currentEnv.provider;
+    let model = currentEnv.model;
+    let baseUrl = currentEnv.baseUrl;
+    let apiKey = currentEnv.apiKey;
+
+    if (section === "all" || section === "model") {
+      provider = await ask("Provider (kilocode/custom/openai/anthropic/openrouter/local)", provider);
+      model = await ask("Model", model || (["kilocode", "kilo"].includes(provider.toLowerCase()) ? "moonshotai/kimi-k2" : "gpt-4o-mini"));
+      baseUrl = await ask("Base URL", baseUrl || defaultBaseUrl(provider));
+      apiKey = await ask("API key", apiKey);
+    }
+
+    const envFile = writeWorkspaceEnv({ provider, model, baseUrl, apiKey });
+    const configFile = writeWorkspaceConfig({ provider, model, baseUrl });
+    console.log("");
+    console.log(`Saved ${envFile}`);
+    console.log(`Synced non-secret defaults to ${configFile}`);
+    console.log(`Provider: ${provider}`);
+    console.log(`Model: ${model}`);
+    console.log(`Base URL: ${baseUrl || "(provider default)"}`);
+    console.log(`API key: ${apiKey ? "configured" : "missing"}`);
+    console.log("");
+    console.log("Next: run `agentix` to open the Agentix shell.");
+  } finally {
+    rl?.close();
+  }
+}
+
+async function verifyCurrentModel(args = []) {
+  const script = resolve(PROJECT_ROOT, "scripts", "verify-live-llm.mjs");
+  const forwarded = args.filter((arg) => arg !== "--verify");
+  const child = spawn(process.execPath, [script, ...forwarded], {
+    cwd: WORKSPACE_ROOT,
+    stdio: "inherit",
+    env: buildRuntimeEnv(),
+  });
+  await new Promise((resolveExit) => {
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolveExit();
+        return;
+      }
+      process.exit(code ?? 1);
+    });
+  });
+}
+
 async function main() {
   const argv = process.argv.slice(2);
   const [cmd, ...args] = argv;
@@ -700,22 +1105,58 @@ async function main() {
   }
 
   if (argv.includes("--node-shell")) {
-    await ensureBridgeRunning();
-    const child = spawn(process.execPath, [resolve(PROJECT_ROOT, "dist", "shell", "entry.js")], {
-      cwd: WORKSPACE_ROOT,
-      stdio: "inherit",
-      env: buildRuntimeEnv({
-        AGENTIX_BRIDGE_URL: bridgeUrl(),
-        HERMES_BRIDGE_URL: bridgeUrl(),
-      }),
-    });
-    await new Promise((resolveExit) => child.on("close", resolveExit));
+    await spawnNodeShell();
     return;
   }
 
   if (!cmd && process.stdin.isTTY) {
-    await ensureBridgeRunning();
-    await spawnHermes([]);
+    await spawnNodeShell();
+    return;
+  }
+  if (!cmd) {
+    await spawnNodeShell();
+    return;
+  }
+
+  if (cmd === "setup") {
+    if (args.includes("--help") || args.includes("-h")) {
+      console.log(buildSetupHelp());
+      return;
+    }
+    if (args[0] === "options") {
+      printAgentixOptions(args[1] || "all");
+      return;
+    }
+    await promptForConfig(args[0] === "model" ? "model" : "all");
+    return;
+  }
+
+  if (cmd === "model") {
+    if (args.includes("--help") || args.includes("-h")) {
+      console.log([
+        "Usage: agentix model [--verify]",
+        "",
+        "Configures Agentix provider/model/base URL/API key for this workspace.",
+        "For Kilo Gateway, use provider `kilocode`, the Kilo model id, and base URL `https://api.kilo.ai/api/gateway`.",
+        "Use `agentix model --verify` to run a live provider handshake with the current config.",
+      ].join("\n"));
+      return;
+    }
+    if (args.includes("--verify")) {
+      await verifyCurrentModel(args);
+      return;
+    }
+    await promptForConfig("model");
+    return;
+  }
+
+  if (cmd === "options") {
+    printAgentixOptions(args[0] || "all");
+    return;
+  }
+
+  if (cmd === "update") {
+    await runAgentixUpdate(args);
     return;
   }
 
@@ -733,11 +1174,15 @@ async function main() {
       console.log(buildCommandHelp(args[0]));
       return;
     }
-    if (HERMES_COMMANDS.has(args[0])) {
-      await spawnHermes([args[0], "--help"]);
+    if (FRONTEND_COMPAT_COMMANDS.has(args[0])) {
+      if (args[0] === "setup" || args[0] === "model" || args[0] === "options") {
+        console.log(buildCommandHelp(args[0]));
+        return;
+      }
+      await spawnFrontendCompatibility([args[0], "--help"]);
       return;
     }
-    await spawnHermes(["--help"]);
+    await spawnFrontendCompatibility(["--help"]);
     return;
   }
 
@@ -746,8 +1191,12 @@ async function main() {
       console.log(buildCommandHelp(cmd));
       return;
     }
-    if (HERMES_COMMANDS.has(cmd)) {
-      await spawnHermes([cmd, "--help"]);
+    if (FRONTEND_COMPAT_COMMANDS.has(cmd)) {
+      if (cmd === "setup" || cmd === "model" || cmd === "options") {
+        console.log(buildLauncherHelp());
+        return;
+      }
+      await spawnFrontendCompatibility([cmd, "--help"]);
       return;
     }
   }
@@ -757,13 +1206,13 @@ async function main() {
     return;
   }
 
-  if (cmd && HERMES_COMMANDS.has(cmd) && BRIDGELESS_HERMES_COMMANDS.has(cmd)) {
-    await spawnHermes([cmd, ...args]);
+  if (cmd && FRONTEND_COMPAT_COMMANDS.has(cmd) && BRIDGELESS_FRONTEND_COMMANDS.has(cmd)) {
+    await spawnFrontendCompatibility([cmd, ...args]);
     return;
   }
 
   await ensureBridgeRunning();
-  await spawnHermes(argv.filter(Boolean));
+  await spawnFrontendCompatibility(argv.filter(Boolean));
 }
 
 main().catch((err) => {

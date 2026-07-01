@@ -93,6 +93,14 @@ export class MemoryStore {
       : [...this.records];
   }
 
+  count(): number {
+    if (this.loaded) return this.records.length;
+    if (!existsSync(this.file)) return 0;
+    const raw = readFileSync(this.file, "utf-8");
+    if (!raw.trim()) return 0;
+    return raw.split(/\r?\n/).filter((line) => line.trim()).length;
+  }
+
   consolidate(sessionId?: string): MemoryRecord {
     const records = this.list(sessionId);
     const recent = records.slice(-20);

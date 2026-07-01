@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -97,10 +98,27 @@ async function verifyNpm(packageName, version) {
   if (metadata.version !== version) fail(`npm package version mismatch: ${metadata.version}`);
   if (!metadata.dist?.tarball) fail("npm metadata missing dist.tarball");
   if (!metadata.dist?.integrity && !metadata.dist?.shasum) fail("npm metadata missing dist integrity/shasum");
+  const attestationsUrl = metadata.dist?.attestations?.url ?? null;
+  if (!attestationsUrl) fail("npm metadata missing dist.attestations.url; publish must use npm provenance");
+  const provenancePredicate = metadata.dist?.attestations?.provenance?.predicateType ?? "";
+  if (!String(provenancePredicate).startsWith("https://slsa.dev/provenance/")) {
+    fail(`npm metadata missing SLSA provenance predicate: ${String(provenancePredicate || "none")}`);
+  }
+  log(`checking npm provenance attestations ${attestationsUrl}`);
+  const attestations = await fetchJson(attestationsUrl);
+  if (!Array.isArray(attestations.attestations) || attestations.attestations.length === 0) {
+    fail("npm attestations endpoint returned no attestations");
+  }
   return {
     tarball: metadata.dist.tarball,
     integrity: metadata.dist.integrity ?? null,
     shasum: metadata.dist.shasum ?? null,
+    attestations: {
+      url: attestationsUrl,
+      predicateType: provenancePredicate,
+      count: attestations.attestations.length,
+      provenance: true,
+    },
   };
 }
 
@@ -148,6 +166,35 @@ async function verifyInstaller(version, releaseBaseUrl) {
   if (!result.stdout.includes("Verified SHA256")) fail("shell installer did not verify SHA256");
 }
 
+async function verifyNpmGlobalInstall(packageName, version) {
+  log(`checking isolated npm install -g ${packageName}@${version}`);
+  const prefix = await mkdtemp(join(tmpdir(), "agentix-public-install-"));
+  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+  const agentix = process.platform === "win32"
+    ? join(prefix, "agentix.cmd")
+    : join(prefix, "bin", "agentix");
+  try {
+    await run(npm, ["install", "-g", "--prefix", prefix, `${packageName}@${version}`, "--no-audit", "--no-fund"], {
+      timeoutMs: 240_000,
+    });
+    const versionResult = await run(agentix, ["version"], { timeoutMs: 60_000 });
+    if (!versionResult.stdout.includes(`Agentix v${version}`)) {
+      fail(`installed agentix version mismatch: ${versionResult.stdout.trim()}`);
+    }
+    const helpResult = await run(agentix, ["help"], { timeoutMs: 60_000 });
+    if (!helpResult.stdout.includes("open the Agentix interactive shell")) {
+      fail("installed agentix help missing shell launch text");
+    }
+    return {
+      prefix,
+      agentixVersion: versionResult.stdout.trim(),
+      helpChecked: true,
+    };
+  } finally {
+    await rm(prefix, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 const packageName = readArg("--package", process.env.AGENTIX_VERIFY_PACKAGE ?? pkg.name);
 const version = readArg("--version", process.env.AGENTIX_VERSION ?? process.env.AGENTIX_VERIFY_VERSION ?? pkg.version);
 const releaseBaseUrl = readArg(
@@ -155,6 +202,7 @@ const releaseBaseUrl = readArg(
   process.env.AGENTIX_RELEASE_BASE_URL ?? process.env.AGENTIX_VERIFY_RELEASE_BASE_URL ?? `https://github.com/so-nerdyy/agentix/releases/download/v${version}`,
 );
 const skipNpm = hasFlag("--skip-npm") || process.env.AGENTIX_VERIFY_SKIP_NPM === "1";
+const skipNpmInstall = hasFlag("--skip-npm-install") || process.env.AGENTIX_VERIFY_SKIP_NPM_INSTALL === "1" || skipNpm;
 const skipInstaller = hasFlag("--skip-installer") || process.env.AGENTIX_VERIFY_SKIP_INSTALLER === "1";
 const outputPath = readArg("--out", process.env.AGENTIX_VERIFY_OUTPUT);
 const artifactBase = readArg(
@@ -164,6 +212,7 @@ const artifactBase = readArg(
 
 const npmResult = skipNpm ? null : await verifyNpm(packageName, version);
 const releaseResult = await verifyGitHubRelease(packageName, version, releaseBaseUrl, artifactBase);
+const npmInstallResult = skipNpmInstall ? null : await verifyNpmGlobalInstall(packageName, version);
 if (!skipInstaller) {
   await verifyInstaller(version, releaseBaseUrl);
 }
@@ -175,6 +224,7 @@ const result = {
   releaseBaseUrl,
   artifactBase,
   npm: npmResult,
+  npmInstall: npmInstallResult,
   release: releaseResult,
   installerDryRun: !skipInstaller,
   verifiedAt: new Date().toISOString(),

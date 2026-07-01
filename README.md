@@ -1,8 +1,8 @@
 # Agentix
 
-Agentix is a Hermes-class agent platform with an Agentix-owned backend.
+Agentix is an AI agent platform with an Agentix-owned shell, setup flow, dashboard, and backend.
 
-- Hermes owns the user-facing shell, setup wizard, update flow, cron UX, gateway UX, and command surface.
+- Agentix owns the user-facing shell, setup wizard, update flow, cron UX, gateway UX, and command surface.
 - Agentix owns LLM-backed Symphony planning, task orchestration, validation, approvals, memory, healing, Pi agents, and runtime services.
 - The web dashboard lives at `/ui` when `agentix server` is running, with live task, Symphony plan, approval, healing, memory, gateway, scheduler, audit, log, doctor, and support-bundle controls.
 
@@ -36,12 +36,11 @@ From any project folder, `agentix` opens the interactive shell. Use `agentix das
 
 ## Commands
 
-- `agentix` - open the interactive Hermes-style shell
-- `agentix chat` - open the Hermes chat shell backed by Agentix execution
-- `agentix --tui` - open the Hermes TUI while routing prompts through Agentix
+- `agentix` - open the interactive Agentix shell
 - `agentix -z "<prompt>"` - run a one-shot prompt through Agentix
 - `agentix setup` - first-run setup wizard
 - `agentix model` - configure provider and model
+- `agentix options` - list setup/provider/model/environment options
 - `agentix update` - check update/install options
 - `agentix doctor` - validate config and runtime health
 - `agentix readiness` - report private-beta and public-release gates
@@ -72,15 +71,25 @@ Agentix uses workspace-scoped configuration and environment variables:
 - `AGENTIX_MODEL` - default model
 - `AGENTIX_BASE_URL` - optional OpenAI-compatible or provider-specific base URL
 - `AGENTIX_LLM_API_KEY` - runtime API key
+- `KILOCODE_API_KEY` - accepted alias for Kilo Gateway when `AGENTIX_PROVIDER=kilocode`
 - `AGENTIX_SESSION_TOKEN` - optional admin Bearer token for dashboard/API/event access; workspace role tokens can also be created with the backend auth CLI
 - `AGENTIX_SESSION_TTL` - session retention
 - `AGENTIX_APPROVAL_TIMEOUT` - approval timeout
-- `AGENTIX_HERMES_VENV` - optional Python venv location for the bundled Hermes frontend
-- `AGENTIX_PYTHON` - optional Python 3 executable override for the bundled Hermes frontend
+- `AGENTIX_PYTHON_VENV` - optional Python venv location for bundled compatibility internals
+- `AGENTIX_PYTHON` - optional Python 3 executable override for bundled compatibility internals
 - `AGENTIX_SANDBOX_MODE` - `auto`, `docker`, or `local` sandbox execution mode
 - `AGENTIX_SANDBOX_DOCKER_IMAGE` - Docker image for containerized sandbox execution
 
-By default, Agentix stores Hermes frontend state under `.agentix/hermes/` in the current workspace and backend runtime state under `data/`. `agentix setup` and `agentix model` use the Hermes provider/model picker, then sync non-secret defaults into `data/config.json`. Provider API keys stay in Hermes' `.env` or your process environment and are injected into the backend at launch.
+By default, Agentix stores workspace runtime state under `data/`. `agentix setup` and `agentix model` write API secrets to `.env.local` and sync non-secret provider/model/base URL defaults into `data/config.json`.
+
+Kilo Gateway first-class setup:
+
+```powershell
+agentix config set provider kilocode
+agentix config set model <kilo-model-id>
+agentix config set baseUrl https://api.kilo.ai/api/gateway
+$env:KILOCODE_API_KEY="<kilo-gateway-key>"
+```
 
 ## Project Layout
 
@@ -88,7 +97,7 @@ By default, Agentix stores Hermes frontend state under `.agentix/hermes/` in the
 - `src/` - Agentix backend, shell fallback, and bridge
 - `frontend/src/` - editable interactive dashboard source
 - `frontend/dist/` - generated dashboard served by the inbox server
-- `hermes-agent/` - Hermes frontend runtime used by the launcher
+- `hermes-agent/` - vendored compatibility runtime used internally
 - `docs/` - install, operations, and security notes
 
 ## Development

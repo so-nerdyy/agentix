@@ -177,15 +177,31 @@ if (!npmToken) {
     whoami.ok ? `authenticated as ${whoami.stdout.trim()}` : "npm token rejected",
     "Refresh NPM_TOKEN with automation/publish permission.",
   );
+  if (whoami.ok) {
+    const dryRun = await run(npm, ["publish", "--dry-run", "--access", "public"], {
+      timeoutMs: 120_000,
+      env: {
+        ...process.env,
+        NODE_AUTH_TOKEN: npmToken,
+      },
+    });
+    add(
+      results,
+      "npm.publish_dry_run",
+      dryRun.ok,
+      dryRun.ok ? "npm publish dry-run completed" : "npm publish dry-run failed",
+      "Check package files, npm token publish scope, and package access settings before tagging release.",
+    );
+  }
 }
 
-const llmKey = envString("AGENTIX_LLM_API_KEY");
+const llmKey = envString("AGENTIX_LLM_API_KEY") || envString("KILOCODE_API_KEY") || envString("KILO_API_KEY");
 add(
   results,
   "llm.secret",
   Boolean(llmKey) || !requireLlm,
-  llmKey ? "AGENTIX_LLM_API_KEY configured" : "AGENTIX_LLM_API_KEY missing",
-  "Add AGENTIX_LLM_API_KEY secret or run npm run verify:llm manually before public readiness.",
+  llmKey ? "live LLM API key configured" : "AGENTIX_LLM_API_KEY/KILOCODE_API_KEY missing",
+  "Add AGENTIX_LLM_API_KEY or KILOCODE_API_KEY secret, or run npm run verify:llm manually before public readiness.",
   requireLlm ? "fail" : "warn",
 );
 

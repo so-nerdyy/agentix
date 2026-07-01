@@ -36,6 +36,6 @@ export function buildHelpText(version: string): string {
     "  eval, broadcast      run a stimulus directly through the backend",
     "  shell                explain how to open the interactive shell",
     "",
-    "See README.md for the Hermes shell, setup wizard, update flow, cron, gateway, and dashboard details.",
+    "See README.md for the Agentix shell, setup wizard, update flow, cron, gateway, and dashboard details.",
   ].join("\n");
 }

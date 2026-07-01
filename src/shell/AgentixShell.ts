@@ -1,24 +1,8 @@
 import * as readline from "readline";
-import { spawn } from "child_process";
 import { AgentixBackend } from "../agentix_backend.js";
-import { hermesCommand, resolvePythonCommand } from "./hermes_python_bridge.js";
 import { PATHS } from "../config/paths.js";
 
-function hermesEnv(): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
-    PYTHONPATH: PATHS.hermesRoot,
-    AGENTIX_FRONTEND: "hermes",
-    AGENTIX_INSTALL_ROOT: PATHS.installRoot,
-    AGENTIX_WORKSPACE_DIR: PATHS.workspaceRoot,
-    AGENTIX_BRIDGE_URL:
-      process.env.AGENTIX_BRIDGE_URL || "http://127.0.0.1:3456",
-    HERMES_BRIDGE_URL:
-      process.env.HERMES_BRIDGE_URL || "http://127.0.0.1:3456",
-  };
-}
-
-export class HermesShell {
+export class AgentixShell {
   private backend = new AgentixBackend();
   private rl = readline.createInterface({
     input: process.stdin,
@@ -29,7 +13,7 @@ export class HermesShell {
   private history: Array<{ role: string; content: string }> = [];
 
   async start(): Promise<void> {
-    console.log("Agentix (Hermes frontend) - type /help for commands\n");
+    console.log("Agentix - type /help for commands\n");
 
     this.rl.on("line", async (line) => {
       const input = line.trim();
@@ -47,16 +31,6 @@ export class HermesShell {
     this.rl.on("close", () => {
       process.exit(0);
     });
-  }
-
-  private async runHermesInteractive(subcommand: string): Promise<void> {
-    const python = resolvePythonCommand();
-    const child = spawn(python.command, [...python.args, "-m", "hermes_cli.main", subcommand], {
-      cwd: PATHS.workspaceRoot,
-      stdio: "inherit",
-      env: hermesEnv(),
-    });
-    await new Promise<void>((resolve) => child.on("close", resolve));
   }
 
   private formatSearchResults(results: Record<string, unknown>): string {
@@ -94,6 +68,40 @@ export class HermesShell {
     ].join("\n");
   }
 
+  private formatUsage(usage: Record<string, unknown>): string {
+    const counts = usage.counts as Record<string, unknown> | undefined;
+    return [
+      String(usage.title ?? "Agentix backend usage"),
+      `Sessions: ${String(counts?.sessions ?? 0)}  Tasks: ${String(counts?.tasks ?? 0)}  Plans: ${String(counts?.plans ?? 0)}`,
+      `Memory: ${String(counts?.memory ?? 0)}  Jobs: ${String(counts?.jobs ?? 0)}  Gateways: ${String(counts?.gateways ?? 0)}`,
+      String(usage.note ?? ""),
+    ].filter(Boolean).join("\n");
+  }
+
+  private formatSessions(sessions: Array<{ id: string; createdAt: string; status?: string }>): string {
+    if (sessions.length === 0) return "No sessions.";
+    return [
+      `Recent sessions (${sessions.length})`,
+      ...sessions.map((session) => `  - ${session.id} [${session.status ?? "unknown"}] created=${session.createdAt}`),
+    ].join("\n");
+  }
+
+  private formatJobs(jobs: Array<Record<string, unknown>>): string {
+    if (jobs.length === 0) return "No scheduled jobs.";
+    return [
+      `Scheduled jobs (${jobs.length})`,
+      ...jobs.map((job) => `  - ${String(job.id ?? "")} ${String(job.name ?? "")} [${job.enabled ? "enabled" : "disabled"}] next=${String(job.nextRunAt ?? "n/a")}`),
+    ].join("\n");
+  }
+
+  private formatTools(tools: Array<{ name: string; description: string }>): string {
+    if (tools.length === 0) return "No tools registered.";
+    return [
+      `Agentix tools (${tools.length})`,
+      ...tools.map((tool) => `  - ${tool.name}: ${tool.description}`),
+    ].join("\n");
+  }
+
   private async handleSlashCommand(input: string): Promise<void> {
     const [commandLine, ...restArgs] = input.slice(1).split(/\n+/);
     const parts = commandLine.split(" ");
@@ -122,26 +130,37 @@ export class HermesShell {
           break;
         case "doctor":
           console.log(this.formatDoctor(await this.backend.doctor()));
-          console.log("\nHermes diagnostics:");
-          console.log(await hermesCommand("doctor", []));
+          console.log("\nUse `agentix doctor --full` for full diagnostics.");
           break;
         case "usage":
-          console.log(await hermesCommand("usage", []));
+          console.log(this.formatUsage(await this.backend.usage()));
           break;
         case "setup":
-          console.log("-> Running Hermes setup wizard...\n");
-          await this.runHermesInteractive("setup");
+          console.log("Run `agentix setup` in a terminal to configure this workspace.\n");
           break;
         case "model":
-          console.log("-> Running Hermes model configuration...\n");
-          await this.runHermesInteractive("model");
+          console.log("Run `agentix model` in a terminal to configure provider/model settings.\n");
+          break;
+        case "options":
+          console.log("Run `agentix options` in a terminal to list setup/provider/model options.\n");
           break;
         case "update":
-          console.log(await hermesCommand("update", ["--check"], 15_000));
+          console.log("Run `agentix update --check` in a terminal to check npm/install updates.");
           break;
         case "cron":
-          console.log(await hermesCommand("cron", [...subArgs, ...restArgs]));
+        case "scheduler": {
+          const [action] = [...subArgs, ...restArgs];
+          if (!action || action === "list") {
+            console.log(this.formatJobs(await this.backend.listScheduledJobs()));
+            break;
+          }
+          if (action === "run-due") {
+            console.log(JSON.stringify(await this.backend.runDueScheduledJobs(), null, 2));
+            break;
+          }
+          console.log("Usage: /cron [list|run-due]. Use `agentix cron create ...` for job creation.");
           break;
+        }
         case "job": {
           const [jobId, action] = [...subArgs, ...restArgs];
           if (!jobId) {
@@ -211,7 +230,7 @@ export class HermesShell {
           break;
         }
         case "sessions":
-          console.log(await hermesCommand("sessions", [...subArgs, ...restArgs]));
+          console.log(this.formatSessions(await this.backend.listSessions({ limit: 20 })));
           break;
         case "session": {
           const [sessionId, action, ...actionArgs] = [...subArgs, ...restArgs];
@@ -232,7 +251,8 @@ export class HermesShell {
           break;
         }
         case "skills":
-          console.log(await hermesCommand("skills", [...subArgs, ...restArgs]));
+          console.log(this.formatTools(await this.backend.listTools()));
+          console.log("\nAgentix uses backend tools/Pi agents. Use `agentix mods` for module inventory.");
           break;
         case "approval": {
           const [taskId, action, ...actionArgs] = [...subArgs, ...restArgs];
@@ -249,7 +269,7 @@ export class HermesShell {
             break;
           }
           if (action === "reject") {
-            const reason = actionArgs.join(" ").trim() || "rejected from Hermes shell";
+            const reason = actionArgs.join(" ").trim() || "rejected from Agentix shell";
             console.log(JSON.stringify(await this.backend.reject(taskId, reason), null, 2));
             break;
           }
@@ -291,7 +311,7 @@ export class HermesShell {
           break;
         }
         case "tools":
-          console.log(await hermesCommand("tools", [...subArgs, ...restArgs]));
+          console.log(this.formatTools(await this.backend.listTools()));
           break;
         case "tool": {
           const [toolId, action] = [...subArgs, ...restArgs];
@@ -348,7 +368,7 @@ export class HermesShell {
             break;
           }
           if (action === "reject") {
-            const reason = actionArgs.join(" ").trim() || "rejected from Hermes shell";
+            const reason = actionArgs.join(" ").trim() || "rejected from Agentix shell";
             console.log(JSON.stringify(await this.backend.reject(taskId, reason), null, 2));
             break;
           }
@@ -365,12 +385,16 @@ export class HermesShell {
             console.log("Usage: /memory <search-query>\n");
             break;
           }
-          console.log(await hermesCommand("memory", [query], 20_000));
+          console.log(JSON.stringify(await this.backend.memorySearch(query), null, 2));
           break;
         }
         case "logs": {
           const query = [...subArgs, ...restArgs].join(" ").trim();
-          console.log(await hermesCommand("logs", query ? [query] : [], 20_000));
+          const logs = await this.backend.listLogs();
+          const filtered = query
+            ? logs.filter((entry) => JSON.stringify(entry).toLowerCase().includes(query.toLowerCase()))
+            : logs;
+          console.log(JSON.stringify(filtered.slice(-50), null, 2));
           break;
         }
         case "log": {
@@ -387,13 +411,17 @@ export class HermesShell {
           break;
         }
         case "theme":
-          console.log("Theme comes from Hermes.\n");
+          console.log("Theme is controlled by the Agentix shell.\n");
           break;
         case "personality":
-          console.log("Personality is controlled by the Hermes frontend.\n");
+          console.log("Personality is controlled by the Agentix shell.\n");
+          break;
+        case "exit":
+        case "quit":
+          this.rl.close();
           break;
         case "fortune":
-          console.log(await hermesCommand("fortune", []));
+          console.log("Agentix: Powerhouse plans, Symphony schedules, Pi agents execute.");
           break;
         default:
           console.log(`Unknown command: /${name}. Type /help for available commands.\n`);
@@ -432,10 +460,11 @@ export class HermesShell {
   /reset              Clear conversation context
   /status             Show current session and bridge
   /history            Show conversation history
-  /doctor             Run Hermes diagnostics
+  /doctor             Run Agentix diagnostics
   /usage              Show usage stats
   /setup              Run first-run setup wizard
   /model              Configure model provider
+  /options            Show setup/provider/model options
   /update             Check for updates
   /cron <args>        Manage scheduled tasks
   /job <id> [action]  Inspect or run a scheduled job
@@ -458,6 +487,7 @@ export class HermesShell {
   /theme              Show theme source
   /personality        Show personality source
   /fortune            Random wisdom
+  /exit               Exit Agentix
   /help               Show this help
 `);
   }
@@ -465,9 +495,9 @@ export class HermesShell {
   private showStatus(): void {
     console.log(`Session: ${this.sessionId}`);
     console.log(
-      `Bridge: ${process.env.HERMES_BRIDGE_URL || "http://127.0.0.1:3456"}`,
+      `Bridge: ${process.env.AGENTIX_BRIDGE_URL || "http://127.0.0.1:3456"}`,
     );
-    console.log(`Hermes root: ${PATHS.hermesRoot}`);
+    console.log(`Agentix frontend root: ${PATHS.compatibilityRuntimeRoot}`);
     console.log();
   }
 

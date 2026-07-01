@@ -25,11 +25,11 @@ export function resolvePythonCommand(): PythonCommand {
     if (check.status === 0) return candidate;
   }
   throw new Error(
-    "Python 3 is required for the Hermes frontend. Set AGENTIX_PYTHON to a Python 3 executable if auto-detection fails.",
+    "Python 3 is required for bundled Agentix compatibility commands. Set AGENTIX_PYTHON to a Python 3 executable if auto-detection fails.",
   );
 }
 
-export async function runHermesSubcommand(
+export async function runCompatibilitySubcommand(
   args: string[],
   opts: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<string> {
@@ -40,7 +40,7 @@ export async function runHermesSubcommand(
     cwd: PATHS.workspaceRoot,
     env: {
       ...process.env,
-      PYTHONPATH: PATHS.hermesRoot,
+      PYTHONPATH: PATHS.compatibilityRuntimeRoot,
       AGENTIX_FRONTEND: "hermes",
       AGENTIX_INSTALL_ROOT: PATHS.installRoot,
       AGENTIX_WORKSPACE_DIR: PATHS.workspaceRoot,
@@ -58,7 +58,7 @@ export async function runHermesSubcommand(
   let spawnError: Error | null = null;
 
   child.on("error", (err) => {
-    spawnError = new Error(`Failed to spawn Hermes CLI: ${err.message}`);
+    spawnError = new Error(`Failed to spawn bundled Agentix compatibility command: ${err.message}`);
   });
 
   const timeout = setTimeout(() => {
@@ -73,12 +73,17 @@ export async function runHermesSubcommand(
   }
 
   try {
-    for await (const chunk of child.stdout!) {
-      stdout += new TextDecoder().decode(chunk);
-    }
-    for await (const chunk of child.stderr!) {
-      stderr += new TextDecoder().decode(chunk);
-    }
+    const stdoutPump = (async () => {
+      for await (const chunk of child.stdout!) {
+        stdout += new TextDecoder().decode(chunk);
+      }
+    })();
+    const stderrPump = (async () => {
+      for await (const chunk of child.stderr!) {
+        stderr += new TextDecoder().decode(chunk);
+      }
+    })();
+    await Promise.all([stdoutPump, stderrPump]);
     await new Promise<void>((resolve) => child.on("close", resolve));
   } finally {
     clearTimeout(timeout);
@@ -88,7 +93,7 @@ export async function runHermesSubcommand(
     throw spawnError;
   }
   if (timedOut) {
-    throw new Error(`Hermes subcommand timed out after ${timeoutMs}ms`);
+    throw new Error(`Agentix compatibility command timed out after ${timeoutMs}ms`);
   }
   if (child.exitCode !== 0 && stderr.trim()) {
     throw new Error(stderr.trim());
@@ -97,10 +102,10 @@ export async function runHermesSubcommand(
   return stdout;
 }
 
-export async function hermesCommand(
+export async function compatibilityCommand(
   subcommand: string,
   args: string[] = [],
   timeoutMs = 30_000,
 ): Promise<string> {
-  return runHermesSubcommand([subcommand, ...args], { timeoutMs });
+  return runCompatibilitySubcommand([subcommand, ...args], { timeoutMs });
 }

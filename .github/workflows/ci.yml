@@ -41,13 +41,16 @@ jobs:
         run: npm test
 
       - name: Release smoke
+        timeout-minutes: 25
         run: npm run smoke:release
 
       - name: Shell installer dry run
+        timeout-minutes: 5
         if: runner.os != 'Windows'
         run: AGENTIX_DRY_RUN=1 AGENTIX_SKIP_SETUP=1 sh install.sh
 
       - name: PowerShell installer dry run
+        timeout-minutes: 5
         if: runner.os == 'Windows'
         shell: pwsh
         run: .\install.ps1 -DryRun -SkipSetup
@@ -69,11 +72,11 @@ jobs:
         env:
           AGENTIX_SESSION_TOKEN: ci-token
 
-      - name: Build Hermes frontend image
+      - name: Build Agentix compatibility frontend image
         run: docker build -f hermes-agent/Dockerfile hermes-agent
 
-      - name: Validate Linux compose
+      - name: Validate compatibility Linux compose
         run: docker compose -f hermes-agent/docker-compose.yml config
 
-      - name: Validate Windows compose
+      - name: Validate compatibility Windows compose
         run: docker compose -f hermes-agent/docker-compose.windows.yml config

@@ -14,6 +14,8 @@ describe("config", () => {
     AGENTIX_PROVIDER: process.env.AGENTIX_PROVIDER,
     AGENTIX_BASE_URL: process.env.AGENTIX_BASE_URL,
     AGENTIX_LLM_API_KEY: process.env.AGENTIX_LLM_API_KEY,
+    KILOCODE_API_KEY: process.env.KILOCODE_API_KEY,
+    KILO_API_KEY: process.env.KILO_API_KEY,
     AGENTIX_SESSION_TOKEN: process.env.AGENTIX_SESSION_TOKEN,
     AGENTIX_WORKSPACE_DIR: process.env.AGENTIX_WORKSPACE_DIR,
   };
@@ -34,6 +36,8 @@ describe("config", () => {
     restoreEnv("AGENTIX_PROVIDER");
     restoreEnv("AGENTIX_BASE_URL");
     restoreEnv("AGENTIX_LLM_API_KEY");
+    restoreEnv("KILOCODE_API_KEY");
+    restoreEnv("KILO_API_KEY");
     restoreEnv("AGENTIX_SESSION_TOKEN");
     restoreEnv("AGENTIX_WORKSPACE_DIR");
     vi.resetModules();
@@ -74,6 +78,8 @@ describe("config", () => {
     dirs.push(dir);
     process.env.AGENTIX_DATA_DIR = dir;
     delete process.env.AGENTIX_LLM_API_KEY;
+    delete process.env.KILOCODE_API_KEY;
+    delete process.env.KILO_API_KEY;
     delete process.env.AGENTIX_SESSION_TOKEN;
     writeFileSync(
       join(dir, "config.json"),
@@ -93,6 +99,102 @@ describe("config", () => {
     expect(config.sessionToken).toBeNull();
   });
 
+  it("loads setup secrets and model defaults from workspace .env.local", async () => {
+    const workspace = tempDir();
+    dirs.push(workspace);
+    delete process.env.AGENTIX_MODEL;
+    delete process.env.AGENTIX_PROVIDER;
+    delete process.env.AGENTIX_BASE_URL;
+    delete process.env.AGENTIX_LLM_API_KEY;
+    delete process.env.KILOCODE_API_KEY;
+    delete process.env.KILO_API_KEY;
+    delete process.env.AGENTIX_SESSION_TOKEN;
+    delete process.env.AGENTIX_DATA_DIR;
+    process.env.AGENTIX_WORKSPACE_DIR = workspace;
+    writeFileSync(
+      join(workspace, ".env.local"),
+      [
+        "AGENTIX_PROVIDER=custom",
+        "AGENTIX_MODEL=env-file-model",
+        "AGENTIX_BASE_URL=https://gateway.example/v1",
+        "AGENTIX_LLM_API_KEY=env-file-secret",
+        "AGENTIX_SESSION_TOKEN=env-file-session",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const configMod = await import("../../src/config/index.js");
+    const config = configMod.loadConfig();
+
+    expect(config.provider).toBe("custom");
+    expect(config.model).toBe("env-file-model");
+    expect(config.baseUrl).toBe("https://gateway.example/v1");
+    expect(config.llmApiKey).toBe("env-file-secret");
+    expect(config.sessionToken).toBe("env-file-session");
+  });
+
+  it("accepts Kilo Gateway key aliases for first-class kilocode provider", async () => {
+    const dir = tempDir();
+    dirs.push(dir);
+    process.env.AGENTIX_DATA_DIR = dir;
+    process.env.AGENTIX_PROVIDER = "kilocode";
+    process.env.AGENTIX_MODEL = "moonshotai/kimi-k2";
+    delete process.env.AGENTIX_LLM_API_KEY;
+    process.env.KILOCODE_API_KEY = "kilo-secret";
+
+    const configMod = await import("../../src/config/index.js");
+    const config = configMod.loadConfig();
+
+    expect(config.provider).toBe("kilocode");
+    expect(config.model).toBe("moonshotai/kimi-k2");
+    expect(config.llmApiKey).toBe("kilo-secret");
+  });
+
+  it("accepts Kilo Gateway key aliases when older config stores provider openai with Kilo base URL", async () => {
+    const dir = tempDir();
+    dirs.push(dir);
+    process.env.AGENTIX_DATA_DIR = dir;
+    delete process.env.AGENTIX_PROVIDER;
+    delete process.env.AGENTIX_MODEL;
+    delete process.env.AGENTIX_LLM_API_KEY;
+    process.env.KILOCODE_API_KEY = "kilo-secret";
+    writeFileSync(
+      join(dir, "config.json"),
+      JSON.stringify({
+        provider: "openai",
+        model: "stepfun/step-3.7-flash:free",
+        baseUrl: "https://api.kilo.ai/api/gateway",
+      }),
+      "utf-8",
+    );
+
+    const configMod = await import("../../src/config/index.js");
+    const config = configMod.loadConfig();
+
+    expect(config.provider).toBe("openai");
+    expect(config.baseUrl).toBe("https://api.kilo.ai/api/gateway");
+    expect(config.llmApiKey).toBe("kilo-secret");
+  });
+
+  it("prefers process env over workspace .env.local", async () => {
+    const workspace = tempDir();
+    dirs.push(workspace);
+    process.env.AGENTIX_WORKSPACE_DIR = workspace;
+    process.env.AGENTIX_MODEL = "process-model";
+    writeFileSync(
+      join(workspace, ".env.local"),
+      "AGENTIX_MODEL=file-model\nAGENTIX_LLM_API_KEY=file-secret\n",
+      "utf-8",
+    );
+
+    const configMod = await import("../../src/config/index.js");
+    const config = configMod.loadConfig();
+
+    expect(config.model).toBe("process-model");
+    expect(config.llmApiKey).toBe("file-secret");
+  });
+
   it("treats undefined-like env strings as absent", async () => {
     const dir = tempDir();
     dirs.push(dir);
@@ -100,6 +202,8 @@ describe("config", () => {
     process.env.AGENTIX_PROVIDER = "undefined";
     process.env.AGENTIX_BASE_URL = "null";
     process.env.AGENTIX_LLM_API_KEY = "undefined";
+    delete process.env.KILOCODE_API_KEY;
+    delete process.env.KILO_API_KEY;
 
     const configMod = await import("../../src/config/index.js");
     const config = configMod.loadConfig();

@@ -3,7 +3,7 @@ import { startBridge } from "./bridge/server.js";
 import { PATHS, ensureDataDirs } from "./config/paths.js";
 import { startInboxServer } from "./config/InboxServer.js";
 import { buildHelpText } from "./cli/help.js";
-import { getBackendRuntime } from "./runtime/backend.js";
+import { getBackendRuntime, shutdownBackendRuntime } from "./runtime/backend.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json");
@@ -65,6 +65,20 @@ function formatDoctorReport(report: Record<string, unknown>): string {
 
 function printJson(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
+}
+
+function printGatewayTable(gateways: Array<Record<string, unknown>>): void {
+  console.log("ID        Platform  Enabled   Status    Messages  Name");
+  for (const gateway of gateways) {
+    console.log([
+      String(gateway.id ?? "").padEnd(9),
+      String(gateway.platform ?? "").padEnd(9),
+      String(gateway.enabled ? "yes" : "no").padEnd(8),
+      String(gateway.status ?? "").padEnd(9),
+      String(gateway.messageCount ?? 0).padEnd(9),
+      String(gateway.name ?? ""),
+    ].join(" "));
+  }
 }
 
 function parseBoolean(value: string | undefined): boolean | undefined {
@@ -134,7 +148,7 @@ async function main() {
         const bundle = getBackendRuntime().createSupportBundle();
         console.log(`Agentix v${pkg.version}`);
         console.log(`Project root: ${PATHS.projectRoot}`);
-        console.log(`Hermes root: ${PATHS.hermesRoot}`);
+        console.log(`Compatibility runtime root: ${PATHS.compatibilityRuntimeRoot}`);
         console.log(`Data dir: ${PATHS.dataDir}`);
         console.log(`Bridge entry: ${PATHS.bridgeEntry}`);
         console.log(`Inbox entry: ${PATHS.inboxEntry}`);
@@ -150,6 +164,28 @@ async function main() {
         } else {
           console.log(formatDoctorReport(report));
         }
+      }
+      return;
+    case "status":
+      ensureDataDirs();
+      {
+        const report = getBackendRuntime().doctor() as {
+          status?: string;
+          counts?: Record<string, unknown>;
+          config?: Record<string, unknown>;
+        };
+        if (cleanArgs.includes("--json")) {
+          printJson(report);
+          return;
+        }
+        const counts = report.counts ?? {};
+        const config = report.config ?? {};
+        console.log(`Agentix status: ${String(report.status ?? "unknown").toUpperCase()}`);
+        console.log(`Provider: ${String(config.provider ?? "n/a")}`);
+        console.log(`Model: ${String(config.model ?? "n/a")}`);
+        console.log(`LLM key: ${config.llmApiKeyConfigured ? "configured" : "missing"}`);
+        console.log(`Sessions: ${String(counts.sessions ?? 0)} Tasks: ${String(counts.tasks ?? 0)} Plans: ${String(counts.plans ?? 0)}`);
+        console.log(`Memory: ${String(counts.memory ?? 0)} Jobs: ${String(counts.jobs ?? 0)} Gateways: ${String(counts.gateways ?? 0)}`);
       }
       return;
     case "readiness":
@@ -253,8 +289,16 @@ async function main() {
         const [action = "list", idOrValue, ...rest] = cleanArgs;
         const runtime = getBackendRuntime();
         if (action === "list") {
-          for (const session of runtime.listSessions()) {
+          const limitFlag = readFlagValue(cleanArgs, "--limit");
+          const limit = cleanArgs.includes("--all")
+            ? undefined
+            : Math.max(1, Number(limitFlag ?? idOrValue ?? 50) || 50);
+          const sessions = runtime.listSessions({ limit, recover: limit === undefined });
+          for (const session of sessions) {
             console.log(`${session.id}: created=${session.createdAt}`);
+          }
+          if (limit !== undefined && sessions.length >= limit) {
+            console.log(`Showing ${limit} session(s). Use --all for full list.`);
           }
           return;
         }
@@ -585,6 +629,7 @@ async function main() {
       }
       return;
     case "mods":
+    case "tools":
     case "plugin":
     case "extension":
       ensureDataDirs();
@@ -599,22 +644,31 @@ async function main() {
         return;
       }
       if (!cleanArgs.length) {
-        for (const gateway of getBackendRuntime().listGateways()) {
-          console.log(
-            `${gateway.id}: ${gateway.name} [${gateway.platform}] ${gateway.enabled ? "enabled" : "disabled"} / ${gateway.status}`,
-          );
-        }
+        printGatewayTable(getBackendRuntime().listGateways());
         return;
       }
       {
         const [first, second, ...rest] = cleanArgs;
+        if (first === "list") {
+          printGatewayTable(getBackendRuntime().listGateways());
+          return;
+        }
+        if (first === "status") {
+          console.log(JSON.stringify(second ? getBackendRuntime().getGateway(second) : getBackendRuntime().listGateways(), null, 2));
+          return;
+        }
         if (first === "enable" || first === "disable") {
           const gatewayId = second;
           if (!gatewayId) {
             console.log(`Usage: agentix gateway ${first} <gateway-id>`);
             return;
           }
-          console.log(JSON.stringify(getBackendRuntime().setGatewayEnabled(gatewayId, first === "enable"), null, 2));
+          const result = getBackendRuntime().setGatewayEnabled(gatewayId, first === "enable") as { ok?: boolean; gateway?: { id?: string } };
+          if (result.ok) {
+            console.log(`${first === "enable" ? "Enabled" : "Disabled"} Agentix gateway: ${result.gateway?.id ?? gatewayId}`);
+          } else {
+            console.log(JSON.stringify(result, null, 2));
+          }
           return;
         }
         if (first === "message") {
@@ -634,7 +688,12 @@ async function main() {
           return;
         }
         if (second === "enable" || second === "disable") {
-          console.log(JSON.stringify(getBackendRuntime().setGatewayEnabled(first, second === "enable"), null, 2));
+          const result = getBackendRuntime().setGatewayEnabled(first, second === "enable") as { ok?: boolean; gateway?: { id?: string } };
+          if (result.ok) {
+            console.log(`${second === "enable" ? "Enabled" : "Disabled"} Agentix gateway: ${result.gateway?.id ?? first}`);
+          } else {
+            console.log(JSON.stringify(result, null, 2));
+          }
           return;
         }
         if (second === "message") {
@@ -695,7 +754,19 @@ async function main() {
     }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+const longRunningCommands = new Set(["server", "dashboard", "ui", "web"]);
+const launchedCommand = process.argv[2];
+
+main()
+  .then(() => {
+    if (!longRunningCommands.has(launchedCommand ?? "")) {
+      shutdownBackendRuntime();
+    }
+  })
+  .catch((err) => {
+    if (!longRunningCommands.has(launchedCommand ?? "")) {
+      shutdownBackendRuntime();
+    }
+    console.error(err);
+    process.exit(1);
+  });

@@ -1,8 +1,7 @@
-"""Hermes CLI command adapters backed by the Agentix bridge.
+"""Compatibility CLI command adapters backed by the Agentix bridge.
 
-These adapters are active only when the Hermes frontend is launched by Agentix
-(`AGENTIX_FRONTEND=hermes`). Upstream Hermes commands keep their native behavior
-when run standalone.
+These adapters are active only when the bundled frontend runtime is launched by
+Agentix. Upstream commands keep their native behavior when run standalone.
 """
 
 from __future__ import annotations
@@ -19,9 +18,15 @@ from typing import Any, Iterable
 
 def using_agentix_backend() -> bool:
     return (
-        os.environ.get("AGENTIX_FRONTEND") == "hermes"
+        os.environ.get("AGENTIX_FRONTEND") in {"agentix", "hermes"}
         and os.environ.get("AGENTIX_DISABLE_BACKEND_COMMANDS") != "1"
     )
+
+
+def _sync_frontend_home_env() -> None:
+    frontend_home = os.environ.get("AGENTIX_FRONTEND_HOME")
+    if frontend_home:
+        os.environ["HERMES_HOME"] = frontend_home
 
 
 def _backend() -> Any:
@@ -54,8 +59,11 @@ def _data_dir() -> Path:
     return Path(os.environ.get("AGENTIX_DATA_DIR") or (_workspace_dir() / "data")).resolve()
 
 
-def _provider_key_candidates(provider: str) -> list[str]:
+def _provider_key_candidates(provider: str, base_url: str = "") -> list[str]:
     normalized = (provider or "").lower()
+    normalized_base_url = (base_url or "").lower()
+    if "kilo" in normalized or "api.kilo.ai" in normalized_base_url:
+        return ["KILOCODE_API_KEY", "KILO_API_KEY", "AGENTIX_LLM_API_KEY", "OPENAI_API_KEY"]
     if "anthropic" in normalized or "claude" in normalized:
         return ["ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN"]
     if "openrouter" in normalized:
@@ -70,16 +78,17 @@ def _provider_key_candidates(provider: str) -> list[str]:
         return ["MISTRAL_API_KEY", "OPENAI_API_KEY"]
     if "xai" in normalized or "grok" in normalized:
         return ["XAI_API_KEY", "OPENAI_API_KEY"]
-    return ["OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"]
+    return ["AGENTIX_LLM_API_KEY", "KILOCODE_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"]
 
 
 def sync_agentix_runtime_config() -> dict[str, Any]:
-    """Mirror Hermes provider/model selection into Agentix runtime config.
+    """Mirror frontend provider/model selection into Agentix runtime config.
 
-    Secrets stay in Hermes' .env; Agentix stores only non-secret defaults in
+    Secrets stay in the frontend .env; Agentix stores only non-secret defaults in
     workspace data/config.json and reads the API key from the process env when
     the backend starts.
     """
+    _sync_frontend_home_env()
     from hermes_cli.config import get_env_value, load_config
 
     cfg = load_config()
@@ -92,7 +101,7 @@ def sync_agentix_runtime_config() -> dict[str, Any]:
     base_url = str(model_cfg.get("base_url") or "").strip()
 
     key = ""
-    for key_name in _provider_key_candidates(provider):
+    for key_name in _provider_key_candidates(provider, base_url):
         key = get_env_value(key_name) or os.environ.get(key_name, "")
         if key:
             break
@@ -394,8 +403,14 @@ def handle_oneshot(
         return None
 
     backend = _backend()
-    session = backend.create_session(model=model)
-    response = backend.execute(str(prompt), session_id=session.get("id"))
+    session = backend.create_session(model=model, provider=provider, toolsets=toolsets)
+    response = backend.execute(
+        str(prompt),
+        session_id=session.get("id"),
+        model=model,
+        provider=provider,
+        toolsets=toolsets,
+    )
     if response:
         print(response)
     return 0

@@ -297,15 +297,20 @@ export class LocalAgentixRuntime {
     this.scheduler.start();
   }
 
-  listSessions(): Array<{
+  listSessions(opts: { limit?: number; recover?: boolean } = {}): Array<{
     id: string;
     status: string;
     createdAt: string;
     updatedAt: string;
     metadata: Record<string, unknown>;
   }> {
-    this.powerhouse.start();
-    return this.powerhouse.listSessions().map((session) => ({
+    const sessions = opts.limit
+      ? this.powerhouse.sessions.listRecent(opts.limit)
+      : (() => {
+          this.powerhouse.start({ recover: opts.recover ?? true });
+          return this.powerhouse.listSessions();
+        })();
+    return sessions.map((session) => ({
       id: session.id,
       status: session.status,
       createdAt: new Date(session.createdAt).toISOString(),
@@ -406,7 +411,7 @@ export class LocalAgentixRuntime {
   }
 
   listTools(): Array<{ name: string; description: string }> {
-    this.powerhouse.start();
+    this.powerhouse.start({ recover: false });
     return this.powerhouse.agents.list().map((agent) => ({
       name: agent.kind,
       description: `Pi agent ${agent.id} handles ${agent.kind} tasks.`,
@@ -414,7 +419,7 @@ export class LocalAgentixRuntime {
   }
 
   getTool(toolId: string): RuntimeToolDetail | null {
-    this.powerhouse.start();
+    this.powerhouse.start({ recover: false });
     const tool = this.powerhouse.agents.get(toolId) ?? this.powerhouse.agents.list().find((agent) => agent.kind === toolId);
     if (!tool) return null;
     const relatedTasks = this.powerhouse
@@ -454,6 +459,7 @@ export class LocalAgentixRuntime {
   }
 
   listAgentProfiles(): Record<string, unknown> {
+    this.powerhouse.start({ recover: false });
     return {
       profiles: this.powerhouse.agentProfiles.list(),
       registeredAgents: this.powerhouse.agents.list().map((agent) => ({
@@ -1457,12 +1463,11 @@ export class LocalAgentixRuntime {
   }
 
   usage(): Record<string, unknown> {
-    const sessions = this.powerhouse.listSessions();
+    this.powerhouse.start({ recover: false });
     const tasks = this.powerhouse.listTasks();
     const plans = this.powerhouse.planStore.list();
     const jobs = this.scheduler.list();
     const gateways = this.gateways.list();
-    const memory = this.powerhouse.memory.list();
     const tasksByStatus: Record<string, number> = {};
     const jobsByLastStatus: Record<string, number> = {};
 
@@ -1475,15 +1480,16 @@ export class LocalAgentixRuntime {
     }
 
     return {
+      title: "Agentix backend usage",
       generatedAt: new Date().toISOString(),
       counts: {
-        sessions: sessions.length,
+        sessions: this.powerhouse.sessions.count(),
         tasks: tasks.length,
         plans: plans.length,
         jobs: jobs.length,
         gateways: gateways.length,
         enabledGateways: gateways.filter((gateway) => gateway.enabled).length,
-        memory: memory.length,
+        memory: this.powerhouse.memory.count(),
       },
       tasksByStatus,
       jobsByLastStatus,
@@ -1601,7 +1607,7 @@ export class LocalAgentixRuntime {
   }
 
   doctor(): Record<string, unknown> {
-    this.powerhouse.start();
+    this.powerhouse.start({ recover: false });
     const config = loadConfig();
     const tasks = this.powerhouse.listTasks();
     const agents = this.powerhouse.agents.list();
@@ -1617,7 +1623,7 @@ export class LocalAgentixRuntime {
       join(PATHS.installRoot, "frontend", "dist", "index.html"),
       join(PATHS.installRoot, "install.sh"),
       join(PATHS.installRoot, "install.ps1"),
-      join(PATHS.hermesRoot, "pyproject.toml"),
+      join(PATHS.compatibilityRuntimeRoot, "pyproject.toml"),
     ];
     const missingInstallAssets = requiredInstallAssets.filter((asset) => !existsSync(asset));
     const sandboxMode = process.env.AGENTIX_SANDBOX_MODE ?? "auto";
@@ -1646,11 +1652,11 @@ export class LocalAgentixRuntime {
       existsSync(PATHS.dataDir) ? undefined : "Run agentix setup or agentix server to initialize runtime directories.",
     );
     add(
-      "paths.hermes",
-      "Hermes frontend",
-      existsSync(PATHS.hermesRoot) ? "pass" : "fail",
-      PATHS.hermesRoot,
-      existsSync(PATHS.hermesRoot) ? undefined : "Reinstall Agentix or restore the bundled hermes-agent directory.",
+      "paths.compatibility",
+      "Bundled compatibility runtime",
+      existsSync(PATHS.compatibilityRuntimeRoot) ? "pass" : "fail",
+      PATHS.compatibilityRuntimeRoot,
+      existsSync(PATHS.compatibilityRuntimeRoot) ? undefined : "Reinstall Agentix or restore the bundled compatibility runtime.",
     );
     add(
       "install.package",
@@ -1665,7 +1671,7 @@ export class LocalAgentixRuntime {
       missingInstallAssets.length ? "fail" : "pass",
       missingInstallAssets.length
         ? `missing ${missingInstallAssets.length}: ${missingInstallAssets.join(", ")}`
-        : "bin, backend dist, dashboard, installers, and Hermes frontend present",
+        : "bin, backend dist, dashboard, installers, and bundled compatibility runtime present",
       missingInstallAssets.length ? "Reinstall Agentix from npm or a verified release tarball." : undefined,
     );
     add(
@@ -1763,13 +1769,13 @@ export class LocalAgentixRuntime {
       installRoot: PATHS.installRoot,
       checks,
       counts: {
-        sessions: this.powerhouse.listSessions().length,
+        sessions: this.powerhouse.sessions.count(),
         tasks: tasks.length,
         plans: this.powerhouse.planStore.list().length,
         approvals: pendingApprovals.length,
         jobs: jobs.length,
         gateways: gateways.length,
-        memory: this.powerhouse.memory.list().length,
+        memory: this.powerhouse.memory.count(),
         healingProcedures: healing.length,
         agentProfiles: agentProfiles.length,
       },
@@ -1815,7 +1821,7 @@ export class LocalAgentixRuntime {
     ) => ({ id, label, status: ok ? "pass" : "block", detail, requiredFor, ...(action ? { action } : {}) });
 
     const installAssets = byId.get("install.assets");
-    const hermes = byId.get("paths.hermes");
+    const compatibilityRuntime = byId.get("paths.compatibility");
     const piAgents = byId.get("agents.pi");
     const sandbox = byId.get("sandbox.isolation");
     const llmConfigured = Boolean(doctor.config?.llmApiKeyConfigured);
@@ -1825,8 +1831,8 @@ export class LocalAgentixRuntime {
     const gateStatus = (ok: boolean, warn = false): "pass" | "warn" | "block" => ok ? (warn ? "warn" : "pass") : "block";
     const releaseProof = this.readPublicReleaseProof(packageVersion);
     const llmProof = this.readLiveLlmProof(packageVersion);
-    const publicReleaseVerified = releaseProof.ok || process.env.AGENTIX_PUBLIC_RELEASE_VERIFIED === "1";
-    const liveLlmVerified = llmProof.ok || process.env.AGENTIX_LLM_LIVE_VERIFIED === "1";
+    const publicReleaseVerified = releaseProof.ok;
+    const liveLlmVerified = llmProof.ok;
 
     const gates = [
       gate(
@@ -1838,12 +1844,12 @@ export class LocalAgentixRuntime {
         installAssets?.action,
       ),
       gate(
-        "frontend.hermes",
-        "Hermes frontend bundled",
-        hermes?.status === "pass",
-        hermes?.detail ?? "unknown",
+        "frontend.compatibility",
+        "Agentix compatibility runtime bundled",
+        compatibilityRuntime?.status === "pass",
+        compatibilityRuntime?.detail ?? "unknown",
         "private-beta",
-        hermes?.action,
+        compatibilityRuntime?.action,
       ),
       gate(
         "backend.pi_agents",
@@ -1875,11 +1881,9 @@ export class LocalAgentixRuntime {
         liveLlmVerified,
         llmProof.ok
           ? `verified by ${llmProof.path}`
-          : liveLlmVerified
-            ? "external live LLM proof supplied by AGENTIX_LLM_LIVE_VERIFIED=1"
-            : llmConfigured
-              ? llmProof.detail
-              : "missing; deterministic fallback active",
+          : llmConfigured
+            ? llmProof.detail
+            : "missing; deterministic fallback active",
         "public-release",
         liveLlmVerified ? undefined : "Run agentix setup or export AGENTIX_LLM_API_KEY, then run npm run verify:llm -- --out data/release/live-llm-proof.json.",
       ),
@@ -1889,9 +1893,7 @@ export class LocalAgentixRuntime {
         publicReleaseVerified,
         releaseProof.ok
           ? `verified by ${releaseProof.path}`
-          : publicReleaseVerified
-            ? "external release proof supplied by AGENTIX_PUBLIC_RELEASE_VERIFIED=1"
-            : releaseProof.detail,
+          : releaseProof.detail,
         "external",
         publicReleaseVerified ? undefined : "Tag a release, publish with provenance, then verify npm install -g and curl install from public URLs.",
       ),
@@ -2009,7 +2011,8 @@ export class LocalAgentixRuntime {
         installerDryRun?: boolean;
         verifiedAt?: string;
         release?: { sha256?: string; manifestUrl?: string; tarballUrl?: string };
-        npm?: unknown;
+        npm?: { attestations?: { url?: string; predicateType?: string; provenance?: boolean } };
+        npmInstall?: { agentixVersion?: string; helpChecked?: boolean };
       };
       if (!proof.ok) {
         return { ok: false, path: proofPath, detail: "proof file does not mark ok=true" };
@@ -2025,6 +2028,15 @@ export class LocalAgentixRuntime {
       }
       if (!proof.npm) {
         return { ok: false, path: proofPath, detail: "proof missing npm registry metadata" };
+      }
+      if (!proof.npm.attestations?.url || proof.npm.attestations.provenance !== true) {
+        return { ok: false, path: proofPath, detail: "proof missing npm provenance attestation verification" };
+      }
+      if (!proof.npm.attestations.predicateType?.startsWith("https://slsa.dev/provenance/")) {
+        return { ok: false, path: proofPath, detail: "proof missing SLSA provenance predicate" };
+      }
+      if (!proof.npmInstall?.agentixVersion || !proof.npmInstall.helpChecked) {
+        return { ok: false, path: proofPath, detail: "proof missing npm global install verification" };
       }
       if (!proof.installerDryRun) {
         return { ok: false, path: proofPath, detail: "proof did not verify installer dry-run" };
@@ -2160,6 +2172,10 @@ export class LocalAgentixRuntime {
       stimulus: string;
       sessionId?: string;
       onDelta?: (delta: string) => void;
+      model?: string;
+      provider?: string;
+      baseUrl?: string;
+      toolsets?: unknown;
     },
   ): Promise<{ response: string; sessionId: string; status: string; taskIds: string[] }> {
     const result = await this.powerhouse.executeStimulus(opts);

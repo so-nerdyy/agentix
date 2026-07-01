@@ -12,13 +12,29 @@ export class ConversationAgent extends BasePIAgent {
     this.emitStart(task);
     const stimulus = String(task.payload.stimulus ?? "").trim();
     const context = task.payload.context;
+    const execution = typeof task.payload.execution === "object" && task.payload.execution !== null
+      ? task.payload.execution as Record<string, unknown>
+      : {};
+    const baseConfig = loadConfig();
+    const config = {
+      ...baseConfig,
+      model: typeof execution.model === "string" && execution.model.trim()
+        ? execution.model.trim()
+        : baseConfig.model,
+      provider: typeof execution.provider === "string" && execution.provider.trim()
+        ? execution.provider.trim()
+        : baseConfig.provider,
+      baseUrl: typeof execution.baseUrl === "string" && execution.baseUrl.trim()
+        ? execution.baseUrl.trim()
+        : baseConfig.baseUrl,
+    };
 
-    const llmResult = await new LLMClient(loadConfig()).complete([
+    const llmResult = await new LLMClient(config).complete([
       {
         role: "system",
         content: [
           "You are Agentix, an autonomous software agent backend.",
-          "The Hermes frontend owns the terminal UI, setup, commands, and integrations.",
+          "The Agentix shell owns the terminal UI, setup, commands, and integrations.",
           "The Agentix backend owns Powerhouse orchestration, Symphony planning, Pi agents, memory, approvals, validation, and healing.",
           "Answer the user directly and be concise unless the task requires detail.",
         ].join(" "),
@@ -41,7 +57,7 @@ export class ConversationAgent extends BasePIAgent {
     }
 
     const lines = [
-      "Agentix is running with the Hermes frontend and Agentix backend.",
+      "Agentix is running with the Agentix shell and backend.",
       "",
       "Backend path:",
       "- Powerhouse accepted the task.",

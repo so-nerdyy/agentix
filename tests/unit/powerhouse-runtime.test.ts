@@ -20,6 +20,7 @@ import { TaskStore } from "../../src/powerhouse/TaskStore.js";
 import { SchedulerService } from "../../src/scheduler/SchedulerService.js";
 import { ScheduledJobStore } from "../../src/scheduler/ScheduledJobStore.js";
 import { PlanStore } from "../../src/symphony/PlanStore.js";
+import { resetConfigCache } from "../../src/config/index.js";
 import type { Task, TaskResult } from "../../src/powerhouse/types.js";
 
 const tempDirs: string[] = [];
@@ -81,13 +82,19 @@ class HealingResistantAgent extends BasePIAgent {
 }
 
 afterEach(() => {
+  vi.unstubAllGlobals();
+  delete process.env.AGENTIX_PROVIDER;
+  delete process.env.AGENTIX_MODEL;
+  delete process.env.AGENTIX_BASE_URL;
+  delete process.env.AGENTIX_LLM_API_KEY;
+  resetConfigCache();
   while (tempDirs.length > 0) {
     rmSync(tempDirs.pop()!, { recursive: true, force: true });
   }
 });
 
 describe("Powerhouse restored runtime", () => {
-  it("executes a normal Hermes message through Symphony and a Pi agent", async () => {
+  it("executes a normal Agentix message through Symphony and a Pi agent", async () => {
     const powerhouse = makePowerhouse();
 
     const result = await powerhouse.executeStimulus({
@@ -100,6 +107,41 @@ describe("Powerhouse restored runtime", () => {
     expect(result.taskIds).toHaveLength(1);
     expect(powerhouse.listTasks()[0]?.status).toBe("complete");
     expect(powerhouse.memory.search("hello").length).toBeGreaterThanOrEqual(1);
+
+    powerhouse.stop();
+  });
+
+  it("honors per-invocation model and provider selectors during conversation execution", async () => {
+    process.env.AGENTIX_PROVIDER = "local";
+    process.env.AGENTIX_MODEL = "env-model";
+    process.env.AGENTIX_BASE_URL = "http://local.invalid/v1";
+    resetConfigCache();
+    let requestBody: Record<string, unknown> | null = null;
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: "selected model response" } }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const powerhouse = makePowerhouse();
+
+    const result = await powerhouse.executeStimulus({
+      stimulus: "hello selected model",
+      model: "cli-model",
+      provider: "local",
+      baseUrl: "http://override.invalid/v1",
+      toolsets: ["web"],
+    });
+
+    expect(result.status).toBe("complete");
+    expect(result.response).toContain("selected model response");
+    expect(requestBody?.model).toBe("cli-model");
+    expect(powerhouse.listSessions()[0]?.metadata).toMatchObject({
+      model: "cli-model",
+      provider: "local",
+      baseUrl: "http://override.invalid/v1",
+      toolsets: ["web"],
+    });
 
     powerhouse.stop();
   });
@@ -259,6 +301,15 @@ describe("Powerhouse restored runtime", () => {
       },
       npm: {
         tarball: `https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/-/${artifactBase}-${pkg.version}.tgz`,
+        attestations: {
+          url: `https://registry.npmjs.org/-/npm/v1/attestations/${encodeURIComponent(pkg.name)}@${pkg.version}`,
+          predicateType: "https://slsa.dev/provenance/v1",
+          provenance: true,
+        },
+      },
+      npmInstall: {
+        agentixVersion: `Agentix v${pkg.version}`,
+        helpChecked: true,
       },
     }), "utf-8");
     const runtime = new LocalAgentixRuntime();
@@ -311,6 +362,105 @@ describe("Powerhouse restored runtime", () => {
       expect(readiness.releaseProof).toMatchObject({
         ok: false,
         detail: "proof missing npm registry metadata",
+      });
+      expect(readiness.gates.find((gate) => gate.id === "release.publish")?.status).toBe("block");
+    } finally {
+      runtime.shutdown();
+      if (previousProof === undefined) {
+        delete process.env.AGENTIX_PUBLIC_RELEASE_PROOF;
+      } else {
+        process.env.AGENTIX_PUBLIC_RELEASE_PROOF = previousProof;
+      }
+    }
+  });
+
+  it("rejects public-release proof files that skip npm global install verification", () => {
+    const dir = tempDir("agentix-release-proof-no-install-");
+    const proofPath = join(dir, "proof.json");
+    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf-8")) as { name: string; version: string };
+    const artifactBase = pkg.name.replace(/^@/, "").replace(/[\/\\]/g, "-");
+    const previousProof = process.env.AGENTIX_PUBLIC_RELEASE_PROOF;
+    process.env.AGENTIX_PUBLIC_RELEASE_PROOF = proofPath;
+    writeFileSync(proofPath, JSON.stringify({
+      ok: true,
+      package: pkg.name,
+      version: pkg.version,
+      installerDryRun: true,
+      verifiedAt: new Date().toISOString(),
+      release: {
+        sha256: "abc123",
+        manifestUrl: `https://example.test/${artifactBase}-${pkg.version}-manifest.json`,
+        tarballUrl: `https://example.test/${artifactBase}-${pkg.version}.tgz`,
+      },
+      npm: {
+        tarball: `https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/-/${artifactBase}-${pkg.version}.tgz`,
+        attestations: {
+          url: `https://registry.npmjs.org/-/npm/v1/attestations/${encodeURIComponent(pkg.name)}@${pkg.version}`,
+          predicateType: "https://slsa.dev/provenance/v1",
+          provenance: true,
+        },
+      },
+    }), "utf-8");
+    const runtime = new LocalAgentixRuntime();
+
+    try {
+      const readiness = runtime.readiness() as {
+        gates: Array<{ id: string; status: string; detail: string }>;
+        releaseProof: { ok: boolean; detail: string };
+      };
+
+      expect(readiness.releaseProof).toMatchObject({
+        ok: false,
+        detail: "proof missing npm global install verification",
+      });
+      expect(readiness.gates.find((gate) => gate.id === "release.publish")?.status).toBe("block");
+    } finally {
+      runtime.shutdown();
+      if (previousProof === undefined) {
+        delete process.env.AGENTIX_PUBLIC_RELEASE_PROOF;
+      } else {
+        process.env.AGENTIX_PUBLIC_RELEASE_PROOF = previousProof;
+      }
+    }
+  });
+
+  it("rejects public-release proof files that skip npm provenance verification", () => {
+    const dir = tempDir("agentix-release-proof-no-provenance-");
+    const proofPath = join(dir, "proof.json");
+    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf-8")) as { name: string; version: string };
+    const artifactBase = pkg.name.replace(/^@/, "").replace(/[\/\\]/g, "-");
+    const previousProof = process.env.AGENTIX_PUBLIC_RELEASE_PROOF;
+    process.env.AGENTIX_PUBLIC_RELEASE_PROOF = proofPath;
+    writeFileSync(proofPath, JSON.stringify({
+      ok: true,
+      package: pkg.name,
+      version: pkg.version,
+      installerDryRun: true,
+      verifiedAt: new Date().toISOString(),
+      release: {
+        sha256: "abc123",
+        manifestUrl: `https://example.test/${artifactBase}-${pkg.version}-manifest.json`,
+        tarballUrl: `https://example.test/${artifactBase}-${pkg.version}.tgz`,
+      },
+      npm: {
+        tarball: `https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/-/${artifactBase}-${pkg.version}.tgz`,
+      },
+      npmInstall: {
+        agentixVersion: `Agentix v${pkg.version}`,
+        helpChecked: true,
+      },
+    }), "utf-8");
+    const runtime = new LocalAgentixRuntime();
+
+    try {
+      const readiness = runtime.readiness() as {
+        gates: Array<{ id: string; status: string; detail: string }>;
+        releaseProof: { ok: boolean; detail: string };
+      };
+
+      expect(readiness.releaseProof).toMatchObject({
+        ok: false,
+        detail: "proof missing npm provenance attestation verification",
       });
       expect(readiness.gates.find((gate) => gate.id === "release.publish")?.status).toBe("block");
     } finally {
@@ -382,6 +532,15 @@ describe("Powerhouse restored runtime", () => {
       },
       npm: {
         tarball: `https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/-/${artifactBase}-${pkg.version}.tgz`,
+        attestations: {
+          url: `https://registry.npmjs.org/-/npm/v1/attestations/${encodeURIComponent(pkg.name)}@${pkg.version}`,
+          predicateType: "https://slsa.dev/provenance/v1",
+          provenance: true,
+        },
+      },
+      npmInstall: {
+        agentixVersion: `Agentix v${pkg.version}`,
+        helpChecked: true,
       },
     }), "utf-8");
     writeFileSync(llmProofPath, JSON.stringify({
@@ -406,6 +565,51 @@ describe("Powerhouse restored runtime", () => {
       expect(readiness.publicReleaseReady).toBe(true);
     } finally {
       runtime.shutdown();
+      if (previousReleaseProof === undefined) {
+        delete process.env.AGENTIX_PUBLIC_RELEASE_PROOF;
+      } else {
+        process.env.AGENTIX_PUBLIC_RELEASE_PROOF = previousReleaseProof;
+      }
+      if (previousLlmProof === undefined) {
+        delete process.env.AGENTIX_LLM_PROOF;
+      } else {
+        process.env.AGENTIX_LLM_PROOF = previousLlmProof;
+      }
+    }
+  });
+
+  it("does not accept environment flags as public-release proof", () => {
+    const previousReleaseFlag = process.env.AGENTIX_PUBLIC_RELEASE_VERIFIED;
+    const previousLlmFlag = process.env.AGENTIX_LLM_LIVE_VERIFIED;
+    const previousReleaseProof = process.env.AGENTIX_PUBLIC_RELEASE_PROOF;
+    const previousLlmProof = process.env.AGENTIX_LLM_PROOF;
+    process.env.AGENTIX_PUBLIC_RELEASE_VERIFIED = "1";
+    process.env.AGENTIX_LLM_LIVE_VERIFIED = "1";
+    delete process.env.AGENTIX_PUBLIC_RELEASE_PROOF;
+    delete process.env.AGENTIX_LLM_PROOF;
+    const runtime = new LocalAgentixRuntime();
+
+    try {
+      const readiness = runtime.readiness() as {
+        publicReleaseReady: boolean;
+        gates: Array<{ id: string; status: string }>;
+      };
+
+      expect(readiness.publicReleaseReady).toBe(false);
+      expect(readiness.gates.find((gate) => gate.id === "llm.live_key")?.status).toBe("block");
+      expect(readiness.gates.find((gate) => gate.id === "release.publish")?.status).toBe("block");
+    } finally {
+      runtime.shutdown();
+      if (previousReleaseFlag === undefined) {
+        delete process.env.AGENTIX_PUBLIC_RELEASE_VERIFIED;
+      } else {
+        process.env.AGENTIX_PUBLIC_RELEASE_VERIFIED = previousReleaseFlag;
+      }
+      if (previousLlmFlag === undefined) {
+        delete process.env.AGENTIX_LLM_LIVE_VERIFIED;
+      } else {
+        process.env.AGENTIX_LLM_LIVE_VERIFIED = previousLlmFlag;
+      }
       if (previousReleaseProof === undefined) {
         delete process.env.AGENTIX_PUBLIC_RELEASE_PROOF;
       } else {
@@ -1030,7 +1234,7 @@ describe("Powerhouse restored runtime", () => {
     powerhouse.stop();
   });
 
-  it("supports Hermes-style cron schedules and records run metadata", async () => {
+  it("supports Agentix cron schedules and records run metadata", async () => {
     const powerhouse = makePowerhouse();
     const dir = tempDir("agentix-cron-scheduler-");
     const scheduler = new SchedulerService(
