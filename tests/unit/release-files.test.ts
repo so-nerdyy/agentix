@@ -40,6 +40,7 @@ describe("release packaging files", () => {
     expect(preflight).toContain("npm.auth");
     expect(preflight).toContain("npm.publish_dry_run");
     expect(preflight).toContain("publish\", \"--dry-run\"");
+    expect(preflight).toContain("KILOCODE_API_KEY");
     expect(preflight).toContain("llm.secret");
     expect(smoke).toContain("smokeInstallerChecksum");
     expect(smoke).toContain("smokeVersionedReleaseInstall");
@@ -63,6 +64,7 @@ describe("release packaging files", () => {
     expect(llmVerifier).toContain("/v1/messages");
     expect(smoke).toContain("public-release-proof.json");
     expect(releaseWorkflow).toContain("npm publish --provenance");
+    expect(releaseWorkflow).toContain("secrets.KILOCODE_API_KEY");
     expect(releaseWorkflow.indexOf("Publish to npm with provenance")).toBeLessThan(releaseWorkflow.indexOf("Upload release assets"));
     expect(releaseWorkflow).toContain("Validate npm authentication");
     expect(releaseWorkflow).toContain("npm run release:preflight -- --require-llm");

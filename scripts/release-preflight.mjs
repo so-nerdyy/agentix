@@ -195,13 +195,13 @@ if (!npmToken) {
   }
 }
 
-const llmKey = envString("AGENTIX_LLM_API_KEY");
+const llmKey = envString("AGENTIX_LLM_API_KEY") || envString("KILOCODE_API_KEY") || envString("KILO_API_KEY");
 add(
   results,
   "llm.secret",
   Boolean(llmKey) || !requireLlm,
-  llmKey ? "AGENTIX_LLM_API_KEY configured" : "AGENTIX_LLM_API_KEY missing",
-  "Add AGENTIX_LLM_API_KEY secret or run npm run verify:llm manually before public readiness.",
+  llmKey ? "live LLM API key configured" : "AGENTIX_LLM_API_KEY/KILOCODE_API_KEY missing",
+  "Add AGENTIX_LLM_API_KEY or KILOCODE_API_KEY secret, or run npm run verify:llm manually before public readiness.",
   requireLlm ? "fail" : "warn",
 );
 
