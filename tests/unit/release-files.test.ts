@@ -47,6 +47,7 @@ describe("release packaging files", () => {
     expect(smoke).toContain("tampered release artifact");
     expect(smoke).toContain("AGENTIX_RELEASE_BASE_URL");
     expect(smoke).toContain("verify-public-release.mjs");
+    expect(smoke).toContain("dashboard HTML exposes Hermes frontend branding");
     expect(smoke).toContain("installCompatibilityPythonDependencies");
     expect(smoke).toContain("pip\", \"install\"");
     expect(verifier).toContain("verifyNpm");
@@ -64,6 +65,9 @@ describe("release packaging files", () => {
     expect(llmVerifier).toContain("/v1/messages");
     expect(smoke).toContain("public-release-proof.json");
     expect(releaseWorkflow).toContain("npm publish --provenance");
+    expect(releaseWorkflow).toContain("concurrency:");
+    expect(releaseWorkflow).toContain("timeout-minutes: 60");
+    expect(releaseWorkflow).toContain("timeout-minutes: 25");
     expect(releaseWorkflow).toContain("secrets.KILOCODE_API_KEY");
     expect(releaseWorkflow.indexOf("Publish to npm with provenance")).toBeLessThan(releaseWorkflow.indexOf("Upload release assets"));
     expect(releaseWorkflow).toContain("Validate npm authentication");
