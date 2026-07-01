@@ -383,6 +383,7 @@ async function smokeVersionedReleaseInstall(tarball, expectedSha256, tarballName
     const verified = await run(process.execPath, [
       join(root, "scripts", "verify-public-release.mjs"),
       "--skip-npm",
+      "--skip-npm-install",
       "--version",
       packageJson.version,
       "--release-base-url",

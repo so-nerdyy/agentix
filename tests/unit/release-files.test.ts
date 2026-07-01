@@ -38,6 +38,8 @@ describe("release packaging files", () => {
     expect(preflight).toContain("github.repo");
     expect(preflight).toContain("gh\", [\"auth\", \"token\"]");
     expect(preflight).toContain("npm.auth");
+    expect(preflight).toContain("npm.publish_dry_run");
+    expect(preflight).toContain("publish\", \"--dry-run\"");
     expect(preflight).toContain("llm.secret");
     expect(smoke).toContain("smokeInstallerChecksum");
     expect(smoke).toContain("smokeVersionedReleaseInstall");
@@ -49,13 +51,19 @@ describe("release packaging files", () => {
     expect(verifier).toContain("verifyNpm");
     expect(verifier).toContain("verifyGitHubRelease");
     expect(verifier).toContain("verifyInstaller");
+    expect(verifier).toContain("verifyNpmGlobalInstall");
+    expect(verifier).toContain("npmInstall");
+    expect(verifier).toContain("dist.attestations.url");
+    expect(verifier).toContain("slsa.dev/provenance");
     expect(verifier).toContain("AGENTIX_VERIFY_SKIP_NPM");
+    expect(verifier).toContain("AGENTIX_VERIFY_SKIP_NPM_INSTALL");
     expect(verifier).toContain("mkdir(dirname(resolve(outputPath))");
     expect(llmVerifier).toContain("AGENTIX_LLM_VERIFY_OUTPUT");
     expect(llmVerifier).toContain("/chat/completions");
     expect(llmVerifier).toContain("/v1/messages");
     expect(smoke).toContain("public-release-proof.json");
     expect(releaseWorkflow).toContain("npm publish --provenance");
+    expect(releaseWorkflow.indexOf("Publish to npm with provenance")).toBeLessThan(releaseWorkflow.indexOf("Upload release assets"));
     expect(releaseWorkflow).toContain("Validate npm authentication");
     expect(releaseWorkflow).toContain("npm run release:preflight -- --require-llm");
     expect(releaseWorkflow).toContain("NPM_TOKEN secret is required");

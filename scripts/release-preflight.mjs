@@ -177,6 +177,22 @@ if (!npmToken) {
     whoami.ok ? `authenticated as ${whoami.stdout.trim()}` : "npm token rejected",
     "Refresh NPM_TOKEN with automation/publish permission.",
   );
+  if (whoami.ok) {
+    const dryRun = await run(npm, ["publish", "--dry-run", "--access", "public"], {
+      timeoutMs: 120_000,
+      env: {
+        ...process.env,
+        NODE_AUTH_TOKEN: npmToken,
+      },
+    });
+    add(
+      results,
+      "npm.publish_dry_run",
+      dryRun.ok,
+      dryRun.ok ? "npm publish dry-run completed" : "npm publish dry-run failed",
+      "Check package files, npm token publish scope, and package access settings before tagging release.",
+    );
+  }
 }
 
 const llmKey = envString("AGENTIX_LLM_API_KEY");

@@ -2011,7 +2011,8 @@ export class LocalAgentixRuntime {
         installerDryRun?: boolean;
         verifiedAt?: string;
         release?: { sha256?: string; manifestUrl?: string; tarballUrl?: string };
-        npm?: unknown;
+        npm?: { attestations?: { url?: string; provenance?: boolean } };
+        npmInstall?: { agentixVersion?: string; helpChecked?: boolean };
       };
       if (!proof.ok) {
         return { ok: false, path: proofPath, detail: "proof file does not mark ok=true" };
@@ -2027,6 +2028,12 @@ export class LocalAgentixRuntime {
       }
       if (!proof.npm) {
         return { ok: false, path: proofPath, detail: "proof missing npm registry metadata" };
+      }
+      if (!proof.npm.attestations?.url || proof.npm.attestations.provenance !== true) {
+        return { ok: false, path: proofPath, detail: "proof missing npm provenance attestation verification" };
+      }
+      if (!proof.npmInstall?.agentixVersion || !proof.npmInstall.helpChecked) {
+        return { ok: false, path: proofPath, detail: "proof missing npm global install verification" };
       }
       if (!proof.installerDryRun) {
         return { ok: false, path: proofPath, detail: "proof did not verify installer dry-run" };

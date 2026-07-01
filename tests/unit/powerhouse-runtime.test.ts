@@ -301,6 +301,14 @@ describe("Powerhouse restored runtime", () => {
       },
       npm: {
         tarball: `https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/-/${artifactBase}-${pkg.version}.tgz`,
+        attestations: {
+          url: `https://registry.npmjs.org/-/npm/v1/attestations/${encodeURIComponent(pkg.name)}@${pkg.version}`,
+          provenance: true,
+        },
+      },
+      npmInstall: {
+        agentixVersion: `Agentix v${pkg.version}`,
+        helpChecked: true,
       },
     }), "utf-8");
     const runtime = new LocalAgentixRuntime();
@@ -353,6 +361,104 @@ describe("Powerhouse restored runtime", () => {
       expect(readiness.releaseProof).toMatchObject({
         ok: false,
         detail: "proof missing npm registry metadata",
+      });
+      expect(readiness.gates.find((gate) => gate.id === "release.publish")?.status).toBe("block");
+    } finally {
+      runtime.shutdown();
+      if (previousProof === undefined) {
+        delete process.env.AGENTIX_PUBLIC_RELEASE_PROOF;
+      } else {
+        process.env.AGENTIX_PUBLIC_RELEASE_PROOF = previousProof;
+      }
+    }
+  });
+
+  it("rejects public-release proof files that skip npm global install verification", () => {
+    const dir = tempDir("agentix-release-proof-no-install-");
+    const proofPath = join(dir, "proof.json");
+    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf-8")) as { name: string; version: string };
+    const artifactBase = pkg.name.replace(/^@/, "").replace(/[\/\\]/g, "-");
+    const previousProof = process.env.AGENTIX_PUBLIC_RELEASE_PROOF;
+    process.env.AGENTIX_PUBLIC_RELEASE_PROOF = proofPath;
+    writeFileSync(proofPath, JSON.stringify({
+      ok: true,
+      package: pkg.name,
+      version: pkg.version,
+      installerDryRun: true,
+      verifiedAt: new Date().toISOString(),
+      release: {
+        sha256: "abc123",
+        manifestUrl: `https://example.test/${artifactBase}-${pkg.version}-manifest.json`,
+        tarballUrl: `https://example.test/${artifactBase}-${pkg.version}.tgz`,
+      },
+      npm: {
+        tarball: `https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/-/${artifactBase}-${pkg.version}.tgz`,
+        attestations: {
+          url: `https://registry.npmjs.org/-/npm/v1/attestations/${encodeURIComponent(pkg.name)}@${pkg.version}`,
+          provenance: true,
+        },
+      },
+    }), "utf-8");
+    const runtime = new LocalAgentixRuntime();
+
+    try {
+      const readiness = runtime.readiness() as {
+        gates: Array<{ id: string; status: string; detail: string }>;
+        releaseProof: { ok: boolean; detail: string };
+      };
+
+      expect(readiness.releaseProof).toMatchObject({
+        ok: false,
+        detail: "proof missing npm global install verification",
+      });
+      expect(readiness.gates.find((gate) => gate.id === "release.publish")?.status).toBe("block");
+    } finally {
+      runtime.shutdown();
+      if (previousProof === undefined) {
+        delete process.env.AGENTIX_PUBLIC_RELEASE_PROOF;
+      } else {
+        process.env.AGENTIX_PUBLIC_RELEASE_PROOF = previousProof;
+      }
+    }
+  });
+
+  it("rejects public-release proof files that skip npm provenance verification", () => {
+    const dir = tempDir("agentix-release-proof-no-provenance-");
+    const proofPath = join(dir, "proof.json");
+    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf-8")) as { name: string; version: string };
+    const artifactBase = pkg.name.replace(/^@/, "").replace(/[\/\\]/g, "-");
+    const previousProof = process.env.AGENTIX_PUBLIC_RELEASE_PROOF;
+    process.env.AGENTIX_PUBLIC_RELEASE_PROOF = proofPath;
+    writeFileSync(proofPath, JSON.stringify({
+      ok: true,
+      package: pkg.name,
+      version: pkg.version,
+      installerDryRun: true,
+      verifiedAt: new Date().toISOString(),
+      release: {
+        sha256: "abc123",
+        manifestUrl: `https://example.test/${artifactBase}-${pkg.version}-manifest.json`,
+        tarballUrl: `https://example.test/${artifactBase}-${pkg.version}.tgz`,
+      },
+      npm: {
+        tarball: `https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/-/${artifactBase}-${pkg.version}.tgz`,
+      },
+      npmInstall: {
+        agentixVersion: `Agentix v${pkg.version}`,
+        helpChecked: true,
+      },
+    }), "utf-8");
+    const runtime = new LocalAgentixRuntime();
+
+    try {
+      const readiness = runtime.readiness() as {
+        gates: Array<{ id: string; status: string; detail: string }>;
+        releaseProof: { ok: boolean; detail: string };
+      };
+
+      expect(readiness.releaseProof).toMatchObject({
+        ok: false,
+        detail: "proof missing npm provenance attestation verification",
       });
       expect(readiness.gates.find((gate) => gate.id === "release.publish")?.status).toBe("block");
     } finally {
@@ -424,6 +530,14 @@ describe("Powerhouse restored runtime", () => {
       },
       npm: {
         tarball: `https://registry.npmjs.org/${encodeURIComponent(pkg.name)}/-/${artifactBase}-${pkg.version}.tgz`,
+        attestations: {
+          url: `https://registry.npmjs.org/-/npm/v1/attestations/${encodeURIComponent(pkg.name)}@${pkg.version}`,
+          provenance: true,
+        },
+      },
+      npmInstall: {
+        agentixVersion: `Agentix v${pkg.version}`,
+        helpChecked: true,
       },
     }), "utf-8");
     writeFileSync(llmProofPath, JSON.stringify({
