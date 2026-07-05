@@ -1,9 +1,13 @@
 {
   "name": "@nerdyy/agentix",
-  "version": "2.1.4",
+  "version": "2.1.5",
   "description": "Agentix CLI - AI coding agent with Agentix shell and orchestration backend",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/so-nerdyy/agentix"
+  },
   "bin": {
     "agentix": "./bin/agentix.js"
   },
