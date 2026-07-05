@@ -75,6 +75,16 @@ function add(results, id, ok, detail, action, severity = "fail") {
   results.push({ id, ok, detail, action, severity });
 }
 
+function packageRepositoryUrl() {
+  if (typeof pkg.repository === "string") {
+    return pkg.repository.trim();
+  }
+  if (pkg.repository && typeof pkg.repository === "object" && typeof pkg.repository.url === "string") {
+    return pkg.repository.url.trim();
+  }
+  return "";
+}
+
 function print(results) {
   for (const item of results) {
     const marker = item.ok ? "PASS" : item.severity === "warn" ? "WARN" : "FAIL";
@@ -104,6 +114,16 @@ if (!pkg.name.startsWith("@")) {
 } else {
   add(results, "package.scope", true, pkg.name);
 }
+
+const expectedRepositoryUrl = `https://github.com/${repository}`;
+const actualRepositoryUrl = packageRepositoryUrl();
+add(
+  results,
+  "package.repository",
+  actualRepositoryUrl === expectedRepositoryUrl,
+  actualRepositoryUrl ? `repository.url=${actualRepositoryUrl}` : "repository.url missing",
+  `Set package.json repository.url to ${expectedRepositoryUrl}; npm provenance requires it to match the GitHub repository.`,
+);
 
 const repoHeaders = {
   Accept: "application/vnd.github+json",

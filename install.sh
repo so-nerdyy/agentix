@@ -31,7 +31,7 @@ Environment:
 
 Examples:
   curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
-  AGENTIX_PACKAGE=@nerdyy/agentix@2.1.4 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
+  AGENTIX_PACKAGE=@nerdyy/agentix@2.1.5 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
   AGENTIX_VERSION=2.1.0 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
 EOF
 }
@@ -108,6 +108,6 @@ if [ "$SKIP_SETUP" != "1" ]; then
 fi
 printf '  agentix\n\n'
 printf 'Use AGENTIX_PACKAGE to install a tag or tarball, for example:\n'
-printf '  AGENTIX_PACKAGE=@nerdyy/agentix@2.1.4 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh\n'
+printf '  AGENTIX_PACKAGE=@nerdyy/agentix@2.1.5 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh\n'
 printf 'Use AGENTIX_VERSION to install a verified GitHub release tarball:\n'
 printf '  AGENTIX_VERSION=2.1.0 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh\n'

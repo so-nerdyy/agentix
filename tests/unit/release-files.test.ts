@@ -5,6 +5,9 @@ import { describe, expect, it } from "vitest";
 describe("release packaging files", () => {
   it("exposes release manifest and checksum-aware installers", () => {
     const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf-8")) as {
+      name: string;
+      repository: { type: string; url: string };
+      files: string[];
       scripts: Record<string, string>;
     };
     const shell = readFileSync(join(process.cwd(), "install.sh"), "utf-8");
@@ -26,6 +29,10 @@ describe("release packaging files", () => {
     expect(pkg.scripts["verify:llm"]).toBe("node scripts/verify-live-llm.mjs");
     expect(pkg.files).toContain("scripts");
     expect(pkg.name).toBe("@nerdyy/agentix");
+    expect(pkg.repository).toEqual({
+      type: "git",
+      url: "https://github.com/so-nerdyy/agentix",
+    });
     expect(shell).toContain("DEFAULT_PACKAGE=\"@nerdyy/agentix\"");
     expect(powershell).toContain("$Package = \"@nerdyy/agentix\"");
     expect(shell).toContain("AGENTIX_EXPECTED_SHA256");
@@ -39,6 +46,8 @@ describe("release packaging files", () => {
     expect(manifest).toContain("createHash");
     expect(manifest).toContain("sha256");
     expect(preflight).toContain("github.repo");
+    expect(preflight).toContain("package.repository");
+    expect(preflight).toContain("npm provenance requires it to match the GitHub repository");
     expect(preflight).toContain("gh\", [\"auth\", \"token\"]");
     expect(preflight).toContain("npm.auth");
     expect(preflight).toContain("npm.publish_dry_run");
