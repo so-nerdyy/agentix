@@ -184,7 +184,7 @@ function buildCommandHelp(command) {
         "Usage: agentix update [--check|--install]",
         "",
         "Checks npm for Agentix updates and can install the latest global package.",
-        "Use `npm install -g @so-nerdyy/agentix` or the verified curl installer to upgrade.",
+        "Use `npm install -g @nerdyy/agentix` or the verified curl installer to upgrade.",
       ].join("\n");
     case "server":
       return [
@@ -1161,7 +1161,7 @@ async function main() {
   }
 
   if (cmd === "version" || cmd === "--version" || cmd === "-V") {
-    await spawnNodeCli(["version"]);
+    console.log(`Agentix v${pkg.version}`);
     return;
   }
 
