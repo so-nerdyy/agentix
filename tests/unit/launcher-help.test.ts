@@ -76,6 +76,15 @@ describe("launcher help", () => {
     expect(result.stdout).not.toContain("@so-nerdyy/agentix");
   });
 
+  it("routes Hermes-style one-shot mode through the Agentix backend CLI", () => {
+    const launcher = readFileSync(join(process.cwd(), "bin", "agentix.js"), "utf8");
+
+    expect(launcher).toContain("function translateOneshotArgs");
+    expect(launcher).toContain('cmd === "-z"');
+    expect(launcher).toContain('cmd === "--oneshot"');
+    expect(launcher).toContain('spawnNodeCli(["oneshot", ...translateOneshotArgs(argv)])');
+  });
+
   it("prints Agentix help for backend-adapted compatibility commands", () => {
     const gateway = spawnSync(process.execPath, [join(process.cwd(), "bin", "agentix.js"), "gateway", "--help"], {
       encoding: "utf8",

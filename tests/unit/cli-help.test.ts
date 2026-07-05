@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { buildHelpText } from "../../src/cli/help.js";
 
 describe("CLI help", () => {
@@ -21,5 +23,16 @@ describe("CLI help", () => {
     expect(help).toContain("server");
     expect(help).toContain("plugin, extension");
     expect(help).toContain("eval, broadcast");
+  });
+
+  it("contains the backend one-shot command implementation", () => {
+    const cli = readFileSync(join(process.cwd(), "src", "cli.ts"), "utf8");
+
+    expect(cli).toContain('case "oneshot"');
+    expect(cli).toContain("Usage: agentix -z <prompt>");
+    expect(cli).toContain("model: modelArg");
+    expect(cli).toContain("provider: providerArg");
+    expect(cli).toContain("baseUrl: baseUrlArg");
+    expect(cli).toContain("toolsets: toolsetsArg");
   });
 });
