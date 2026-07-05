@@ -54,6 +54,28 @@ describe("launcher help", () => {
     expect(result.stdout).toContain("backend bridge/API and inbox server");
   });
 
+  it("prints version directly without booting the backend CLI", () => {
+    const result = spawnSync(process.execPath, [join(process.cwd(), "bin", "agentix.js"), "version"], {
+      encoding: "utf8",
+      timeout: 5_000,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toMatch(/^Agentix v\d+\.\d+\.\d+/);
+    expect(result.stderr).toBe("");
+  });
+
+  it("uses the public npm package scope in update help", () => {
+    const result = spawnSync(process.execPath, [join(process.cwd(), "bin", "agentix.js"), "help", "update"], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("npm install -g @nerdyy/agentix");
+    expect(result.stdout).not.toContain("@so-nerdyy/agentix");
+  });
+
   it("prints Agentix help for backend-adapted compatibility commands", () => {
     const gateway = spawnSync(process.execPath, [join(process.cwd(), "bin", "agentix.js"), "gateway", "--help"], {
       encoding: "utf8",
