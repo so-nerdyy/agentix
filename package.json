@@ -1,6 +1,6 @@
 {
   "name": "@nerdyy/agentix",
-  "version": "2.1.3",
+  "version": "2.1.4",
   "description": "Agentix CLI - AI coding agent with Agentix shell and orchestration backend",
   "type": "module",
   "license": "MIT",
