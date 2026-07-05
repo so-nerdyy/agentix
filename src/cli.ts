@@ -94,7 +94,12 @@ async function main() {
   const portArg = readFlagValue(args, "--port");
   const hostArg = readFlagValue(args, "--host");
   const bridgePortArg = readFlagValue(args, "--bridge-port");
+  const modelArg = readFlagValue(args, "--model");
+  const providerArg = readFlagValue(args, "--provider");
+  const baseUrlArg = readFlagValue(args, "--base-url");
+  const toolsetsArg = readFlagValue(args, "--toolsets");
   const cleanArgs = withoutFlags(args, ["--port", "--host", "--bridge-port"]);
+  const stimulusArgs = withoutFlags(cleanArgs, ["--model", "--provider", "--base-url", "--toolsets"]);
 
   switch (cmd) {
     case "help":
@@ -717,18 +722,46 @@ async function main() {
     case "eval":
     case "broadcast": {
       ensureDataDirs();
-      const stimulus = cleanArgs.join(" ").trim();
+      const stimulus = stimulusArgs.join(" ").trim();
       if (!stimulus) {
         console.log(`Usage: agentix ${cmd} <stimulus>`);
         return;
       }
-      const result = await getBackendRuntime().execute({ stimulus });
+      const result = await getBackendRuntime().execute({
+        stimulus,
+        model: modelArg,
+        provider: providerArg,
+        baseUrl: baseUrlArg,
+        toolsets: toolsetsArg,
+      });
       console.log(`Status: ${result.status}`);
       console.log(`Session: ${result.sessionId}`);
       console.log(`Tasks: ${result.taskIds.join(", ") || "(none)"}`);
       if (result.response) {
         console.log("");
         console.log(result.response);
+      }
+      return;
+    }
+    case "oneshot": {
+      ensureDataDirs();
+      const stimulus = stimulusArgs.join(" ").trim();
+      if (!stimulus) {
+        console.log("Usage: agentix -z <prompt>");
+        return;
+      }
+      const result = await getBackendRuntime().execute({
+        stimulus,
+        model: modelArg,
+        provider: providerArg,
+        baseUrl: baseUrlArg,
+        toolsets: toolsetsArg,
+      });
+      if (result.response) {
+        console.log(result.response);
+      }
+      if (result.status === "failed") {
+        process.exitCode = 1;
       }
       return;
     }

@@ -51,6 +51,7 @@ const BACKEND_COMMANDS = new Set([
   "extension",
   "broadcast",
   "eval",
+  "oneshot",
   "shell",
   "version",
 ]);
@@ -160,6 +161,27 @@ function buildSetupHelp() {
     "  agentix setup model",
     "  agentix setup options",
   ].join("\n");
+}
+
+function translateOneshotArgs(argv) {
+  const translated = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === "-z" || arg === "--oneshot") {
+      const prompt = argv[i + 1];
+      if (prompt && !prompt.startsWith("-")) {
+        translated.push(prompt);
+        i += 1;
+      }
+      continue;
+    }
+    if (arg.startsWith("--oneshot=")) {
+      translated.push(arg.slice("--oneshot=".length));
+      continue;
+    }
+    translated.push(arg);
+  }
+  return translated;
 }
 
 function buildCommandHelp(command) {
@@ -355,10 +377,15 @@ function buildCommandHelp(command) {
       ].join("\n");
     case "eval":
     case "broadcast":
+    case "oneshot":
       return [
-        `Usage: agentix ${command} <stimulus>`,
+        command === "oneshot"
+          ? "Usage: agentix -z <prompt>"
+          : `Usage: agentix ${command} <stimulus>`,
         "",
-        "Runs a stimulus directly through the Agentix backend and prints the result.",
+        command === "oneshot"
+          ? "Runs a prompt through the Agentix backend and prints only the final response."
+          : "Runs a stimulus directly through the Agentix backend and prints the result.",
       ].join("\n");
     case "shell":
       return [
@@ -1162,6 +1189,11 @@ async function main() {
 
   if (cmd === "version" || cmd === "--version" || cmd === "-V") {
     console.log(`Agentix v${pkg.version}`);
+    return;
+  }
+
+  if (cmd === "-z" || cmd === "--oneshot" || cmd?.startsWith("--oneshot=")) {
+    await spawnNodeCli(["oneshot", ...translateOneshotArgs(argv)]);
     return;
   }
 
