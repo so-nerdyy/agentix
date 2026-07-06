@@ -118,6 +118,6 @@ if (-not $SkipSetup) {
 Write-Host "  agentix"
 Write-Host ""
 Write-Host "Use AGENTIX_PACKAGE to install a tag or tarball, for example:"
-Write-Host "  `$env:AGENTIX_PACKAGE='@nerdyy/agentix@2.1.7'; irm <url>/install.ps1 | iex"
+Write-Host "  `$env:AGENTIX_PACKAGE='@nerdyy/agentix@2.1.8'; irm <url>/install.ps1 | iex"
 Write-Host "Use AGENTIX_VERSION to install a verified GitHub release tarball:"
 Write-Host "  `$env:AGENTIX_VERSION='2.1.0'; irm https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.ps1 | iex"

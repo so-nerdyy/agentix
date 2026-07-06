@@ -105,12 +105,12 @@ jobs:
         shell: bash
         run: |
           mkdir -p data/release
-          for attempt in 1 2 3 4 5; do
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
             if npm run release:verify -- --out data/release/public-release-proof.json; then
               exit 0
             fi
             echo "release verification attempt ${attempt} failed; retrying after registry/release propagation"
-            sleep 30
+            sleep 45
           done
           npm run release:verify -- --out data/release/public-release-proof.json
 
