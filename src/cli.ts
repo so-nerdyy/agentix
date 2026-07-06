@@ -564,11 +564,16 @@ async function main() {
       ensureDataDirs();
       {
         const [auditId] = cleanArgs;
-        if (auditId) {
+        if (auditId && auditId !== "list") {
           console.log(JSON.stringify(getBackendRuntime().getAudit(auditId), null, 2));
           return;
         }
-        for (const entry of getBackendRuntime().listAudit()) {
+        const entries = getBackendRuntime().listAudit();
+        if (entries.length === 0) {
+          console.log("No audit entries.");
+          return;
+        }
+        for (const entry of entries) {
           console.log(
             `${String(entry.id ?? "")}: ${String(entry.type ?? "")} actor=${String(entry.actor ?? "")} subject=${String(entry.subjectId ?? "-")}`,
           );
@@ -579,7 +584,7 @@ async function main() {
       ensureDataDirs();
       {
         const [entryId, action = "inspect"] = cleanArgs;
-        if (!entryId) {
+        if (!entryId || entryId === "list" || entryId === "stats") {
           console.log(JSON.stringify(getBackendRuntime().healingStats(), null, 2));
           return;
         }

@@ -35,4 +35,12 @@ describe("CLI help", () => {
     expect(cli).toContain("baseUrl: baseUrlArg");
     expect(cli).toContain("toolsets: toolsetsArg");
   });
+
+  it("treats list as a list alias for audit and healing commands", () => {
+    const cli = readFileSync(join(process.cwd(), "src", "cli.ts"), "utf8");
+
+    expect(cli).toContain('auditId !== "list"');
+    expect(cli).toContain('entryId === "list"');
+    expect(cli).toContain('entryId === "stats"');
+  });
 });
