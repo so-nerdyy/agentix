@@ -11,26 +11,48 @@ export class AgentixShell {
   });
   private sessionId = "default";
   private history: Array<{ role: string; content: string }> = [];
+  private closed = false;
 
   async start(): Promise<void> {
-    console.log("Agentix - type /help for commands\n");
+    return new Promise((resolve) => {
+      this.rl.setPrompt("agentix> ");
+      this.printBanner();
 
-    this.rl.on("line", async (line) => {
-      const input = line.trim();
-      if (!input) {
-        return;
-      }
+      this.rl.on("line", async (line) => {
+        const input = line.trim();
+        try {
+          if (!input) {
+            return;
+          }
 
-      if (input.startsWith("/")) {
-        await this.handleSlashCommand(input);
-      } else {
-        await this.handleMessage(input);
-      }
+          if (input.startsWith("/")) {
+            await this.handleSlashCommand(input);
+          } else {
+            await this.handleMessage(input);
+          }
+        } finally {
+          if (!this.closed) {
+            this.rl.prompt();
+          }
+        }
+      });
+
+      this.rl.on("close", () => {
+        this.closed = true;
+        resolve();
+      });
+
+      this.rl.prompt();
     });
+  }
 
-    this.rl.on("close", () => {
-      process.exit(0);
-    });
+  private printBanner(): void {
+    console.log([
+      "Agentix v2",
+      "Powerhouse orchestrates. Symphony plans. Pi agents execute.",
+      "Type a message to create a task, or /help for commands.",
+      "",
+    ].join("\n"));
   }
 
   private formatSearchResults(results: Record<string, unknown>): string {

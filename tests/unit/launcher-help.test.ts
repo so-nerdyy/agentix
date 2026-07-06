@@ -178,11 +178,31 @@ describe("launcher help", () => {
     const shell = readFileSync(join(process.cwd(), "src", "shell", "AgentixShell.ts"), "utf8");
 
     expect(shell).toContain("export class AgentixShell");
+    expect(shell).toContain('this.rl.setPrompt("agentix> ")');
+    expect(shell).toContain("this.printBanner();");
+    expect(shell).toContain("Powerhouse orchestrates. Symphony plans. Pi agents execute.");
+    expect(shell).toContain("this.rl.prompt();");
     expect(shell).toContain("this.backend.usage()");
     expect(shell).toContain("this.backend.listSessions");
     expect(shell).toContain("this.backend.listTools()");
+    expect(shell).not.toContain("process.exit(0)");
     expect(shell).not.toContain("runLegacyInteractive");
     expect(shell).not.toContain("compatibilityCommand");
     expect(shell).not.toContain("spawnFrontendCompatibility");
+  });
+
+  it("prints a visible prompt for no-argument shell launches", () => {
+    const result = spawnSync(process.execPath, [join(process.cwd(), "bin", "agentix.js")], {
+      encoding: "utf8",
+      input: "/exit\n",
+      timeout: 10_000,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Agentix v2");
+    expect(result.stdout).toContain("Powerhouse orchestrates. Symphony plans. Pi agents execute.");
+    expect(result.stdout).toContain("Type a message to create a task, or /help for commands.");
+    expect(result.stdout).toContain("agentix>");
+    expect(result.stderr).toBe("");
   });
 });
