@@ -3,7 +3,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { spawn, spawnSync } from "child_process";
 import { createRequire } from "module";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import { dirname, join, resolve } from "path";
 import os from "os";
 import http from "http";
@@ -849,15 +849,14 @@ async function spawnNodeCli(args) {
 
 async function spawnNodeShell() {
   await ensureBridgeRunning();
-  const child = spawn(process.execPath, [resolve(PROJECT_ROOT, "dist", "shell", "entry.js")], {
-    cwd: WORKSPACE_ROOT,
-    stdio: "inherit",
-    env: buildRuntimeEnv({
-      AGENTIX_BRIDGE_URL: bridgeUrl(),
-      HERMES_BRIDGE_URL: bridgeUrl(),
-    }),
-  });
-  await new Promise((resolveExit) => child.on("close", resolveExit));
+  Object.assign(process.env, buildRuntimeEnv({
+    AGENTIX_BRIDGE_URL: bridgeUrl(),
+    HERMES_BRIDGE_URL: bridgeUrl(),
+  }));
+  const shellModuleUrl = pathToFileURL(resolve(PROJECT_ROOT, "dist", "shell", "AgentixShell.js")).href;
+  const { AgentixShell } = await import(shellModuleUrl);
+  const shell = new AgentixShell();
+  await shell.start();
 }
 
 function printAgentixOptions(topic = "all") {
