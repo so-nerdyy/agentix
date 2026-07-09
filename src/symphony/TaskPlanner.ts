@@ -329,12 +329,20 @@ export class TaskPlanner {
       : {};
 
     if (kind === "user-message") {
-      return {
+      const plannedInstruction = typeof payload.stimulus === "string" && payload.stimulus.trim()
+        ? payload.stimulus.trim()
+        : "";
+      const safePayload: Record<string, unknown> = {
         ...payload,
-        stimulus: typeof payload.stimulus === "string" && payload.stimulus.trim()
-          ? payload.stimulus
-          : stimulus,
+        // The planner may summarize a conversational request, but it must not
+        // replace the user's original request before the conversation Pi sees it.
+        stimulus,
+        userRequest: stimulus,
       };
+      if (plannedInstruction && plannedInstruction !== stimulus) {
+        safePayload.plannedInstruction = plannedInstruction;
+      }
+      return safePayload;
     }
 
     if (kind === "bash") {

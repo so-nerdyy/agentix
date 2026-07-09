@@ -392,10 +392,20 @@ async function main() {
     case "scheduler":
       ensureDataDirs();
       {
-        const [action = "list", idOrName, ...rest] = cleanArgs;
+        const [requestedAction = "list", idOrName, ...rest] = cleanArgs;
+        const action = requestedAction === "pause"
+          ? "disable"
+          : requestedAction === "resume"
+            ? "enable"
+            : requestedAction;
         const runtime = getBackendRuntime();
         if (action === "list") {
-          for (const job of runtime.listJobs()) {
+          const jobs = runtime.listJobs();
+          if (jobs.length === 0) {
+            console.log("No scheduled jobs.");
+            return;
+          }
+          for (const job of jobs) {
             console.log(`${String(job.id ?? "")}: ${String(job.enabled ?? true)} ${String(job.scheduleDisplay ?? job.schedule ?? "")} ${String(job.name ?? "")}`);
           }
           return;
@@ -403,6 +413,14 @@ async function main() {
         if (action === "inspect") {
           if (!idOrName) {
             console.log(`Usage: agentix ${cmd} inspect <job-id>`);
+            return;
+          }
+          printJson(runtime.getJob(idOrName));
+          return;
+        }
+        if (action === "history") {
+          if (!idOrName) {
+            console.log(`Usage: agentix ${cmd} history <job-id>`);
             return;
           }
           printJson(runtime.getJob(idOrName));
@@ -454,7 +472,7 @@ async function main() {
           printJson(runtime.setJobEnabled(idOrName, enabled));
           return;
         }
-        console.log(`Usage: agentix ${cmd} [list|inspect <id>|create <name> <stimulus>|run <id>|run-due|enable <id>|disable <id>|delete <id>]`);
+        console.log(`Usage: agentix ${cmd} [list|inspect <id>|history <id>|create <name> <stimulus>|run <id>|run-due|enable <id>|disable <id>|pause <id>|resume <id>|set-enabled <id> <true|false>|delete <id>]`);
       }
       return;
     case "plans":

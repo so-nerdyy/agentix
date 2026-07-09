@@ -177,10 +177,12 @@ export class Powerhouse {
   }
 
   listApprovals(): Task[] {
+    this.start();
     return this.approvals.listPending();
   }
 
   async approve(taskId: string): Promise<TaskResult> {
+    this.start();
     const task = this.queue.get(taskId);
     if (!task) return { ok: false, error: `unknown task: ${taskId}` };
     if (!this.approvals.approve(taskId)) {
@@ -213,6 +215,7 @@ export class Powerhouse {
   }
 
   reject(taskId: string, reason?: string): boolean {
+    this.start();
     const task = this.queue.get(taskId);
     if (!task) return false;
     const rejected = this.approvals.reject(taskId, reason);
@@ -253,6 +256,7 @@ export class Powerhouse {
   }
 
   async controlTask(taskId: string, action: TaskAction): Promise<TaskResult> {
+    this.start();
     const task = this.queue.get(taskId);
     if (!task) return { ok: false, error: `unknown task: ${taskId}` };
     if (action === "cancel") {

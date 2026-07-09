@@ -95,6 +95,11 @@ describe("TaskPlanner", () => {
       payload: { commandLine: "npm test" },
     });
     expect(plan.steps[1]?.dependsOn).toEqual(["inspect"]);
+    expect(plan.steps[1]?.payload).toMatchObject({
+      stimulus: "run tests and explain failures",
+      userRequest: "run tests and explain failures",
+      plannedInstruction: "Summarize the test result.",
+    });
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 

@@ -161,6 +161,36 @@ describe("Powerhouse restored runtime", () => {
     powerhouse.stop();
   });
 
+  it("recovers pending approvals before a fresh control-plane read or decision", async () => {
+    const dir = tempDir("agentix-approval-restart-");
+    const makePersistentPowerhouse = () => new Powerhouse({
+      sessions: new SessionCoordinator(join(dir, "sessions")),
+      queue: new TaskQueue(),
+      approvals: new ApprovalWorkflow({ timeoutMs: 10_000 }),
+      memory: new MemoryStore(join(dir, "memory.jsonl")),
+      healing: new HealingEngine(join(dir, "healing.json")),
+      planStore: new PlanStore(join(dir, "plans.json")),
+      taskStore: new TaskStore(join(dir, "tasks.json")),
+      audit: new AuditLog(join(dir, "audit.jsonl")),
+    });
+    const first = makePersistentPowerhouse();
+    const created = await first.executeStimulus({ stimulus: "run: echo approval-restart" });
+    const taskId = created.taskIds[0]!;
+    first.stop();
+
+    const restarted = makePersistentPowerhouse();
+    try {
+      expect(restarted.listApprovals().map((task) => task.id)).toContain(taskId);
+
+      const approved = await restarted.approve(taskId);
+      expect(approved.ok).toBe(true);
+      expect(JSON.stringify(approved.output)).toContain("approval-restart");
+      expect(restarted.listTasks().find((task) => task.id === taskId)?.status).toBe("complete");
+    } finally {
+      restarted.stop();
+    }
+  });
+
   it("persists approval timeout as a rejected task", async () => {
     vi.useFakeTimers();
     const powerhouse = makePowerhouse();

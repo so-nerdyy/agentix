@@ -255,7 +255,7 @@ function buildCommandHelp(command) {
     case "cron":
     case "scheduler":
       return [
-        "Usage: agentix cron [list|create|run|pause|resume|delete|history] ...",
+        "Usage: agentix cron [list|inspect|history|create|run|run-due|enable|disable|pause|resume|set-enabled|delete] ...",
         "",
         "Manages Agentix scheduled jobs.",
       ].join("\n");
