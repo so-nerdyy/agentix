@@ -11,6 +11,8 @@ export class ConversationAgent extends BasePIAgent {
   async execute(task: Task): Promise<TaskResult> {
     this.emitStart(task);
     const stimulus = String(task.payload.stimulus ?? "").trim();
+    const userRequest = String(task.payload.userRequest ?? stimulus).trim();
+    const plannedInstruction = String(task.payload.plannedInstruction ?? "").trim();
     const context = task.payload.context;
     const execution = typeof task.payload.execution === "object" && task.payload.execution !== null
       ? task.payload.execution as Record<string, unknown>
@@ -42,7 +44,10 @@ export class ConversationAgent extends BasePIAgent {
       {
         role: "user",
         content: [
-          stimulus || "The user sent an empty message.",
+          `User request:\n${userRequest || "The user sent an empty message."}`,
+          plannedInstruction && plannedInstruction !== userRequest
+            ? `\n\nCurrent planned subtask:\n${plannedInstruction}`
+            : "",
           typeof context === "string" && context.trim()
             ? `\n\nContext:\n${context.trim()}`
             : "",
