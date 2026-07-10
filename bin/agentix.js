@@ -795,12 +795,20 @@ function ensureFrontendCompatibilityInstalled(pythonExe) {
     return;
   }
 
+  console.log("Preparing Agentix shell commands (first run may take a minute)...");
   const installed = spawnSync(pythonExe, ["-m", "pip", "install", "-e", COMPAT_FRONTEND_ROOT], {
     cwd: COMPAT_FRONTEND_ROOT,
-    stdio: "inherit",
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
   });
   if (installed.status !== 0) {
-    throw new Error("failed to install Agentix compatibility dependencies");
+    const detail = `${installed.stdout || ""}\n${installed.stderr || ""}`
+      .replace(/nous portal/gi, "Agentix provider")
+      .replace(/hermes[-_ ]agent/gi, "Agentix shell runtime")
+      .replace(/\bhermes\b/gi, "Agentix")
+      .trim()
+      .slice(-2000);
+    throw new Error(`failed to install Agentix shell dependencies${detail ? `:\n${detail}` : ""}`);
   }
 }
 
