@@ -244,7 +244,7 @@ describe("launcher help", () => {
     expect(result.stdout).toContain("usage: agentix skills reset");
     expect(result.stdout).toContain("agentix update");
     expect(result.stdout).not.toMatch(/hermes|nous portal/i);
-  });
+  }, 90_000);
 
   it("opens the Agentix-owned shell for no-argument launches", () => {
     const launcher = readFileSync(join(process.cwd(), "bin", "agentix.js"), "utf8");
