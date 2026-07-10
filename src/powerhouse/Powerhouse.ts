@@ -172,6 +172,13 @@ export class Powerhouse {
     return this.sessions.updateMetadata(id, { title });
   }
 
+  removeAgentProfile(id: string) {
+    this.start({ recover: false });
+    const profile = this.agentProfiles.remove(id);
+    if (profile) this.agents.unregister(id);
+    return profile;
+  }
+
   listTasks(sessionId?: string): Task[] {
     return this.taskStore.list(sessionId);
   }
@@ -257,7 +264,7 @@ export class Powerhouse {
 
   async controlTask(taskId: string, action: TaskAction): Promise<TaskResult> {
     this.start();
-    const task = this.queue.get(taskId);
+    const task = this.queue.get(taskId) ?? this.hydrateStoredTask(taskId);
     if (!task) return { ok: false, error: `unknown task: ${taskId}` };
     if (action === "cancel") {
       const cancelled = this.queue.cancel(taskId);
@@ -327,6 +334,13 @@ export class Powerhouse {
       };
     }
     return { ok: false, error: `unsupported task action: ${action}` };
+  }
+
+  private hydrateStoredTask(taskId: string): Task | undefined {
+    const task = this.taskStore.get(taskId);
+    if (!task) return undefined;
+    this.queue.upsert(task);
+    return task;
   }
 
   async executeStimulus(opts: ExecuteStimulusOptions): Promise<ExecuteStimulusResult> {

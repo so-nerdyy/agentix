@@ -447,6 +447,7 @@ async function smokeCli() {
   assert(options.stdout.includes("https://api.kilo.ai/api/gateway"), "agentix options missing Kilo Gateway base URL");
   assert(options.stdout.includes("AGENTIX_LLM_API_KEY"), "agentix options missing Agentix API key env var");
   assert(options.stdout.includes("KILOCODE_API_KEY"), "agentix options missing Kilo Gateway API key alias");
+  assert(options.stdout.includes("KILO_API_KEY"), "agentix options missing short Kilo Gateway API key alias");
   assert(!options.stdout.includes("Nous"), "agentix options still mentions Nous branding");
 
   const updateHelp = await run(agentixCommand, ["update", "--help"], { timeoutMs: 30_000 });
@@ -459,8 +460,27 @@ async function smokeCli() {
   assert(!updateCheck.stdout.includes("Hermes"), "agentix update --check still mentions Hermes");
 
   const modelHelp = await run(agentixCommand, ["model", "--help"], { timeoutMs: 30_000 });
-  assert(modelHelp.stdout.includes("agentix model [--verify]"), "agentix model help missing live verify option");
+  assert(modelHelp.stdout.includes("agentix model [--verify|--list]"), "agentix model help missing verify/list options");
   assert(modelHelp.stdout.includes("https://api.kilo.ai/api/gateway"), "agentix model help missing Kilo Gateway base URL");
+
+  const modelOptions = await run(agentixCommand, ["options", "models"], { timeoutMs: 30_000 });
+  assert(modelOptions.stdout.includes("agentix options models --live"), "agentix model options missing live catalog guidance");
+
+  const fortune = await run(agentixCommand, ["fortune"], { timeoutMs: 30_000 });
+  assert(fortune.stdout.includes("Powerhouse plans, Symphony schedules, Pi agents execute"), "agentix fortune missing architecture summary");
+  assert(!/hermes|nous portal/i.test(fortune.stdout), "agentix fortune leaked compatibility branding");
+
+  const skillsHelp = await run(agentixCommand, ["skills", "reset", "--help"], { timeoutMs: 60_000 });
+  assert(skillsHelp.stdout.includes("usage: agentix skills reset"), "installed nested skills help was not preserved");
+  assert(!/hermes|nous portal/i.test(skillsHelp.stdout), "installed skills help leaked compatibility branding");
+
+  const pluginsHelp = await run(agentixCommand, ["plugins", "install", "--help"], { timeoutMs: 60_000 });
+  assert(pluginsHelp.stdout.includes("usage: agentix plugins install"), "installed nested plugins help was not preserved");
+  assert(!/hermes|nous portal/i.test(pluginsHelp.stdout), "installed plugins help leaked compatibility branding");
+
+  const insightsHelp = await run(agentixCommand, ["insights", "--help"], { timeoutMs: 60_000 });
+  assert(insightsHelp.stdout.includes("usage: agentix insights"), "installed insights help was not Agentix-branded");
+  assert(!/hermes|nous portal/i.test(insightsHelp.stdout), "installed insights help leaked compatibility branding");
 
   const workspaceDir = join(smokeRoot, "workspace-cli");
   await mkdir(workspaceDir, { recursive: true });

@@ -1,6 +1,5 @@
 import * as readline from "readline";
 import { AgentixBackend } from "../agentix_backend.js";
-import { PATHS } from "../config/paths.js";
 
 export class AgentixShell {
   private backend = new AgentixBackend();
@@ -12,34 +11,35 @@ export class AgentixShell {
   private sessionId = "default";
   private history: Array<{ role: string; content: string }> = [];
   private closed = false;
+  private commandQueue: Promise<void> = Promise.resolve();
 
   async start(): Promise<void> {
     return new Promise((resolve) => {
       this.rl.setPrompt("agentix> ");
       this.printBanner();
 
-      this.rl.on("line", async (line) => {
-        const input = line.trim();
-        try {
-          if (!input) {
-            return;
+      this.rl.on("line", (line) => {
+        this.commandQueue = this.commandQueue.then(async () => {
+          const input = line.trim();
+          try {
+            if (!input) return;
+            if (input.startsWith("/")) {
+              await this.handleSlashCommand(input);
+            } else {
+              await this.handleMessage(input);
+            }
+          } finally {
+            if (!this.closed) this.rl.prompt();
           }
-
-          if (input.startsWith("/")) {
-            await this.handleSlashCommand(input);
-          } else {
-            await this.handleMessage(input);
-          }
-        } finally {
-          if (!this.closed) {
-            this.rl.prompt();
-          }
-        }
+        }).catch((err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          console.error(`Error: ${message}\n`);
+        });
       });
 
       this.rl.on("close", () => {
         this.closed = true;
-        resolve();
+        void this.commandQueue.finally(resolve);
       });
 
       this.rl.prompt();
@@ -254,6 +254,38 @@ export class AgentixShell {
         case "sessions":
           console.log(this.formatSessions(await this.backend.listSessions({ limit: 20 })));
           break;
+        case "agents":
+          console.log(JSON.stringify(await this.backend.listAgentProfiles(), null, 2));
+          break;
+        case "agent": {
+          const [profileId, action = "inspect"] = [...subArgs, ...restArgs];
+          if (!profileId) {
+            console.log("Usage: /agent <profile-id> [inspect|enable|disable|delete]\n");
+            break;
+          }
+          if (action === "inspect") {
+            const inventory = await this.backend.listAgentProfiles() as {
+              profiles?: Array<Record<string, unknown>>;
+            };
+            const profile = inventory.profiles?.find((item) => item.id === profileId) ?? null;
+            console.log(JSON.stringify(profile, null, 2));
+            break;
+          }
+          if (action === "enable" || action === "disable") {
+            console.log(JSON.stringify(
+              await this.backend.setAgentProfileEnabled(profileId, action === "enable"),
+              null,
+              2,
+            ));
+            break;
+          }
+          if (action === "delete" || action === "remove") {
+            console.log(JSON.stringify(await this.backend.deleteAgentProfile(profileId), null, 2));
+            break;
+          }
+          console.log(`Unknown /agent action: ${action}\n`);
+          break;
+        }
         case "session": {
           const [sessionId, action, ...actionArgs] = [...subArgs, ...restArgs];
           if (!sessionId) {
@@ -491,6 +523,8 @@ export class AgentixShell {
   /cron <args>        Manage scheduled tasks
   /job <id> [action]  Inspect or run a scheduled job
   /gateway [id] [action]  Inspect or manage gateway integrations
+  /agents              List dynamic Pi agent profiles
+  /agent <id> [action] Inspect, enable, disable, or delete a Pi profile
   /sessions <args>    Manage sessions
   /session <id> [action] Inspect a session
   /approval <id> [action] Inspect or decide an approval
@@ -519,7 +553,7 @@ export class AgentixShell {
     console.log(
       `Bridge: ${process.env.AGENTIX_BRIDGE_URL || "http://127.0.0.1:3456"}`,
     );
-    console.log(`Agentix frontend root: ${PATHS.compatibilityRuntimeRoot}`);
+    console.log("Frontend: Agentix terminal shell");
     console.log();
   }
 

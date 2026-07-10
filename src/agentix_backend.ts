@@ -28,7 +28,7 @@ export class AgentixBackend {
     const res = await fetch(`${this.baseUrl}${path}`, {
       method: "POST",
       headers: this.headers(),
-      body: body ? JSON.stringify(body) : undefined,
+      body: JSON.stringify(body ?? {}),
     });
     if (!res.ok) throw new Error(`Bridge ${res.status}: ${await res.text()}`);
     return res.json() as Promise<T>;
@@ -166,6 +166,23 @@ export class AgentixBackend {
 
   async config(): Promise<Record<string, unknown>> {
     return this.get("/config");
+  }
+
+  async listAgentProfiles(): Promise<Record<string, unknown>> {
+    return this.get("/agents/profiles");
+  }
+
+  async setAgentProfileEnabled(id: string, enabled: boolean): Promise<Record<string, unknown>> {
+    return this.post(`/agents/profiles/${encodeURIComponent(id)}/${enabled ? "enable" : "disable"}`);
+  }
+
+  async deleteAgentProfile(id: string): Promise<Record<string, unknown>> {
+    const res = await fetch(`${this.baseUrl}/agents/profiles/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: this.headers(),
+    });
+    if (!res.ok) throw new Error(`Bridge ${res.status}: ${await res.text()}`);
+    return res.json() as Promise<Record<string, unknown>>;
   }
 
   async authStatus(): Promise<Record<string, unknown>> {

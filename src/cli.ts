@@ -153,7 +153,7 @@ async function main() {
         const bundle = getBackendRuntime().createSupportBundle();
         console.log(`Agentix v${pkg.version}`);
         console.log(`Project root: ${PATHS.projectRoot}`);
-        console.log(`Compatibility runtime root: ${PATHS.compatibilityRuntimeRoot}`);
+        console.log("Shell runtime: bundled Agentix frontend");
         console.log(`Data dir: ${PATHS.dataDir}`);
         console.log(`Bridge entry: ${PATHS.bridgeEntry}`);
         console.log(`Inbox entry: ${PATHS.inboxEntry}`);
@@ -653,7 +653,16 @@ async function main() {
           console.log(JSON.stringify(runtime.setAgentProfileEnabled(id, action === "enable"), null, 2));
           return;
         }
-        console.log("Usage: agentix agents [list|create <id> <kind> <command...>|enable <id>|disable <id>]");
+        if (action === "delete" || action === "remove") {
+          const [id] = agentArgs;
+          if (!id) {
+            console.log(`Usage: agentix agents ${action} <profile-id>`);
+            return;
+          }
+          console.log(JSON.stringify(runtime.removeAgentProfile(id), null, 2));
+          return;
+        }
+        console.log("Usage: agentix agents [list|create <id> <kind> <command...>|enable <id>|disable <id>|delete <id>]");
       }
       return;
     case "mods":

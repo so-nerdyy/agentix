@@ -27,7 +27,7 @@ When `agentix` launches, it starts the Agentix shell and connects it to the Agen
 - `agentix` opens the Agentix shell
 - `agentix -z/--oneshot` executes prompts through the Agentix bridge
 - `agentix setup` and `agentix model` configure provider/model/base URL/API key for Agentix
-- Kilo Gateway uses provider `kilocode`, base URL `https://api.kilo.ai/api/gateway`, and either `AGENTIX_LLM_API_KEY` or `KILOCODE_API_KEY`
+- Kilo Gateway uses provider `kilocode`, base URL `https://api.kilo.ai/api/gateway`, and `AGENTIX_LLM_API_KEY`, `KILOCODE_API_KEY`, or `KILO_API_KEY`
 - `agentix options` lists provider/model/environment options
 - `agentix sessions list|stats|export|delete`
 - `agentix memory status|search|consolidate`

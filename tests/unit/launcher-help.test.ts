@@ -1,6 +1,7 @@
-import { readFileSync } from "fs";
+import { mkdtempSync, readFileSync, rmSync } from "fs";
 import { spawnSync } from "child_process";
 import { join } from "path";
+import { tmpdir } from "os";
 import { describe, expect, it } from "vitest";
 
 function commandSet(name: string) {
@@ -29,6 +30,19 @@ describe("launcher help", () => {
     expect(result.stdout).toContain("healing");
     expect(result.stdout).toContain("agents");
     expect(result.stdout).toContain("--bridge-port");
+  });
+
+  it("documents complete dynamic Pi profile lifecycle controls", () => {
+    const result = spawnSync(process.execPath, [join(process.cwd(), "bin", "agentix.js"), "agents", "--help"], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("create <id> <kind> <command...>");
+    expect(result.stdout).toContain("enable <id>");
+    expect(result.stdout).toContain("disable <id>");
+    expect(result.stdout).toContain("delete <id>");
   });
 
   it("shows command help instead of starting backend commands", () => {
@@ -152,6 +166,79 @@ describe("launcher help", () => {
     expect(launcher).toContain("AGENTIX_FRONTEND_HOME");
     expect(launcher).toContain("parseFrontendModelConfig");
     expect(launcher).toContain("AGENTIX_LLM_API_KEY");
+    expect(launcher).toContain("process.env.KILO_API_KEY");
+    expect(launcher).toContain("async function printLiveModelOptions");
+    expect(launcher).toContain('args.includes("--list")');
+    expect(launcher).toContain('args.includes("--live")');
+  });
+
+  it("never prints an existing API key during piped setup", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "agentix-setup-secret-"));
+    const secret = "kilo-secret-that-must-not-appear";
+    try {
+      const result = spawnSync(process.execPath, [join(process.cwd(), "bin", "agentix.js"), "setup"], {
+        cwd: workspace,
+        encoding: "utf8",
+        input: "kilocode\nkilo-auto/free\nhttps://api.kilo.ai/api/gateway\n\n",
+        env: {
+          ...process.env,
+          AGENTIX_LLM_API_KEY: "",
+          KILOCODE_API_KEY: "",
+          KILO_API_KEY: secret,
+        },
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("API key [configured]");
+      expect(result.stdout).not.toContain(secret);
+      expect(readFileSync(join(workspace, ".env.local"), "utf8")).toContain(`AGENTIX_LLM_API_KEY=${secret}`);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("creates a local control token before probing or spawning a protected bridge", () => {
+    const launcher = readFileSync(join(process.cwd(), "bin", "agentix.js"), "utf8");
+
+    expect(launcher).toContain("function ensureLocalBridgeSessionToken");
+    expect(launcher).toContain("AGENTIX_SESSION_TOKEN");
+    expect(launcher).toContain("ensureLocalBridgeSessionToken();");
+    expect(launcher).toContain("agx_local_");
+  });
+
+  it("owns and stops fallback bridge processes started for shell commands", () => {
+    const launcher = readFileSync(join(process.cwd(), "bin", "agentix.js"), "utf8");
+
+    expect(launcher).toContain("let managedBridgeChild = null;");
+    expect(launcher).toContain("async function stopManagedBridge()");
+    expect(launcher).toContain("managedBridgeChild = child;");
+    expect(launcher).toContain(".then(() => stopManagedBridge())");
+    expect(launcher).not.toContain("detached: true");
+    expect(launcher).not.toContain("child.unref();");
+  });
+
+  it("keeps the fortune command local to Agentix", () => {
+    const result = spawnSync(process.execPath, [join(process.cwd(), "bin", "agentix.js"), "fortune"], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    const frontendCommands = commandSet("FRONTEND_COMPAT_COMMANDS");
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Agentix: Powerhouse plans, Symphony schedules, Pi agents execute.");
+    expect(frontendCommands).not.toContain("fortune");
+  });
+
+  it("preserves compatibility subcommands when forwarding their help", () => {
+    const result = spawnSync(process.execPath, [join(process.cwd(), "bin", "agentix.js"), "skills", "reset", "--help"], {
+      encoding: "utf8",
+      timeout: 60_000,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("usage: agentix skills reset");
+    expect(result.stdout).toContain("agentix update");
+    expect(result.stdout).not.toMatch(/hermes|nous portal/i);
   });
 
   it("opens the Agentix-owned shell for no-argument launches", () => {
@@ -181,10 +268,15 @@ describe("launcher help", () => {
     expect(shell).toContain('this.rl.setPrompt("agentix> ")');
     expect(shell).toContain("this.printBanner();");
     expect(shell).toContain("Powerhouse orchestrates. Symphony plans. Pi agents execute.");
+    expect(shell).toContain("private commandQueue: Promise<void> = Promise.resolve();");
+    expect(shell).toContain("Frontend: Agentix terminal shell");
+    expect(shell).not.toContain("compatibilityRuntimeRoot");
     expect(shell).toContain("this.rl.prompt();");
     expect(shell).toContain("this.backend.usage()");
     expect(shell).toContain("this.backend.listSessions");
     expect(shell).toContain("this.backend.listTools()");
+    expect(shell).toContain("this.backend.listAgentProfiles()");
+    expect(shell).toContain("this.backend.deleteAgentProfile(profileId)");
     expect(shell).not.toContain("process.exit(0)");
     expect(shell).not.toContain("runLegacyInteractive");
     expect(shell).not.toContain("compatibilityCommand");
@@ -203,6 +295,22 @@ describe("launcher help", () => {
     expect(result.stdout).toContain("Powerhouse orchestrates. Symphony plans. Pi agents execute.");
     expect(result.stdout).toContain("Type a message to create a task, or /help for commands.");
     expect(result.stdout).toContain("agentix>");
+    expect(result.stderr).toBe("");
+  });
+
+  it("serializes pasted shell commands before exiting", () => {
+    const result = spawnSync(process.execPath, [join(process.cwd(), "bin", "agentix.js")], {
+      encoding: "utf8",
+      input: "/status\n/fortune\n/new\n/reset\n/exit\n",
+      timeout: 30_000,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Frontend: Agentix terminal shell");
+    expect(result.stdout).toContain("Powerhouse plans, Symphony schedules, Pi agents execute.");
+    expect(result.stdout).toContain("New session started");
+    expect(result.stdout).toContain("Context reset");
+    expect(result.stdout).not.toMatch(/hermes|nous portal/i);
     expect(result.stderr).toBe("");
   });
 });

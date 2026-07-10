@@ -23,6 +23,21 @@ export class PIAgentRegistry {
     return this.byId.get(id);
   }
 
+  unregister(id: string): BasePIAgent | undefined {
+    const agent = this.byId.get(id);
+    if (!agent) return undefined;
+    this.byId.delete(id);
+    agent.shutdown?.();
+    if (this.byKind.get(agent.kind)?.id === id) {
+      this.byKind.delete(agent.kind);
+      const replacement = Array.from(this.byId.values()).find(
+        (candidate) => candidate.kind === agent.kind && candidate.healthy(),
+      );
+      if (replacement) this.byKind.set(agent.kind, replacement);
+    }
+    return agent;
+  }
+
   list(): BasePIAgent[] {
     return Array.from(this.byId.values());
   }

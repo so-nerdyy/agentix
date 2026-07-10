@@ -59,6 +59,7 @@ export const openApiSpec = {
       get: { summary: "List dynamic command-backed Pi agent profiles" },
       post: { summary: "Create or update a dynamic command-backed Pi agent profile" },
     },
+    "/agents/profiles/{id}": { delete: { summary: "Delete a dynamic Pi agent profile" } },
     "/agents/profiles/{id}/enable": { post: { summary: "Enable a dynamic Pi agent profile" } },
     "/agents/profiles/{id}/disable": { post: { summary: "Disable a dynamic Pi agent profile" } },
     "/tasks": { get: { summary: "List tasks" } },

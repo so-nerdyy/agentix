@@ -29,7 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh |
 Verified GitHub release install:
 
 ```sh
-AGENTIX_VERSION=2.1.9 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
+AGENTIX_VERSION=2.1.10 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
 ```
 
 From any project folder, `agentix` opens the interactive shell. Use `agentix dashboard` if you want the web control surface only, or `agentix server` if you want the backend bridge, event stream, and dashboard/API runtime. Open `http://127.0.0.1:3000/ui/` for the live control surface.
@@ -40,6 +40,8 @@ From any project folder, `agentix` opens the interactive shell. Use `agentix das
 - `agentix -z "<prompt>"` - run a one-shot prompt through Agentix
 - `agentix setup` - first-run setup wizard
 - `agentix model` - configure provider and model
+- `agentix model --list --search free` - query the configured provider's live model catalog
+- `agentix options models --live` - list live model options with optional `--search` and `--limit`
 - `agentix options` - list setup/provider/model/environment options
 - `agentix update` - check update/install options
 - `agentix doctor` - validate config and runtime health
@@ -71,7 +73,7 @@ Agentix uses workspace-scoped configuration and environment variables:
 - `AGENTIX_MODEL` - default model
 - `AGENTIX_BASE_URL` - optional OpenAI-compatible or provider-specific base URL
 - `AGENTIX_LLM_API_KEY` - runtime API key
-- `KILOCODE_API_KEY` - accepted alias for Kilo Gateway when `AGENTIX_PROVIDER=kilocode`
+- `KILOCODE_API_KEY` or `KILO_API_KEY` - accepted aliases for Kilo Gateway when `AGENTIX_PROVIDER=kilocode`
 - `AGENTIX_SESSION_TOKEN` - optional admin Bearer token for dashboard/API/event access; workspace role tokens can also be created with the backend auth CLI
 - `AGENTIX_SESSION_TTL` - session retention
 - `AGENTIX_APPROVAL_TIMEOUT` - approval timeout

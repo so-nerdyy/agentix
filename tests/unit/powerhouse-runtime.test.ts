@@ -191,6 +191,43 @@ describe("Powerhouse restored runtime", () => {
     }
   });
 
+  it("controls persisted terminal tasks after the Powerhouse process restarts", async () => {
+    const dir = tempDir("agentix-task-control-restart-");
+    const makePersistentPowerhouse = () => new Powerhouse({
+      sessions: new SessionCoordinator(join(dir, "sessions")),
+      queue: new TaskQueue(),
+      approvals: new ApprovalWorkflow({ timeoutMs: 10_000 }),
+      memory: new MemoryStore(join(dir, "memory.jsonl")),
+      healing: new HealingEngine(join(dir, "healing.json")),
+      planStore: new PlanStore(join(dir, "plans.json")),
+      taskStore: new TaskStore(join(dir, "tasks.json")),
+      audit: new AuditLog(join(dir, "audit.jsonl")),
+    });
+    const first = makePersistentPowerhouse();
+    const created = await first.executeStimulus({ stimulus: "run: echo persisted-control" });
+    const taskId = created.taskIds[0]!;
+    expect(first.reject(taskId, "prepare persisted rejection")).toBe(true);
+    first.stop();
+
+    const restarted = makePersistentPowerhouse();
+    try {
+      const retried = await restarted.controlTask(taskId, "retry");
+      expect(retried.ok).toBe(true);
+      expect(restarted.listTasks().find((task) => task.id === taskId)?.status).toBe("awaiting-approval");
+
+      const cancelled = await restarted.controlTask(taskId, "cancel");
+      expect(cancelled.ok).toBe(true);
+      expect(restarted.listTasks().find((task) => task.id === taskId)?.status).toBe("rejected");
+
+      const restartedTask = await restarted.controlTask(taskId, "restart");
+      expect(restartedTask.ok).toBe(true);
+      expect(restarted.listTasks().find((task) => task.id === taskId)?.status).toBe("awaiting-approval");
+      expect(restarted.reject(taskId, "cleanup persisted control test")).toBe(true);
+    } finally {
+      restarted.stop();
+    }
+  });
+
   it("persists approval timeout as a rejected task", async () => {
     vi.useFakeTimers();
     const powerhouse = makePowerhouse();
@@ -1102,6 +1139,10 @@ describe("Powerhouse restored runtime", () => {
     expect(approved.ok).toBe(true);
     expect(approved.output).toBe("profile profile-echo ok");
     expect(powerhouse.agents.get("profile-echo")?.healthy()).toBe(true);
+
+    expect(powerhouse.removeAgentProfile("profile-echo")?.id).toBe("profile-echo");
+    expect(agentProfiles.list()).toHaveLength(0);
+    expect(powerhouse.agents.get("profile-echo")).toBeUndefined();
 
     powerhouse.stop();
   });
