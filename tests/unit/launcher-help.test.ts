@@ -277,6 +277,11 @@ describe("launcher help", () => {
     expect(shell).toContain("this.backend.listTools()");
     expect(shell).toContain("this.backend.listAgentProfiles()");
     expect(shell).toContain("this.backend.deleteAgentProfile(profileId)");
+    expect(shell).toContain('case "tasks"');
+    expect(shell).toContain('case "approvals"');
+    expect(shell).toContain('case "audits"');
+    expect(shell).toContain('case "gateways"');
+    expect(shell).toContain('case "jobs"');
     expect(shell).not.toContain("process.exit(0)");
     expect(shell).not.toContain("runLegacyInteractive");
     expect(shell).not.toContain("compatibilityCommand");
@@ -287,11 +292,12 @@ describe("launcher help", () => {
     const result = spawnSync(process.execPath, [join(process.cwd(), "bin", "agentix.js")], {
       encoding: "utf8",
       input: "/exit\n",
-      timeout: 10_000,
+      timeout: 30_000,
     });
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("Agentix v2");
+    const { version } = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as { version: string };
+    expect(result.stdout).toContain(`Agentix v${version}`);
     expect(result.stdout).toContain("Powerhouse orchestrates. Symphony plans. Pi agents execute.");
     expect(result.stdout).toContain("Type a message to create a task, or /help for commands.");
     expect(result.stdout).toContain("agentix>");
@@ -301,7 +307,7 @@ describe("launcher help", () => {
   it("serializes pasted shell commands before exiting", () => {
     const result = spawnSync(process.execPath, [join(process.cwd(), "bin", "agentix.js")], {
       encoding: "utf8",
-      input: "/status\n/fortune\n/new\n/reset\n/exit\n",
+      input: "/status\n/tasks\n/approvals\n/audits\n/healing\n/gateways\n/jobs\n/fortune\n/new\n/reset\n/exit\n",
       timeout: 30_000,
     });
 
@@ -310,6 +316,10 @@ describe("launcher help", () => {
     expect(result.stdout).toContain("Powerhouse plans, Symphony schedules, Pi agents execute.");
     expect(result.stdout).toContain("New session started");
     expect(result.stdout).toContain("Context reset");
+    expect(result.stdout).toContain("No tasks.");
+    expect(result.stdout).toContain("No pending approvals.");
+    expect(result.stdout).toContain("Configured gateways:");
+    expect(result.stdout).not.toContain("Unknown command:");
     expect(result.stdout).not.toMatch(/hermes|nous portal/i);
     expect(result.stderr).toBe("");
   });

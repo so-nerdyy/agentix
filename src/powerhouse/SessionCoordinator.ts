@@ -42,10 +42,7 @@ export class SessionCoordinator {
     if (!existsSync(this.dir)) return [];
     const files = readdirSync(this.dir, { withFileTypes: true })
       .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
-      .map((entry) => entry.name)
-      .sort()
-      .reverse()
-      .slice(0, Math.max(1, limit));
+      .map((entry) => entry.name);
 
     const sessions: Session[] = [];
     for (const file of files) {
@@ -56,7 +53,9 @@ export class SessionCoordinator {
         // Corrupt session file remains for support-bundle inspection.
       }
     }
-    return sessions;
+    return sessions
+      .sort((left, right) => (right.updatedAt || right.createdAt) - (left.updatedAt || left.createdAt))
+      .slice(0, Math.max(1, limit));
   }
 
   listActive(): Session[] {

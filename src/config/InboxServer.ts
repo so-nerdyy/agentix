@@ -121,16 +121,26 @@ export async function startInboxServer(opts: { port?: number; host?: string } = 
     reply.raw.setHeader("X-Accel-Buffering", "no");
 
     try {
-      await runtime.execute({
+      const result = await runtime.execute({
         stimulus: String(body.stimulus ?? body.text ?? ""),
         sessionId: body.sessionId as string | undefined,
+        model: typeof body.model === "string" ? body.model : undefined,
+        provider: typeof body.provider === "string" ? body.provider : undefined,
+        baseUrl: typeof body.baseUrl === "string" ? body.baseUrl : undefined,
+        toolsets: body.toolsets,
         onDelta: (delta: string) => {
-          reply.raw.write(`data: ${delta.replace(/\n/g, "\\n")}\n\n`);
+          reply.raw.write(`data: ${JSON.stringify({ delta })}\n\n`);
         },
       });
+      reply.raw.write(`data: ${JSON.stringify({
+        type: "result",
+        sessionId: result.sessionId,
+        status: result.status,
+        taskIds: result.taskIds,
+      })}\n\n`);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      reply.raw.write(`data: ${JSON.stringify({ error: message }).replace(/\n/g, "\\n")}\n\n`);
+      reply.raw.write(`data: ${JSON.stringify({ error: message })}\n\n`);
     }
 
     reply.raw.write("data: [DONE]\n\n");
