@@ -11,6 +11,34 @@ because its dispatch is tightly coupled to module-level ``cmd_*`` functions.
 """
 
 import argparse
+import os
+import re
+
+
+def _agentix_frontend_enabled() -> bool:
+    """Return whether the bundled CLI is being launched through Agentix."""
+    return os.environ.get("AGENTIX_FRONTEND") == "agentix"
+
+
+def _rebrand_agentix_text(value: str) -> str:
+    """Keep forked CLI help user-facing Agentix without changing upstream mode."""
+    if not _agentix_frontend_enabled():
+        return value
+
+    value = re.sub(r"\bNous Portal\b", "Agentix provider", value, flags=re.IGNORECASE)
+    value = re.sub(r"\bHermes Agent\b", "Agentix", value, flags=re.IGNORECASE)
+    value = re.sub(r"\bhermes\b", "agentix", value, flags=re.IGNORECASE)
+    return value
+
+
+class _BrandedArgumentParser(argparse.ArgumentParser):
+    """Apply Agentix terminology to argparse-generated compatibility help."""
+
+    def format_help(self) -> str:
+        return _rebrand_agentix_text(super().format_help())
+
+    def format_usage(self) -> str:
+        return _rebrand_agentix_text(super().format_usage())
 
 
 # `--profile` / `-p` is consumed by ``main._apply_profile_override`` before
@@ -86,7 +114,7 @@ def build_top_level_parser():
     ``chat_parser.set_defaults(func=cmd_chat)`` and continues registering
     other subparsers via ``subparsers.add_parser(...)``.
     """
-    parser = argparse.ArgumentParser(
+    parser = _BrandedArgumentParser(
         prog="hermes",
         description="Hermes Agent - AI assistant with tool-calling capabilities",
         formatter_class=argparse.RawDescriptionHelpFormatter,

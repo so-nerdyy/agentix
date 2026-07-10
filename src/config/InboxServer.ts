@@ -84,6 +84,10 @@ export async function startInboxServer(opts: { port?: number; host?: string } = 
     const { id } = request.params as { id: string };
     return runtime.setAgentProfileEnabled(id, false);
   });
+  server.delete("/agents/profiles/:id", async (request) => {
+    const { id } = request.params as { id: string };
+    return runtime.removeAgentProfile(id);
+  });
   server.get("/auth/status", async () => runtime.authStatus());
   server.get("/auth/tokens", async () => runtime.listAuthTokens());
   server.post("/auth/tokens", async (request) => {

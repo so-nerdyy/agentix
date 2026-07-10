@@ -77,4 +77,16 @@ export class AgentProfileStore {
     }));
     return updated ? normalizeProfile(updated) ?? undefined : undefined;
   }
+
+  remove(id: string): CommandAgentProfile | undefined {
+    let removed: CommandAgentProfile | undefined;
+    this.store.update((current) => ({
+      profiles: current.profiles.filter((profile) => {
+        if (profile.id !== id) return true;
+        removed = normalizeProfile(profile) ?? undefined;
+        return false;
+      }),
+    }));
+    return removed;
+  }
 }

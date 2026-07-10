@@ -3,6 +3,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { spawn, spawnSync } from "child_process";
 import { createRequire } from "module";
+import { randomBytes } from "crypto";
 import { fileURLToPath, pathToFileURL } from "url";
 import { dirname, join, resolve } from "path";
 import os from "os";
@@ -63,7 +64,6 @@ const FRONTEND_COMPAT_COMMANDS = new Set([
   "insights",
   "skills",
   "plugins",
-  "fortune",
   "dashboard",
   "web",
 ]);
@@ -71,7 +71,6 @@ const FRONTEND_COMPAT_COMMANDS = new Set([
 const BRIDGELESS_FRONTEND_COMMANDS = new Set([
   "plugins",
   "skills",
-  "fortune",
 ]);
 
 const AGENTIX_COMMAND_HELP = new Set(["gateway", "logs", "tools"]);
@@ -90,6 +89,7 @@ function resolveFrontendHome() {
 
 const AGENTIX_FRONTEND_HOME = resolveFrontendHome();
 let activeBridgeUrl = null;
+let managedBridgeChild = null;
 
 function buildLauncherHelp() {
   return [
@@ -190,16 +190,18 @@ function buildCommandHelp(command) {
       return buildSetupHelp();
     case "model":
       return [
-        "Usage: agentix model",
+        "Usage: agentix model [--list] [--search <text>] [--limit <n>]",
         "",
         "Configures Agentix provider/model/base URL/API key for this workspace.",
         "For Kilo Gateway, use provider `kilocode`, the Kilo model id, and base URL `https://api.kilo.ai/api/gateway`.",
+        "Use --list to query models from the configured provider.",
       ].join("\n");
     case "options":
       return [
-        "Usage: agentix options [providers|models|env|commands]",
+        "Usage: agentix options [providers|models|env|commands] [--live] [--search <text>] [--limit <n>]",
         "",
         "Lists Agentix setup/provider/model/environment options.",
+        "Use `agentix options models --live` to query the configured provider catalog.",
       ].join("\n");
     case "update":
       return [
@@ -353,7 +355,7 @@ function buildCommandHelp(command) {
       ].join("\n");
     case "agents":
       return [
-        "Usage: agentix agents [list|create <id> <kind> <command...>|enable <id>|disable <id>]",
+        "Usage: agentix agents [list|create <id> <kind> <command...>|enable <id>|disable <id>|delete <id>]",
         "",
         "Manages dynamic command-backed Pi agent profiles.",
         "Command profiles are approval-gated and receive task JSON on stdin.",
@@ -501,6 +503,40 @@ function parseEnvFile(file) {
     env[key] = value;
   }
   return env;
+}
+
+function writeEnvFile(file, values) {
+  const content = Object.entries(values)
+    .filter(([, value]) => String(value ?? "").trim() !== "")
+    .map(([key, value]) => `${key}=${String(value).replace(/\r?\n/g, "")}`)
+    .join("\n") + "\n";
+  writeFileSync(file, content, "utf8");
+}
+
+function ensureLocalBridgeSessionToken() {
+  const workspaceToken = parseEnvFile(join(WORKSPACE_ROOT, ".env.local")).AGENTIX_SESSION_TOKEN;
+  const frontendEnvFile = join(AGENTIX_FRONTEND_HOME, ".env");
+  const frontendEnv = parseEnvFile(frontendEnvFile);
+  const configured = process.env.AGENTIX_SESSION_TOKEN || workspaceToken || frontendEnv.AGENTIX_SESSION_TOKEN;
+  if (configured) {
+    process.env.AGENTIX_SESSION_TOKEN = configured;
+    return configured;
+  }
+
+  const token = `agx_local_${randomBytes(32).toString("base64url")}`;
+  process.env.AGENTIX_SESSION_TOKEN = token;
+
+  try {
+    mkdirSync(AGENTIX_FRONTEND_HOME, { recursive: true });
+    writeEnvFile(frontendEnvFile, {
+      ...frontendEnv,
+      AGENTIX_SESSION_TOKEN: token,
+    });
+  } catch {
+    // The current invocation can still use its in-memory local control token.
+  }
+
+  return token;
 }
 
 function parseScalar(value) {
@@ -769,6 +805,8 @@ function ensureFrontendCompatibilityInstalled(pythonExe) {
 }
 
 async function ensureBridgeRunning() {
+  ensureLocalBridgeSessionToken();
+
   if ((await healthCheck()) && (await bridgeControlCheck())) {
     return;
   }
@@ -782,7 +820,6 @@ async function ensureBridgeRunning() {
 
   const child = spawn("node", [resolve(PROJECT_ROOT, "dist", "bridge", "entry.js")], {
     cwd: WORKSPACE_ROOT,
-    detached: true,
     stdio: "ignore",
     env: buildRuntimeEnv({
       AGENTIX_BRIDGE_PORT: String(port),
@@ -790,13 +827,38 @@ async function ensureBridgeRunning() {
       HERMES_BRIDGE_URL: url,
     }),
   });
-  child.unref();
+  managedBridgeChild = child;
 
   if (!(await waitForBridgeHealth(10000, url)) || !(await bridgeControlCheck(10000, url))) {
     if (!explicitBridgeUrlConfigured() && url !== preferredUrl) {
       throw new Error(`Agentix bridge failed to start on fallback port ${port}`);
     }
     throw new Error(`Agentix bridge failed to start at ${url}`);
+  }
+}
+
+async function stopManagedBridge() {
+  const child = managedBridgeChild;
+  managedBridgeChild = null;
+  if (!child || child.exitCode !== null || child.signalCode !== null) {
+    return;
+  }
+
+  const exited = new Promise((resolveExit) => {
+    child.once("exit", resolveExit);
+    child.once("error", resolveExit);
+  });
+  child.kill("SIGTERM");
+  await Promise.race([
+    exited,
+    new Promise((resolveTimeout) => setTimeout(resolveTimeout, 3000)),
+  ]);
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill("SIGKILL");
+    await Promise.race([
+      exited,
+      new Promise((resolveTimeout) => setTimeout(resolveTimeout, 1000)),
+    ]);
   }
 }
 
@@ -811,7 +873,8 @@ async function spawnFrontendCompatibility(args) {
       PYTHONPATH: COMPAT_FRONTEND_ROOT,
       HERMES_BRIDGE_URL: bridgeUrl(),
       AGENTIX_BRIDGE_URL: bridgeUrl(),
-      AGENTIX_FRONTEND: "hermes",
+      // The bundled frontend is a fork, but its user-facing mode is Agentix.
+      AGENTIX_FRONTEND: "agentix",
     }),
   });
 
@@ -859,7 +922,67 @@ async function spawnNodeShell() {
   await shell.start();
 }
 
-function printAgentixOptions(topic = "all") {
+function optionValue(args, name) {
+  const index = args.indexOf(name);
+  if (index < 0) return undefined;
+  const value = args[index + 1];
+  return value && !value.startsWith("-") ? value : undefined;
+}
+
+function defaultProviderBaseUrl(provider) {
+  const normalized = String(provider || "").toLowerCase();
+  if (normalized === "openai") return "https://api.openai.com/v1";
+  if (normalized === "kilocode" || normalized === "kilo") return "https://api.kilo.ai/api/gateway";
+  if (normalized === "openrouter") return "https://openrouter.ai/api/v1";
+  if (normalized === "local") return "http://127.0.0.1:11434/v1";
+  return "";
+}
+
+async function printLiveModelOptions(args = []) {
+  const env = buildRuntimeEnv();
+  const provider = optionValue(args, "--provider") || env.AGENTIX_PROVIDER || "kilocode";
+  const baseUrl = optionValue(args, "--base-url") || env.AGENTIX_BASE_URL || defaultProviderBaseUrl(provider);
+  if (!baseUrl) {
+    throw new Error(`no model catalog endpoint is configured for provider ${provider}`);
+  }
+
+  const search = String(optionValue(args, "--search") || "").toLowerCase();
+  const requestedLimit = Number(optionValue(args, "--limit") || 25);
+  const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(100, requestedLimit)) : 25;
+  const endpoint = `${baseUrl.replace(/\/+$/, "")}/models`;
+  const headers = { Accept: "application/json" };
+  if (env.AGENTIX_LLM_API_KEY) {
+    headers.Authorization = `Bearer ${env.AGENTIX_LLM_API_KEY}`;
+  }
+  const response = await fetch(endpoint, { headers });
+  if (!response.ok) {
+    throw new Error(`model catalog returned ${response.status}: ${(await response.text()).slice(0, 300)}`);
+  }
+  const payload = await response.json();
+  const records = Array.isArray(payload?.data)
+    ? payload.data
+    : Array.isArray(payload?.models)
+      ? payload.models
+      : [];
+  const models = records
+    .map((record) => ({
+      id: String(record?.id ?? record?.name ?? "").trim(),
+      name: String(record?.name ?? record?.display_name ?? record?.id ?? "").trim(),
+    }))
+    .filter((record) => record.id)
+    .filter((record) => !search || `${record.id} ${record.name}`.toLowerCase().includes(search));
+
+  console.log(`Live models: ${provider} (${models.length} match${models.length === 1 ? "" : "es"})`);
+  console.log(`Endpoint: ${endpoint}`);
+  for (const model of models.slice(0, limit)) {
+    console.log(`  ${model.id}${model.name && model.name !== model.id ? `  ${model.name}` : ""}`);
+  }
+  if (models.length > limit) {
+    console.log(`  ... ${models.length - limit} more; increase --limit or narrow --search`);
+  }
+}
+
+async function printAgentixOptions(topic = "all", args = []) {
   const providers = [
     ["kilocode", "Kilo Gateway OpenAI-compatible endpoint"],
     ["custom", "OpenAI-compatible gateways, including Kilo Gateway"],
@@ -891,6 +1014,13 @@ function printAgentixOptions(topic = "all") {
     console.log("  Anthropic:   claude-3-5-sonnet-latest or your configured model id");
     console.log("  Local:       whatever your local /v1/models endpoint exposes");
     console.log("");
+    if (topic === "models" && args.includes("--live")) {
+      await printLiveModelOptions(args);
+      console.log("");
+    } else if (topic === "models") {
+      console.log("  Query live catalog: agentix options models --live [--search <text>] [--limit <n>]");
+      console.log("");
+    }
   }
   if (topic === "env" || topic === "all") {
     console.log("Environment variables:");
@@ -899,6 +1029,7 @@ function printAgentixOptions(topic = "all") {
     console.log("  AGENTIX_BASE_URL=https://api.kilo.ai/api/gateway");
     console.log("  AGENTIX_LLM_API_KEY=<provider-or-gateway-key>");
     console.log("  KILOCODE_API_KEY=<kilo-gateway-key>  # accepted alias");
+    console.log("  KILO_API_KEY=<kilo-gateway-key>      # accepted alias");
     console.log("  AGENTIX_BRIDGE_URL=http://127.0.0.1:<port>  # optional explicit bridge");
     console.log("");
   }
@@ -908,7 +1039,7 @@ function printAgentixOptions(topic = "all") {
     console.log("");
   }
   if (!["providers", "models", "env", "commands", "all"].includes(topic)) {
-    console.log("Usage: agentix options [providers|models|env|commands]");
+    console.log("Usage: agentix options [providers|models|env|commands] [--live] [--search <text>] [--limit <n>]");
   }
 }
 
@@ -1035,21 +1166,82 @@ function writeWorkspaceEnv({ provider, model, baseUrl, apiKey }) {
   return envFile;
 }
 
+function readMaskedSecret(label, fallback = "") {
+  const input = process.stdin;
+  const suffix = fallback ? " [configured]" : "";
+  process.stdout.write(`${label}${suffix}: `);
+
+  return new Promise((resolveSecret) => {
+    let value = "";
+    const wasRaw = Boolean(input.isRaw);
+    const cleanup = () => {
+      input.off("data", onData);
+      if (typeof input.setRawMode === "function") {
+        input.setRawMode(wasRaw);
+      }
+      if (!wasRaw) input.pause();
+    };
+    const finish = () => {
+      cleanup();
+      process.stdout.write("\n");
+      resolveSecret(value.trim() || fallback);
+    };
+    const onData = (chunk) => {
+      const text = chunk.toString("utf8");
+      if (text.includes("\u0003")) {
+        cleanup();
+        process.stdout.write("\n");
+        process.kill(process.pid, "SIGINT");
+        return;
+      }
+
+      for (const char of text) {
+        if (char === "\r" || char === "\n") {
+          finish();
+          return;
+        }
+        if (char === "\b" || char === "\u007f") {
+          if (value.length > 0) {
+            value = value.slice(0, -1);
+            process.stdout.write("\b \b");
+          }
+          continue;
+        }
+        const code = char.charCodeAt(0);
+        if (code < 32 || code === 127) continue;
+        value += char;
+        process.stdout.write("*");
+      }
+    };
+
+    if (typeof input.setRawMode === "function") {
+      input.setRawMode(true);
+    }
+    input.on("data", onData);
+    input.resume();
+  });
+}
+
 async function promptForConfig(section = "all") {
   const pipedAnswers = process.stdin.isTTY
     ? null
     : readFileSync(0, "utf8").split(/\r?\n/);
   let pipedIndex = 0;
   const { createInterface } = await import("node:readline/promises");
-  const rl = pipedAnswers
+  let rl = pipedAnswers
     ? null
     : createInterface({ input: process.stdin, output: process.stdout });
-  const ask = async (label, fallback = "") => {
-    const suffix = fallback ? ` [${fallback}]` : "";
+  const ask = async (label, fallback = "", { secret = false } = {}) => {
+    const suffix = fallback ? (secret ? " [configured]" : ` [${fallback}]`) : "";
     if (pipedAnswers) {
       const value = (pipedAnswers[pipedIndex++] || "").trim();
       console.log(`${label}${suffix}: ${value ? "(provided)" : ""}`);
       return value || fallback;
+    }
+    if (secret) {
+      rl?.close();
+      rl = null;
+      return readMaskedSecret(label, fallback);
     }
     const value = (await rl.question(`${label}${suffix}: `)).trim();
     return value || fallback;
@@ -1068,7 +1260,7 @@ async function promptForConfig(section = "all") {
       provider: process.env.AGENTIX_PROVIDER || "kilocode",
       model: process.env.AGENTIX_MODEL || "",
       baseUrl: process.env.AGENTIX_BASE_URL || "",
-      apiKey: process.env.AGENTIX_LLM_API_KEY || process.env.KILOCODE_API_KEY || "",
+      apiKey: process.env.AGENTIX_LLM_API_KEY || process.env.KILOCODE_API_KEY || process.env.KILO_API_KEY || "",
     };
     console.log(`Agentix setup`);
     console.log(`Workspace: ${WORKSPACE_ROOT}`);
@@ -1083,7 +1275,7 @@ async function promptForConfig(section = "all") {
       provider = await ask("Provider (kilocode/custom/openai/anthropic/openrouter/local)", provider);
       model = await ask("Model", model || (["kilocode", "kilo"].includes(provider.toLowerCase()) ? "moonshotai/kimi-k2" : "gpt-4o-mini"));
       baseUrl = await ask("Base URL", baseUrl || defaultBaseUrl(provider));
-      apiKey = await ask("API key", apiKey);
+      apiKey = await ask("API key", apiKey, { secret: true });
     }
 
     const envFile = writeWorkspaceEnv({ provider, model, baseUrl, apiKey });
@@ -1150,7 +1342,7 @@ async function main() {
       return;
     }
     if (args[0] === "options") {
-      printAgentixOptions(args[1] || "all");
+      await printAgentixOptions(args[1] || "all", args.slice(2));
       return;
     }
     await promptForConfig(args[0] === "model" ? "model" : "all");
@@ -1160,11 +1352,12 @@ async function main() {
   if (cmd === "model") {
     if (args.includes("--help") || args.includes("-h")) {
       console.log([
-        "Usage: agentix model [--verify]",
+        "Usage: agentix model [--verify|--list] [--search <text>] [--limit <n>]",
         "",
         "Configures Agentix provider/model/base URL/API key for this workspace.",
         "For Kilo Gateway, use provider `kilocode`, the Kilo model id, and base URL `https://api.kilo.ai/api/gateway`.",
         "Use `agentix model --verify` to run a live provider handshake with the current config.",
+        "Use `agentix model --list` to query the configured provider model catalog.",
       ].join("\n"));
       return;
     }
@@ -1172,12 +1365,16 @@ async function main() {
       await verifyCurrentModel(args);
       return;
     }
+    if (args.includes("--list")) {
+      await printLiveModelOptions(args.filter((arg) => arg !== "--list"));
+      return;
+    }
     await promptForConfig("model");
     return;
   }
 
   if (cmd === "options") {
-    printAgentixOptions(args[0] || "all");
+    await printAgentixOptions(args[0] || "all", args.slice(1));
     return;
   }
 
@@ -1188,6 +1385,11 @@ async function main() {
 
   if (cmd === "version" || cmd === "--version" || cmd === "-V") {
     console.log(`Agentix v${pkg.version}`);
+    return;
+  }
+
+  if (cmd === "fortune") {
+    console.log("Agentix: Powerhouse plans, Symphony schedules, Pi agents execute.");
     return;
   }
 
@@ -1227,7 +1429,7 @@ async function main() {
         console.log(buildLauncherHelp());
         return;
       }
-      await spawnFrontendCompatibility([cmd, "--help"]);
+      await spawnFrontendCompatibility([cmd, ...args]);
       return;
     }
   }
@@ -1246,8 +1448,21 @@ async function main() {
   await spawnFrontendCompatibility(argv.filter(Boolean));
 }
 
-main().catch((err) => {
-  const message = err instanceof Error ? err.message : String(err);
-  console.error(`agentix ${pkg.version}: ${message}`);
-  process.exit(1);
-});
+let signalShutdownStarted = false;
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.once(signal, async () => {
+    if (signalShutdownStarted) return;
+    signalShutdownStarted = true;
+    await stopManagedBridge();
+    process.exit(signal === "SIGINT" ? 130 : 143);
+  });
+}
+
+main()
+  .then(() => stopManagedBridge())
+  .catch(async (err) => {
+    await stopManagedBridge();
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`agentix ${pkg.version}: ${message}`);
+    process.exitCode = 1;
+  });

@@ -35,24 +35,24 @@ agentix
 The installer scripts require Node.js/npm first, then install the global `agentix` package and verify `agentix version`. To install a specific release or tarball, set `AGENTIX_PACKAGE`, for example:
 
 ```powershell
-$env:AGENTIX_PACKAGE = "@nerdyy/agentix@2.1.9"
+$env:AGENTIX_PACKAGE = "@nerdyy/agentix@2.1.10"
 irm https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.ps1 | iex
 ```
 
 ```sh
-AGENTIX_PACKAGE=@nerdyy/agentix@2.1.9 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
+AGENTIX_PACKAGE=@nerdyy/agentix@2.1.10 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
 ```
 
 For versioned GitHub release installs, set `AGENTIX_VERSION`; the installer downloads the release manifest,
 downloads the matching tarball, verifies SHA256, then installs that tarball:
 
 ```powershell
-$env:AGENTIX_VERSION = "2.1.9"
+$env:AGENTIX_VERSION = "2.1.10"
 irm https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.ps1 | iex
 ```
 
 ```sh
-AGENTIX_VERSION=2.1.9 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
+AGENTIX_VERSION=2.1.10 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
 ```
 
 If Python is not discoverable under the default command names, set
@@ -62,14 +62,14 @@ For verified tarball installs, generate a release manifest and pass the expected
 
 ```powershell
 npm run release:manifest
-$env:AGENTIX_PACKAGE='.release/nerdyy-agentix-2.1.9.tgz'
+$env:AGENTIX_PACKAGE='.release/nerdyy-agentix-2.1.10.tgz'
 $env:AGENTIX_EXPECTED_SHA256='<sha256 from manifest>'
 .\install.ps1
 ```
 
 ```bash
 npm run release:manifest
-AGENTIX_PACKAGE=.release/nerdyy-agentix-2.1.9.tgz \
+AGENTIX_PACKAGE=.release/nerdyy-agentix-2.1.10.tgz \
 AGENTIX_EXPECTED_SHA256=<sha256 from manifest> \
 sh install.sh
 ```

@@ -502,6 +502,19 @@ export class LocalAgentixRuntime {
     return { ok: Boolean(profile), profile };
   }
 
+  removeAgentProfile(id: string): Record<string, unknown> {
+    const profile = this.powerhouse.removeAgentProfile(id);
+    if (profile) {
+      this.powerhouse.audit.record({
+        type: "agent.profile_removed",
+        actor: "user",
+        subjectId: id,
+        data: { kind: profile.kind },
+      });
+    }
+    return { ok: Boolean(profile), profile };
+  }
+
   search(query: string): RuntimeSearchResults {
     this.powerhouse.start();
     const needle = query.trim().toLowerCase();
@@ -1653,10 +1666,10 @@ export class LocalAgentixRuntime {
     );
     add(
       "paths.compatibility",
-      "Bundled compatibility runtime",
+      "Bundled Agentix shell runtime",
       existsSync(PATHS.compatibilityRuntimeRoot) ? "pass" : "fail",
-      PATHS.compatibilityRuntimeRoot,
-      existsSync(PATHS.compatibilityRuntimeRoot) ? undefined : "Reinstall Agentix or restore the bundled compatibility runtime.",
+      existsSync(PATHS.compatibilityRuntimeRoot) ? "Agentix shell runtime available" : "Agentix shell runtime missing",
+      existsSync(PATHS.compatibilityRuntimeRoot) ? undefined : "Reinstall Agentix to restore the bundled shell runtime.",
     );
     add(
       "install.package",
@@ -1670,8 +1683,8 @@ export class LocalAgentixRuntime {
       "Installed runtime assets",
       missingInstallAssets.length ? "fail" : "pass",
       missingInstallAssets.length
-        ? `missing ${missingInstallAssets.length}: ${missingInstallAssets.join(", ")}`
-        : "bin, backend dist, dashboard, installers, and bundled compatibility runtime present",
+        ? `${missingInstallAssets.length} required runtime asset(s) missing`
+        : "bin, backend dist, dashboard, installers, and bundled Agentix shell runtime present",
       missingInstallAssets.length ? "Reinstall Agentix from npm or a verified release tarball." : undefined,
     );
     add(
