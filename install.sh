@@ -55,12 +55,12 @@ case "${1:-}" in
     ;;
 esac
 
-command -v node >/dev/null 2>&1 || fail "Node.js 18+ is required before installing Agentix. Install Node.js, then rerun this script."
+command -v node >/dev/null 2>&1 || fail "Node.js 20+ is required before installing Agentix. Install Node.js, then rerun this script."
 command -v npm >/dev/null 2>&1 || fail "npm is required before installing Agentix. Install Node.js/npm, then rerun this script."
 
 NODE_MAJOR="$(node -v | sed 's/^v//' | cut -d. -f1)"
-if [ "$NODE_MAJOR" -lt 18 ]; then
-  fail "Node.js 18+ is required before installing Agentix. Found $(node -v)."
+if [ "$NODE_MAJOR" -lt 20 ]; then
+  fail "Node.js 20+ is required before installing Agentix. Found $(node -v)."
 fi
 
 if [ -n "$VERSION" ] && [ "$PACKAGE" = "$DEFAULT_PACKAGE" ]; then
