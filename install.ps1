@@ -44,7 +44,7 @@ if ([string]::IsNullOrWhiteSpace($ReleaseArtifactBase)) {
 }
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-  Fail "Node.js 18+ is required before installing Agentix. Install Node.js, then rerun this script."
+  Fail "Node.js 20+ is required before installing Agentix. Install Node.js, then rerun this script."
 }
 
 if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
@@ -53,8 +53,8 @@ if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
 
 $NodeVersionText = (& node -v).TrimStart("v")
 $NodeMajor = [int]($NodeVersionText.Split(".")[0])
-if ($NodeMajor -lt 18) {
-  Fail "Node.js 18+ is required before installing Agentix. Found node v$NodeVersionText."
+if ($NodeMajor -lt 20) {
+  Fail "Node.js 20+ is required before installing Agentix. Found node v$NodeVersionText."
 }
 
 $TempDir = $null

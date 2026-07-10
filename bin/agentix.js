@@ -694,10 +694,11 @@ function healthCheck(timeoutMs = 2000, url = bridgeUrl()) {
   });
 }
 
-async function waitForBridgeHealth(timeoutMs = 10000, url = bridgeUrl()) {
+async function waitForBridgeReady(child, timeoutMs = 30000, url = bridgeUrl()) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (await healthCheck(1000, url)) {
+    if (child.exitCode !== null || child.signalCode !== null) return false;
+    if ((await healthCheck(1000, url)) && (await bridgeControlCheck(3000, url))) {
       return true;
     }
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
@@ -820,29 +821,47 @@ async function ensureBridgeRunning() {
   }
 
   const preferredUrl = bridgeUrl();
-  const port = explicitBridgeUrlConfigured()
-    ? portFromBridgeUrl(preferredUrl)
-    : await findFreePort();
-  const url = explicitBridgeUrlConfigured() ? preferredUrl : urlForPort(port);
-  activeBridgeUrl = url;
+  const explicit = explicitBridgeUrlConfigured();
+  const attempts = explicit ? 1 : 2;
+  let lastPort = portFromBridgeUrl(preferredUrl);
+  let lastDiagnostic = "";
 
-  const child = spawn("node", [resolve(PROJECT_ROOT, "dist", "bridge", "entry.js")], {
-    cwd: WORKSPACE_ROOT,
-    stdio: "ignore",
-    env: buildRuntimeEnv({
-      AGENTIX_BRIDGE_PORT: String(port),
-      AGENTIX_BRIDGE_URL: url,
-      HERMES_BRIDGE_URL: url,
-    }),
-  });
-  managedBridgeChild = child;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const port = explicit ? lastPort : await findFreePort();
+    const url = explicit ? preferredUrl : urlForPort(port);
+    lastPort = port;
+    activeBridgeUrl = url;
 
-  if (!(await waitForBridgeHealth(10000, url)) || !(await bridgeControlCheck(10000, url))) {
-    if (!explicitBridgeUrlConfigured() && url !== preferredUrl) {
-      throw new Error(`Agentix bridge failed to start on fallback port ${port}`);
-    }
-    throw new Error(`Agentix bridge failed to start at ${url}`);
+    const child = spawn(process.execPath, [resolve(PROJECT_ROOT, "dist", "bridge", "entry.js")], {
+      cwd: WORKSPACE_ROOT,
+      stdio: ["ignore", "ignore", "pipe"],
+      windowsHide: true,
+      env: buildRuntimeEnv({
+        AGENTIX_BRIDGE_PORT: String(port),
+        AGENTIX_BRIDGE_URL: url,
+        HERMES_BRIDGE_URL: url,
+      }),
+    });
+    managedBridgeChild = child;
+    let diagnostic = "";
+    child.stderr?.on("data", (chunk) => {
+      diagnostic = `${diagnostic}${chunk.toString("utf8")}`.slice(-4000);
+    });
+    child.on("error", (err) => {
+      diagnostic = `${diagnostic}\n${err.message}`.slice(-4000);
+    });
+
+    if (await waitForBridgeReady(child, 30000, url)) return;
+
+    lastDiagnostic = diagnostic.replace(/\s+/g, " ").trim().slice(-1000);
+    await stopManagedBridge();
   }
+
+  const location = explicit ? preferredUrl : `fallback port ${lastPort}`;
+  throw new Error(
+    `Agentix bridge failed to start at ${location} after ${attempts} attempt${attempts === 1 ? "" : "s"}`
+      + (lastDiagnostic ? `: ${lastDiagnostic}` : ""),
+  );
 }
 
 async function stopManagedBridge() {

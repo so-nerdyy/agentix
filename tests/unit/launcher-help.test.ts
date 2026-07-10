@@ -212,6 +212,11 @@ describe("launcher help", () => {
     expect(launcher).toContain("let managedBridgeChild = null;");
     expect(launcher).toContain("async function stopManagedBridge()");
     expect(launcher).toContain("managedBridgeChild = child;");
+    expect(launcher).toContain("async function waitForBridgeReady");
+    expect(launcher).toContain("waitForBridgeReady(child, 30000, url)");
+    expect(launcher).toContain("const attempts = explicit ? 1 : 2;");
+    expect(launcher).toContain("spawn(process.execPath");
+    expect(launcher).toContain('stdio: ["ignore", "ignore", "pipe"]');
     expect(launcher).toContain(".then(() => stopManagedBridge())");
     expect(launcher).not.toContain("detached: true");
     expect(launcher).not.toContain("child.unref();");
@@ -239,7 +244,7 @@ describe("launcher help", () => {
     expect(result.stdout).toContain("usage: agentix skills reset");
     expect(result.stdout).toContain("agentix update");
     expect(result.stdout).not.toMatch(/hermes|nous portal/i);
-  });
+  }, 90_000);
 
   it("opens the Agentix-owned shell for no-argument launches", () => {
     const launcher = readFileSync(join(process.cwd(), "bin", "agentix.js"), "utf8");
@@ -302,7 +307,7 @@ describe("launcher help", () => {
     expect(result.stdout).toContain("Type a message to create a task, or /help for commands.");
     expect(result.stdout).toContain("agentix>");
     expect(result.stderr).toBe("");
-  });
+  }, 60_000);
 
   it("serializes pasted shell commands before exiting", () => {
     const result = spawnSync(process.execPath, [join(process.cwd(), "bin", "agentix.js")], {
@@ -322,5 +327,5 @@ describe("launcher help", () => {
     expect(result.stdout).not.toContain("Unknown command:");
     expect(result.stdout).not.toMatch(/hermes|nous portal/i);
     expect(result.stderr).toBe("");
-  });
+  }, 60_000);
 });

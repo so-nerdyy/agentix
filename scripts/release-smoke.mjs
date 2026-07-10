@@ -51,7 +51,7 @@ function run(command, args, opts = {}) {
       env: opts.env ?? process.env,
       shell: shouldUseShell(command),
       windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [opts.input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
     });
     let stdout = "";
     let stderr = "";
@@ -68,6 +68,7 @@ function run(command, args, opts = {}) {
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString("utf-8");
     });
+    if (opts.input !== undefined) child.stdin.end(opts.input);
     child.on("error", (err) => {
       if (timeout) clearTimeout(timeout);
       rejectRun(err);
@@ -288,6 +289,7 @@ function smokeInstallScripts() {
   assert(shellInstaller.includes("AGENTIX_VERSION"), "install.sh missing versioned release install support");
   assert(shellInstaller.includes("npm install -g"), "install.sh missing global npm install");
   assert(shellInstaller.includes("agentix setup"), "install.sh missing setup next step");
+  assert(shellInstaller.includes("Node.js 20+"), "install.sh does not enforce the supported Node.js floor");
   assert(!shellInstaller.includes("caveman"), "install.sh contains unrelated plugin installer content");
 
   const powershellInstaller = readFileSync(join(root, "install.ps1"), "utf-8");
@@ -296,6 +298,7 @@ function smokeInstallScripts() {
   assert(powershellInstaller.includes("AGENTIX_VERSION"), "install.ps1 missing versioned release install support");
   assert(powershellInstaller.includes("npm install -g"), "install.ps1 missing global npm install");
   assert(powershellInstaller.includes("agentix setup"), "install.ps1 missing setup next step");
+  assert(powershellInstaller.includes("Node.js 20+"), "install.ps1 does not enforce the supported Node.js floor");
 }
 
 async function smokeInstallerChecksum(tarball, expectedSha256) {
@@ -564,6 +567,29 @@ async function smokeCli() {
     env: backendEnv,
     timeoutMs: 60_000,
   });
+}
+
+async function smokeColdShell() {
+  log("checking first-command interactive shell cold start");
+  const workspaceDir = join(smokeRoot, "workspace-cold-shell");
+  await mkdir(workspaceDir, { recursive: true });
+  const env = { ...process.env };
+  delete env.AGENTIX_BRIDGE_URL;
+  delete env.AGENTIX_DATA_DIR;
+  delete env.AGENTIX_WORKSPACE_DIR;
+  delete env.AGENTIX_SESSION_TOKEN;
+
+  const shell = await run(agentixCommand, [], {
+    cwd: workspaceDir,
+    env,
+    input: "/exit\n",
+    timeoutMs: 60_000,
+  });
+  assert(shell.stdout.includes(`Agentix v${packageJson.version}`), "cold shell did not print the installed version");
+  assert(shell.stdout.includes("Powerhouse orchestrates. Symphony plans. Pi agents execute."), "cold shell missing architecture banner");
+  assert(/Session: sess-[a-z0-9-]+/i.test(shell.stdout), "cold shell did not create a real backend session");
+  assert(shell.stdout.includes("agentix>"), "cold shell did not render a prompt");
+  assert(!/bridge failed to start/i.test(`${shell.stdout}\n${shell.stderr}`), "cold shell bridge startup failed");
 }
 
 async function smokeReinstallPreservesWorkspace(tarball) {
@@ -928,6 +954,7 @@ try {
   await removeDirWithRetries(smokeRoot);
   smokeInstallScripts();
   const packedArtifact = await packAndInstall();
+  await smokeColdShell();
   await smokeInstallerChecksum(packedArtifact.tarball, packedArtifact.sha256);
   await smokeVersionedReleaseInstall(packedArtifact.tarball, packedArtifact.sha256, packedArtifact.tarballName);
   await smokeCli();
