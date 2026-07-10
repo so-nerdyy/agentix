@@ -2345,18 +2345,25 @@ async function streamExecute(stimulus) {
       buffer = buffer.slice(idx + 2);
       const dataLine = frame.split("\n").find((line) => line.startsWith("data: "));
       if (!dataLine) continue;
-      const payload = dataLine.slice(6).replace(/\\n/g, "\n");
+      const payload = dataLine.slice(6);
       if (payload === "[DONE]") continue;
+      let parsed;
       try {
-        const parsed = JSON.parse(payload);
-        if (parsed.error) throw new Error(parsed.error);
-        if (parsed.delta) {
-          response += parsed.delta;
-          appendEvent("stream", parsed.delta);
-        }
+        parsed = JSON.parse(payload);
       } catch {
-        response += payload;
-        appendEvent("stream", payload);
+        const delta = payload.replace(/\\n/g, "\n");
+        response += delta;
+        appendEvent("stream", delta);
+        continue;
+      }
+      if (parsed.error) throw new Error(parsed.error);
+      if (parsed.type === "result") {
+        if (parsed.sessionId) setSessionId(parsed.sessionId);
+        continue;
+      }
+      if (parsed.delta) {
+        response += parsed.delta;
+        appendEvent("stream", parsed.delta);
       }
     }
   }

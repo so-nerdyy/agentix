@@ -78,7 +78,7 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
     reply.raw!.setHeader("X-Accel-Buffering", "no");
 
     try {
-      await runtime().execute({
+      const result = await runtime().execute({
         stimulus: body.stimulus as string,
         sessionId: body.sessionId as string | undefined,
         model: typeof body.model === "string" ? body.model : undefined,
@@ -86,13 +86,19 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
         baseUrl: typeof body.baseUrl === "string" ? body.baseUrl : undefined,
         toolsets: body.toolsets,
         onDelta: (delta: string) => {
-          reply.raw!.write(`data: ${delta.replace(/\n/g, "\\n")}\n\n`);
+          reply.raw!.write(`data: ${JSON.stringify({ delta })}\n\n`);
         },
       });
+      reply.raw!.write(`data: ${JSON.stringify({
+        type: "result",
+        sessionId: result.sessionId,
+        status: result.status,
+        taskIds: result.taskIds,
+      })}\n\n`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       reply.raw!.write(
-        `data: ${JSON.stringify({ error: msg }).replace(/\n/g, "\\n")}\n\n`,
+        `data: ${JSON.stringify({ error: msg })}\n\n`,
       );
     }
 

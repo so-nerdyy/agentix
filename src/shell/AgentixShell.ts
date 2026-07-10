@@ -1,19 +1,25 @@
 import * as readline from "readline";
+import { createRequire } from "node:module";
 import { AgentixBackend } from "../agentix_backend.js";
+
+const require = createRequire(import.meta.url);
+const { version: AGENTIX_VERSION } = require("../../package.json") as { version: string };
 
 export class AgentixShell {
   private backend = new AgentixBackend();
-  private rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    terminal: true,
-  });
+  private rl!: readline.Interface;
   private sessionId = "default";
   private history: Array<{ role: string; content: string }> = [];
   private closed = false;
   private commandQueue: Promise<void> = Promise.resolve();
 
   async start(): Promise<void> {
+    await this.initializeSession();
+    this.rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      terminal: true,
+    });
     return new Promise((resolve) => {
       this.rl.setPrompt("agentix> ");
       this.printBanner();
@@ -48,8 +54,9 @@ export class AgentixShell {
 
   private printBanner(): void {
     console.log([
-      "Agentix v2",
+      `Agentix v${AGENTIX_VERSION}`,
       "Powerhouse orchestrates. Symphony plans. Pi agents execute.",
+      `Session: ${this.sessionId}`,
       "Type a message to create a task, or /help for commands.",
       "",
     ].join("\n"));
@@ -124,6 +131,47 @@ export class AgentixShell {
     ].join("\n");
   }
 
+  private async initializeSession(): Promise<void> {
+    const sessions = await this.backend.listSessions({ limit: 20 });
+    const active = sessions.find((session) => session.status === "active");
+    if (active) {
+      this.sessionId = active.id;
+      return;
+    }
+    this.sessionId = (await this.backend.createSession()).id;
+  }
+
+  private formatTasks(tasks: Array<Record<string, unknown>>): string {
+    if (tasks.length === 0) return "No tasks.";
+    return [
+      `Recent tasks (${tasks.length})`,
+      ...tasks.slice(0, 20).map((task) => {
+        const summary = String(task.summary ?? task.error ?? task.operation ?? task.kind ?? "").slice(0, 100);
+        return `  - ${String(task.id ?? task.taskId ?? "")} [${String(task.status ?? "unknown")}] ${summary}`.trimEnd();
+      }),
+    ].join("\n");
+  }
+
+  private formatApprovals(approvals: Array<Record<string, unknown>>): string {
+    if (approvals.length === 0) return "No pending approvals.";
+    return [
+      `Pending approvals (${approvals.length})`,
+      ...approvals.map((approval) =>
+        `  - ${String(approval.taskId ?? approval.id ?? "")} [${String(approval.status ?? "pending")}] ${String(approval.reason ?? approval.summary ?? "")}`.trimEnd(),
+      ),
+    ].join("\n");
+  }
+
+  private formatAudit(entries: Array<Record<string, unknown>>): string {
+    if (entries.length === 0) return "No audit entries.";
+    return [
+      `Recent audit entries (${entries.length})`,
+      ...entries.slice(-20).map((entry) =>
+        `  - ${String(entry.id ?? "")} ${String(entry.type ?? entry.action ?? "")} ${String(entry.timestamp ?? entry.createdAt ?? "")}`.trimEnd(),
+      ),
+    ].join("\n");
+  }
+
   private async handleSlashCommand(input: string): Promise<void> {
     const [commandLine, ...restArgs] = input.slice(1).split(/\n+/);
     const parts = commandLine.split(" ");
@@ -136,11 +184,12 @@ export class AgentixShell {
           this.printHelp();
           break;
         case "new":
-          this.sessionId = `session-${Date.now()}`;
+          this.sessionId = (await this.backend.createSession()).id;
           this.history = [];
           console.log("-> New session started.\n");
           break;
         case "reset":
+          this.sessionId = (await this.backend.createSession()).id;
           this.history = [];
           console.log("-> Context reset.\n");
           break;
@@ -170,7 +219,8 @@ export class AgentixShell {
           console.log("Run `agentix update --check` in a terminal to check npm/install updates.");
           break;
         case "cron":
-        case "scheduler": {
+        case "scheduler":
+        case "jobs": {
           const [action] = [...subArgs, ...restArgs];
           if (!action || action === "list") {
             console.log(this.formatJobs(await this.backend.listScheduledJobs()));
@@ -210,7 +260,8 @@ export class AgentixShell {
           console.log(`Unknown /job action: ${action}\n`);
           break;
         }
-        case "gateway": {
+        case "gateway":
+        case "gateways": {
           const [gatewayId, action, ...actionArgs] = [...subArgs, ...restArgs];
           if (!gatewayId) {
             const gateways = await this.backend.listGateways();
@@ -260,7 +311,7 @@ export class AgentixShell {
         case "agent": {
           const [profileId, action = "inspect"] = [...subArgs, ...restArgs];
           if (!profileId) {
-            console.log("Usage: /agent <profile-id> [inspect|enable|disable|delete]\n");
+            console.log(JSON.stringify(await this.backend.listAgentProfiles(), null, 2));
             break;
           }
           if (action === "inspect") {
@@ -289,7 +340,7 @@ export class AgentixShell {
         case "session": {
           const [sessionId, action, ...actionArgs] = [...subArgs, ...restArgs];
           if (!sessionId) {
-            console.log("Usage: /session <session-id> [inspect|open|close]\n");
+            console.log(this.formatSessions(await this.backend.listSessions({ limit: 20 })));
             break;
           }
           if (!action || action === "inspect" || action === "open") {
@@ -308,10 +359,13 @@ export class AgentixShell {
           console.log(this.formatTools(await this.backend.listTools()));
           console.log("\nAgentix uses backend tools/Pi agents. Use `agentix mods` for module inventory.");
           break;
+        case "approvals":
+          console.log(this.formatApprovals(await this.backend.listApprovals()));
+          break;
         case "approval": {
           const [taskId, action, ...actionArgs] = [...subArgs, ...restArgs];
           if (!taskId) {
-            console.log("Usage: /approval <task-id> [inspect|approve|reject]\n");
+            console.log(this.formatApprovals(await this.backend.listApprovals()));
             break;
           }
           if (!action || action === "inspect") {
@@ -333,7 +387,7 @@ export class AgentixShell {
         case "healing": {
           const [entryId, action] = [...subArgs, ...restArgs];
           if (!entryId) {
-            console.log("Usage: /healing <fingerprint|procedure-id> [inspect|promote|deprecate]\n");
+            console.log(JSON.stringify(await this.backend.healingStats(), null, 2));
             break;
           }
           if (!action || action === "inspect") {
@@ -351,10 +405,13 @@ export class AgentixShell {
           console.log(`Unknown /healing action: ${action}\n`);
           break;
         }
+        case "audits":
+          console.log(this.formatAudit(await this.backend.listAudit()));
+          break;
         case "audit": {
           const [entryId, action] = [...subArgs, ...restArgs];
           if (!entryId) {
-            console.log("Usage: /audit <audit-id> [inspect]\n");
+            console.log(this.formatAudit(await this.backend.listAudit()));
             break;
           }
           if (!action || action === "inspect") {
@@ -370,7 +427,7 @@ export class AgentixShell {
         case "tool": {
           const [toolId, action] = [...subArgs, ...restArgs];
           if (!toolId) {
-            console.log("Usage: /tool <tool-id> [inspect]\n");
+            console.log(this.formatTools(await this.backend.listTools()));
             break;
           }
           if (!action || action === "inspect") {
@@ -396,7 +453,7 @@ export class AgentixShell {
         case "plan": {
           const [planId, action] = [...subArgs, ...restArgs];
           if (!planId) {
-            console.log("Usage: /plan <plan-id> [replay|cancel|retry-failed]\n");
+            console.log(this.formatPlans(await this.backend.listPlans()));
             break;
           }
           if (action === "replay" || action === "cancel" || action === "retry-failed") {
@@ -406,10 +463,13 @@ export class AgentixShell {
           console.log(this.formatPlan(await this.backend.getPlan(planId)));
           break;
         }
+        case "tasks":
+          console.log(this.formatTasks(await this.backend.listTasks(this.sessionId)));
+          break;
         case "task": {
           const [taskId, action, ...actionArgs] = [...subArgs, ...restArgs];
           if (!taskId) {
-            console.log("Usage: /task <task-id> [inspect|approve|reject|cancel|retry|restart]\n");
+            console.log(this.formatTasks(await this.backend.listTasks(this.sessionId)));
             break;
           }
           if (!action || action === "inspect") {
@@ -436,7 +496,7 @@ export class AgentixShell {
         case "memory": {
           const query = [...subArgs, ...restArgs].join(" ").trim();
           if (!query) {
-            console.log("Usage: /memory <search-query>\n");
+            console.log(JSON.stringify(await this.backend.listMemory(this.sessionId), null, 2));
             break;
           }
           console.log(JSON.stringify(await this.backend.memorySearch(query), null, 2));
@@ -492,7 +552,7 @@ export class AgentixShell {
     try {
       process.stdout.write("-> ");
       let response = "";
-      await this.backend.executeStream({
+      const result = await this.backend.executeStream({
         stimulus: input,
         sessionId: this.sessionId,
         streamCallback: (delta: string) => {
@@ -500,6 +560,7 @@ export class AgentixShell {
           response += delta;
         },
       });
+      this.sessionId = result.sessionId;
       this.history.push({ role: "assistant", content: response });
       console.log();
     } catch (err) {
@@ -521,21 +582,26 @@ export class AgentixShell {
   /options            Show setup/provider/model options
   /update             Check for updates
   /cron <args>        Manage scheduled tasks
+  /jobs               List scheduled tasks
   /job <id> [action]  Inspect or run a scheduled job
   /gateway [id] [action]  Inspect or manage gateway integrations
+  /gateways           List gateway integrations
   /agents              List dynamic Pi agent profiles
   /agent <id> [action] Inspect, enable, disable, or delete a Pi profile
   /sessions <args>    Manage sessions
   /session <id> [action] Inspect a session
   /approval <id> [action] Inspect or decide an approval
+  /approvals          List pending approvals
   /healing <id> [action] Inspect or manage healing records
   /audit <id> [action] Inspect an audit entry
+  /audits             List recent audit entries
   /skills <args>      Manage skills
   /tools <args>       Manage tools
   /tool <id> [action] Inspect a tool
   /search <query>     Search tasks, sessions, memory, logs, jobs, healing
   /plans              List Symphony plan executions
   /plan <id>          Inspect a Symphony plan execution
+  /tasks              List tasks in the current session
   /task <id> [action] Inspect or control a task
   /memory <query>     Search memory
   /logs [query]       Search logs

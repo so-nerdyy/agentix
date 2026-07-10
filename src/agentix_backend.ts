@@ -38,7 +38,7 @@ export class AgentixBackend {
     stimulus: string;
     sessionId?: string;
     streamCallback?: (delta: string) => void;
-  }): Promise<{ response: string; sessionId: string }> {
+  }): Promise<{ response: string; sessionId: string; status?: string; taskIds?: string[] }> {
     const { stimulus, sessionId } = opts;
 
     const res = await fetch(`${this.baseUrl}/execute/stream`, {
@@ -52,44 +52,98 @@ export class AgentixBackend {
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     let response = "";
+    let buffer = "";
+    let resolvedSessionId = sessionId || "default";
+    let status: string | undefined;
+    let taskIds: string[] | undefined;
+
+    const emit = (delta: string) => {
+      response += delta;
+      opts.streamCallback?.(delta);
+    };
+
+    const consumeEvent = (event: string) => {
+      const dataLines = event
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).replace(/^ /, ""));
+      if (dataLines.length === 0) return;
+
+      const data = dataLines.join("\n");
+      if (data === "[DONE]") return;
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(data);
+      } catch {
+        emit(data.replace(/\\n/g, "\n"));
+        return;
+      }
+
+      if (!parsed || typeof parsed !== "object") {
+        emit(String(parsed ?? ""));
+        return;
+      }
+
+      const payload = parsed as {
+        type?: unknown;
+        delta?: unknown;
+        error?: unknown;
+        sessionId?: unknown;
+        status?: unknown;
+        taskIds?: unknown;
+      };
+      if (payload.error !== undefined) {
+        const message = typeof payload.error === "string"
+          ? payload.error
+          : JSON.stringify(payload.error);
+        throw new Error(message);
+      }
+      if (payload.type === "result") {
+        if (typeof payload.sessionId === "string") resolvedSessionId = payload.sessionId;
+        if (typeof payload.status === "string") status = payload.status;
+        if (Array.isArray(payload.taskIds)) taskIds = payload.taskIds.map(String);
+        return;
+      }
+      if (payload.delta !== undefined) emit(String(payload.delta));
+    };
+
+    const consumeBuffer = (final = false) => {
+      const events = buffer.split(/\r?\n\r?\n/);
+      buffer = events.pop() ?? "";
+      for (const event of events) consumeEvent(event);
+      if (final && buffer.trim()) {
+        consumeEvent(buffer);
+        buffer = "";
+      }
+    };
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      const chunk = decoder.decode(value, { stream: true });
-      for (const line of chunk.split("\n")) {
-        if (line.startsWith("data: ")) {
-          const data = line.slice(6).replace(/\\n/g, "\n");
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.error) throw new Error(parsed.error);
-            if (parsed.delta) {
-              response += parsed.delta;
-              opts.streamCallback?.(parsed.delta);
-            } else if (data === "[DONE]") {
-              // end
-            }
-          } catch {
-            // plain text delta
-            response += data;
-            opts.streamCallback?.(data);
-          }
-        }
-      }
+      buffer += decoder.decode(value, { stream: true });
+      consumeBuffer();
     }
+    buffer += decoder.decode();
+    consumeBuffer(true);
 
-    return { response, sessionId: sessionId || "default" };
+    return { response, sessionId: resolvedSessionId, status, taskIds };
   }
 
   async executeStream(opts: {
     stimulus: string;
     sessionId?: string;
     streamCallback: (delta: string) => void;
-  }): Promise<void> {
-    await this.execute(opts);
+  }): Promise<{ response: string; sessionId: string; status?: string; taskIds?: string[] }> {
+    return this.execute(opts);
   }
 
-  async listSessions(opts: { limit?: number } = {}): Promise<Array<{ id: string; createdAt: string; status?: string }>> {
+  async listSessions(opts: { limit?: number } = {}): Promise<Array<{
+    id: string;
+    createdAt: string;
+    updatedAt?: string;
+    status?: string;
+  }>> {
     const suffix = opts.limit ? `?limit=${encodeURIComponent(String(opts.limit))}` : "";
     return this.get(`/sessions${suffix}`);
   }

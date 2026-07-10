@@ -146,7 +146,7 @@ class AgentixBackend:
                 line = raw_line.decode("utf-8").rstrip("\r\n")
                 if not line.startswith("data: "):
                     continue
-                payload = line[6:].replace("\\n", "\n")
+                payload = line[6:]
                 if payload == "[DONE]":
                     break
                 try:
@@ -159,6 +159,7 @@ class AgentixBackend:
                             stream_callback(delta)
                         response += delta
                 except json.JSONDecodeError:
+                    payload = payload.replace("\\n", "\n")
                     if stream_callback:
                         stream_callback(payload)
                     response += payload

@@ -43,6 +43,9 @@ describe("frontend dashboard build surface", () => {
     expect(app).toContain("new EventSource");
     expect(app).toContain("Authorization: `Bearer ${state.sessionToken}`");
     expect(app).toContain("/execute/stream");
+    expect(app).toContain('parsed.type === "result"');
+    expect(app).toContain("setSessionId(parsed.sessionId)");
+    expect(app).not.toContain('dataLine.slice(6).replace(/\\\\n/g, "\\n")');
     expect(app).toContain("/plans");
     expect(app).toContain("/scheduler/jobs");
     expect(app).toContain("data-action=\"inspect-plan");

@@ -86,7 +86,10 @@ describe("HTTP session token auth", () => {
         body: JSON.stringify({ stimulus: "inbox stream smoke" }),
       });
       expect(stream.status).toBe(200);
-      expect(await stream.text()).toContain("data: [DONE]");
+      const streamBody = await stream.text();
+      expect(streamBody).toContain('"type":"result"');
+      expect(streamBody).toMatch(/"sessionId":"sess-[^"]+"/);
+      expect(streamBody).toContain("data: [DONE]");
       const reset = await fetch(`${base}/memory/reset`, {
         method: "POST",
         headers: {

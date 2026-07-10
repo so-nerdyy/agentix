@@ -40,4 +40,51 @@ describe("Agentix backend HTTP client", () => {
       expect.objectContaining({ method: "DELETE" }),
     );
   });
+
+  it("parses fragmented SSE events without rendering the done sentinel", async () => {
+    const payload = [
+      `data: ${JSON.stringify({ delta: "hello\n" })}\n\n`,
+      `data: ${JSON.stringify({ delta: "world" })}\n\n`,
+      `data: ${JSON.stringify({ type: "result", sessionId: "sess-real", status: "complete", taskIds: ["task-1"] })}\n\n`,
+      "data: [DONE]\n\n",
+    ].join("");
+    const boundaries = [7, 19, 31, payload.length - 5];
+    const chunks: string[] = [];
+    let start = 0;
+    for (const end of boundaries) {
+      chunks.push(payload.slice(start, end));
+      start = end;
+    }
+    chunks.push(payload.slice(start));
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+        controller.close();
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(body, { status: 200 })));
+    const backend = new AgentixBackend("http://127.0.0.1:3456");
+    const deltas: string[] = [];
+
+    const result = await backend.execute({
+      stimulus: "test",
+      streamCallback: (delta) => deltas.push(delta),
+    });
+
+    expect(result.response).toBe("hello\nworld");
+    expect(result.sessionId).toBe("sess-real");
+    expect(result.status).toBe("complete");
+    expect(result.taskIds).toEqual(["task-1"]);
+    expect(deltas.join("")).toBe("hello\nworld");
+    expect(deltas).not.toContain("[DONE]");
+  });
+
+  it("propagates structured SSE errors", async () => {
+    const body = `data: ${JSON.stringify({ error: "backend exploded" })}\n\n`;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(body, { status: 200 })));
+    const backend = new AgentixBackend("http://127.0.0.1:3456");
+
+    await expect(backend.execute({ stimulus: "test" })).rejects.toThrow("backend exploded");
+  });
 });

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,10 +12,28 @@ describe("SessionCoordinator", () => {
   const dirs: string[] = [];
 
   afterEach(() => {
+    vi.useRealTimers();
     while (dirs.length > 0) {
       const dir = dirs.pop()!;
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("lists recent sessions by update time rather than random filename", () => {
+    const dir = tempDir();
+    dirs.push(dir);
+    vi.useFakeTimers();
+
+    vi.setSystemTime(1_000);
+    const coordinator = new SessionCoordinator(dir);
+    const first = coordinator.create({ source: "first" });
+    vi.setSystemTime(2_000);
+    const second = coordinator.create({ source: "second" });
+    vi.setSystemTime(3_000);
+    coordinator.updateMetadata(first.id, { touched: true });
+
+    const recent = new SessionCoordinator(dir).listRecent(2);
+    expect(recent.map((session) => session.id)).toEqual([first.id, second.id]);
   });
 
   it("persists active sessions and recovers them", () => {
