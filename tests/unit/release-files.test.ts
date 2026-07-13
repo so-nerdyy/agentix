@@ -99,5 +99,6 @@ describe("release packaging files", () => {
     expect(dockerfile).toContain("HEALTHCHECK");
     expect(compose).toContain("AGENTIX_SESSION_TOKEN");
     expect(ciWorkflow).toContain("docker build -t agentix:ci .");
+    expect(ciWorkflow).not.toContain('      - "codex/**"');
   });
 });
