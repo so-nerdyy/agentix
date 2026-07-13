@@ -1,11 +1,20 @@
-import { mkdtempSync, readFileSync, rmSync } from "fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "fs";
 import { spawnSync } from "child_process";
 import { join } from "path";
 import { tmpdir } from "os";
 import { describe, expect, it } from "vitest";
 
+const launcherPath = join(process.cwd(), "bin", "agentix.js");
+
+function launcherSource() {
+  return [
+    readFileSync(launcherPath, "utf8"),
+    readFileSync(join(process.cwd(), "bin", "agentix-main.js"), "utf8"),
+  ].join("\n").replace(/\r\n/g, "\n");
+}
+
 function commandSet(name: string) {
-  const launcher = readFileSync(join(process.cwd(), "bin", "agentix.js"), "utf8");
+  const launcher = launcherSource();
   const match = launcher.match(new RegExp(`const ${name} = new Set\\(\\[([\\s\\S]*?)\\]\\);`));
   expect(match).not.toBeNull();
   return new Set(Array.from(match![1].matchAll(/"([^"]+)"/g), (item) => item[1]));
@@ -18,7 +27,8 @@ describe("launcher help", () => {
     });
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("open the Agentix interactive shell");
+    expect(result.stdout).toContain("open the Agentix terminal UI");
+    expect(result.stdout).toContain("agentix --tui");
     expect(result.stdout).toContain("Agentix commands:");
     expect(result.stdout).toContain("Agentix backend commands:");
     expect(result.stdout).toContain("setup");
@@ -91,7 +101,7 @@ describe("launcher help", () => {
   });
 
   it("routes Hermes-style one-shot mode through the Agentix backend CLI", () => {
-    const launcher = readFileSync(join(process.cwd(), "bin", "agentix.js"), "utf8");
+    const launcher = launcherSource();
 
     expect(launcher).toContain("function translateOneshotArgs");
     expect(launcher).toContain('cmd === "-z"');
@@ -156,7 +166,7 @@ describe("launcher help", () => {
   });
 
   it("does not start the bridge for setup/model before configuration exists", () => {
-    const launcher = readFileSync(join(process.cwd(), "bin", "agentix.js"), "utf8");
+    const launcher = launcherSource();
 
     expect(launcher).toContain('if (cmd === "setup")');
     expect(launcher).toContain('if (cmd === "model")');
@@ -168,6 +178,7 @@ describe("launcher help", () => {
     expect(launcher).toContain("AGENTIX_LLM_API_KEY");
     expect(launcher).toContain("process.env.KILO_API_KEY");
     expect(launcher).toContain("async function printLiveModelOptions");
+    expect(launcher).toContain('"kilo-auto/free"');
     expect(launcher).toContain('args.includes("--list")');
     expect(launcher).toContain('args.includes("--live")');
   });
@@ -176,6 +187,8 @@ describe("launcher help", () => {
     const workspace = mkdtempSync(join(tmpdir(), "agentix-setup-secret-"));
     const secret = "kilo-secret-that-must-not-appear";
     try {
+      mkdirSync(join(workspace, "data"), { recursive: true });
+      writeFileSync(join(workspace, "data", "config.json"), "{partial", "utf8");
       const result = spawnSync(process.execPath, [join(process.cwd(), "bin", "agentix.js"), "setup"], {
         cwd: workspace,
         encoding: "utf8",
@@ -192,13 +205,24 @@ describe("launcher help", () => {
       expect(result.stdout).toContain("API key [configured]");
       expect(result.stdout).not.toContain(secret);
       expect(readFileSync(join(workspace, ".env.local"), "utf8")).toContain(`AGENTIX_LLM_API_KEY=${secret}`);
+      const backup = readdirSync(join(workspace, "data"))
+        .find((name) => name.startsWith("config.json.corrupt-"));
+      expect(backup).toBeDefined();
+      expect(readFileSync(join(workspace, "data", backup!), "utf8")).toBe("{partial");
+      expect(JSON.parse(readFileSync(join(workspace, "data", "config.json"), "utf8"))).toMatchObject({
+        provider: "kilocode",
+      });
+      if (process.platform !== "win32") {
+        expect(statSync(join(workspace, ".env.local")).mode & 0o777).toBe(0o600);
+        expect(statSync(join(workspace, "data", "config.json")).mode & 0o777).toBe(0o600);
+      }
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
   });
 
   it("creates a local control token before probing or spawning a protected bridge", () => {
-    const launcher = readFileSync(join(process.cwd(), "bin", "agentix.js"), "utf8");
+    const launcher = launcherSource();
 
     expect(launcher).toContain("function ensureLocalBridgeSessionToken");
     expect(launcher).toContain("AGENTIX_SESSION_TOKEN");
@@ -207,7 +231,7 @@ describe("launcher help", () => {
   });
 
   it("owns and stops fallback bridge processes started for shell commands", () => {
-    const launcher = readFileSync(join(process.cwd(), "bin", "agentix.js"), "utf8");
+    const launcher = launcherSource();
 
     expect(launcher).toContain("let managedBridgeChild = null;");
     expect(launcher).toContain("async function stopManagedBridge()");
@@ -237,25 +261,26 @@ describe("launcher help", () => {
   it("preserves compatibility subcommands when forwarding their help", () => {
     const result = spawnSync(process.execPath, [join(process.cwd(), "bin", "agentix.js"), "skills", "reset", "--help"], {
       encoding: "utf8",
-      timeout: 60_000,
+      timeout: 120_000,
     });
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("usage: agentix skills reset");
     expect(result.stdout).toContain("agentix update");
     expect(result.stdout).not.toMatch(/hermes|nous portal/i);
-  }, 90_000);
+  }, 150_000);
 
-  it("opens the Agentix-owned shell for no-argument launches", () => {
-    const launcher = readFileSync(join(process.cwd(), "bin", "agentix.js"), "utf8");
+  it("opens the full TUI interactively and preserves the backend shell for piped input", () => {
+    const launcher = launcherSource();
 
     expect(launcher).toContain("async function spawnNodeShell");
     expect(launcher).toContain("await spawnNodeShell();");
-    expect(launcher).not.toContain("if (!cmd && process.stdin.isTTY) {\n    await ensureBridgeRunning();\n    await spawnFrontendCompatibility([]);");
+    expect(launcher).toContain('cmd === "--tui" || cmd === "tui"');
+    expect(launcher).toContain("if (!cmd && process.stdin.isTTY) {\n    await ensureBridgeRunning();\n    await spawnFrontendCompatibility([\"--tui\"]);");
   });
 
   it("detects Python instead of requiring a literal python command", () => {
-    const launcher = readFileSync(join(process.cwd(), "bin", "agentix.js"), "utf8");
+    const launcher = launcherSource();
     const bridge = readFileSync(join(process.cwd(), "src", "shell", "agentix_python_bridge.ts"), "utf8");
 
     expect(launcher).toContain("AGENTIX_PYTHON");
@@ -264,6 +289,25 @@ describe("launcher help", () => {
     expect(launcher.indexOf('command: "python"')).toBeLessThan(launcher.indexOf('command: "py"'));
     expect(bridge.indexOf('command: "python"')).toBeLessThan(bridge.indexOf('command: "py"'));
     expect(launcher).not.toContain('spawnSync("python", ["-m", "venv"');
+  });
+
+  it("rejects unknown commands without exposing compatibility-only commands", () => {
+    const result = spawnSync(process.execPath, [launcherPath, "run", "--invalid-flag"], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("Unknown Agentix command: run");
+    expect(`${result.stdout}\n${result.stderr}`).not.toMatch(/hermes|nous|portal|claw/i);
+  });
+
+  it("prints startup feedback before loading the full launcher", () => {
+    const bootstrap = readFileSync(launcherPath, "utf8");
+
+    expect(bootstrap.length).toBeLessThan(1_000);
+    expect(bootstrap).toContain('process.stdout.write("Starting Agentix...\\n")');
+    expect(bootstrap.indexOf("process.stdout.write")).toBeLessThan(bootstrap.indexOf('import("./agentix-main.js")'));
   });
 
   it("keeps the interactive shell on Agentix backend commands", () => {
@@ -279,6 +323,8 @@ describe("launcher help", () => {
     expect(shell).toContain("this.rl.prompt();");
     expect(shell).toContain("this.backend.usage()");
     expect(shell).toContain("this.backend.listSessions");
+    expect(shell).toContain("loadSessionHistory");
+    expect(shell).toContain("detail.messages");
     expect(shell).toContain("this.backend.listTools()");
     expect(shell).toContain("this.backend.listAgentProfiles()");
     expect(shell).toContain("this.backend.deleteAgentProfile(profileId)");
@@ -294,38 +340,72 @@ describe("launcher help", () => {
   });
 
   it("prints a visible prompt for no-argument shell launches", () => {
-    const result = spawnSync(process.execPath, [join(process.cwd(), "bin", "agentix.js")], {
-      encoding: "utf8",
-      input: "/exit\n",
-      timeout: 30_000,
-    });
+    const workspace = mkdtempSync(join(tmpdir(), "agentix-shell-prompt-"));
+    try {
+      const result = spawnSync(process.execPath, [launcherPath], {
+        cwd: workspace,
+        env: {
+          ...process.env,
+          AGENTIX_DATA_DIR: join(workspace, "data"),
+          AGENTIX_WORKSPACE_DIR: workspace,
+        },
+        encoding: "utf8",
+        input: "/exit\n",
+        timeout: 30_000,
+      });
 
-    expect(result.status).toBe(0);
-    const { version } = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as { version: string };
-    expect(result.stdout).toContain(`Agentix v${version}`);
-    expect(result.stdout).toContain("Powerhouse orchestrates. Symphony plans. Pi agents execute.");
-    expect(result.stdout).toContain("Type a message to create a task, or /help for commands.");
-    expect(result.stdout).toContain("agentix>");
-    expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+      const { version } = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as { version: string };
+      expect(result.stdout).toContain(`Agentix v${version}`);
+      expect(result.stdout).toContain("Powerhouse orchestrates. Symphony plans. Pi agents execute.");
+      expect(result.stdout).toContain("Type a message to create a task, or /help for commands.");
+      expect(result.stdout).toContain("agentix>");
+      expect(result.stderr).toBe("");
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
   }, 60_000);
 
-  it("serializes pasted shell commands before exiting", () => {
-    const result = spawnSync(process.execPath, [join(process.cwd(), "bin", "agentix.js")], {
-      encoding: "utf8",
-      input: "/status\n/tasks\n/approvals\n/audits\n/healing\n/gateways\n/jobs\n/fortune\n/new\n/reset\n/exit\n",
-      timeout: 30_000,
-    });
+  it("serializes the complete pasted shell command inventory before exiting", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "agentix-shell-commands-"));
+    try {
+      const commands = [
+        "/help", "/status", "/history", "/doctor", "/usage", "/setup", "/model", "/options", "/update",
+        "/cron", "/job", "/gateways", "/gateway", "/sessions", "/session", "/agents", "/agent",
+        "/approvals", "/approval", "/healing", "/audits", "/audit", "/skills", "/tools", "/tool",
+        "/search no-match-expected", "/plans", "/plan", "/tasks", "/task", "/memory", "/logs", "/log",
+        "/theme", "/personality", "/fortune", "/new", "/reset", "/exit",
+      ];
+      const result = spawnSync(process.execPath, [launcherPath], {
+        cwd: workspace,
+        env: {
+          ...process.env,
+          AGENTIX_DATA_DIR: join(workspace, "data"),
+          AGENTIX_WORKSPACE_DIR: workspace,
+        },
+        encoding: "utf8",
+        input: `${commands.join("\n")}\n`,
+        timeout: 60_000,
+      });
 
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain("Frontend: Agentix terminal shell");
-    expect(result.stdout).toContain("Powerhouse plans, Symphony schedules, Pi agents execute.");
-    expect(result.stdout).toContain("New session started");
-    expect(result.stdout).toContain("Context reset");
-    expect(result.stdout).toContain("No tasks.");
-    expect(result.stdout).toContain("No pending approvals.");
-    expect(result.stdout).toContain("Configured gateways:");
-    expect(result.stdout).not.toContain("Unknown command:");
-    expect(result.stdout).not.toMatch(/hermes|nous portal/i);
-    expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("Available commands:");
+      expect(result.stdout).toContain("Frontend: Agentix terminal shell");
+      expect(result.stdout).toContain("Agentix backend doctor:");
+      expect(result.stdout).toContain("Agentix backend usage");
+      expect(result.stdout).toContain("Run `agentix setup`");
+      expect(result.stdout).toContain("Run `agentix model`");
+      expect(result.stdout).toContain("Powerhouse plans, Symphony schedules, Pi agents execute.");
+      expect(result.stdout).toContain("New session started");
+      expect(result.stdout).toContain("Context reset");
+      expect(result.stdout).toContain("No tasks.");
+      expect(result.stdout).toContain("No pending approvals.");
+      expect(result.stdout).toContain("Configured gateways:");
+      expect(result.stdout).not.toContain("Unknown command:");
+      expect(result.stdout).not.toMatch(/hermes|nous portal/i);
+      expect(result.stderr).toBe("");
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
   }, 60_000);
 });

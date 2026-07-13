@@ -37,14 +37,35 @@ export class AgentixBackend {
   async execute(opts: {
     stimulus: string;
     sessionId?: string;
+    model?: string;
+    provider?: string;
+    baseUrl?: string;
+    toolsets?: unknown;
+    skills?: string[];
+    gatewayId?: string;
+    metadata?: Record<string, unknown>;
+    deliver?: boolean;
     streamCallback?: (delta: string) => void;
+    signal?: AbortSignal;
   }): Promise<{ response: string; sessionId: string; status?: string; taskIds?: string[] }> {
     const { stimulus, sessionId } = opts;
 
     const res = await fetch(`${this.baseUrl}/execute/stream`, {
       method: "POST",
       headers: this.headers(),
-      body: JSON.stringify({ stimulus, sessionId }),
+      body: JSON.stringify({
+        stimulus,
+        sessionId,
+        model: opts.model,
+        provider: opts.provider,
+        baseUrl: opts.baseUrl,
+        toolsets: opts.toolsets,
+        skills: opts.skills,
+        gatewayId: opts.gatewayId,
+        metadata: opts.metadata,
+        deliver: opts.deliver,
+      }),
+      signal: opts.signal,
     });
 
     if (!res.ok) throw new Error(`Bridge ${res.status}: ${await res.text()}`);
@@ -133,7 +154,16 @@ export class AgentixBackend {
   async executeStream(opts: {
     stimulus: string;
     sessionId?: string;
+    model?: string;
+    provider?: string;
+    baseUrl?: string;
+    toolsets?: unknown;
+    skills?: string[];
+    gatewayId?: string;
+    metadata?: Record<string, unknown>;
+    deliver?: boolean;
     streamCallback: (delta: string) => void;
+    signal?: AbortSignal;
   }): Promise<{ response: string; sessionId: string; status?: string; taskIds?: string[] }> {
     return this.execute(opts);
   }
@@ -143,6 +173,9 @@ export class AgentixBackend {
     createdAt: string;
     updatedAt?: string;
     status?: string;
+    metadata?: Record<string, unknown>;
+    messageCount?: number;
+    preview?: string;
   }>> {
     const suffix = opts.limit ? `?limit=${encodeURIComponent(String(opts.limit))}` : "";
     return this.get(`/sessions${suffix}`);
@@ -152,22 +185,33 @@ export class AgentixBackend {
     return this.get(`/sessions/${encodeURIComponent(sessionId)}`);
   }
 
-  async createSession(opts?: { model?: string }): Promise<{ id: string }> {
+  async createSession(opts?: {
+    model?: string;
+    provider?: string;
+    baseUrl?: string;
+    toolsets?: unknown;
+    skills?: string[];
+    metadata?: Record<string, unknown>;
+    messages?: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+  }): Promise<{ id: string }> {
     return this.post("/sessions", opts);
   }
 
-  async deleteSession(id: string): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/sessions/${id}`, {
+  async deleteSession(id: string): Promise<Record<string, unknown>> {
+    const res = await fetch(`${this.baseUrl}/sessions/${encodeURIComponent(id)}`, {
       method: "DELETE",
       headers: this.headers(),
     });
-    if (!res.ok && res.status !== 204) {
-      throw new Error(`Bridge ${res.status}: ${await res.text()}`);
-    }
+    if (!res.ok) throw new Error(`Bridge ${res.status}: ${await res.text()}`);
+    return res.json() as Promise<Record<string, unknown>>;
   }
 
   async renameSession(id: string, title: string): Promise<Record<string, unknown>> {
     return this.post(`/sessions/${encodeURIComponent(id)}/rename`, { title });
+  }
+
+  async truncateSessionBeforeUserOrdinal(id: string, userOrdinal: number): Promise<Record<string, unknown>> {
+    return this.post(`/sessions/${encodeURIComponent(id)}/truncate`, { userOrdinal });
   }
 
   async pruneSessions(input: { olderThanDays?: number; source?: string }): Promise<Record<string, unknown>> {
@@ -262,6 +306,39 @@ export class AgentixBackend {
 
   async setConfig(key: string, value: unknown): Promise<Record<string, unknown>> {
     return this.post("/config", { key, value });
+  }
+
+  async setLlmApiKey(value: string | null): Promise<Record<string, unknown>> {
+    return this.post("/config/secret", { value });
+  }
+
+  async listSkills(query = ""): Promise<Array<Record<string, unknown>>> {
+    const suffix = query ? `?q=${encodeURIComponent(query)}` : "";
+    return this.get(`/skills${suffix}`);
+  }
+
+  async getSkill(id: string): Promise<Record<string, unknown>> {
+    return this.get(`/skills/${encodeURIComponent(id)}`);
+  }
+
+  async setSkillEnabled(id: string, enabled: boolean): Promise<Record<string, unknown>> {
+    return this.post(`/skills/${encodeURIComponent(id)}/${enabled ? "enable" : "disable"}`, {});
+  }
+
+  async reloadSkills(): Promise<Record<string, unknown>> {
+    return this.post("/skills/reload", {});
+  }
+
+  async undoSession(id: string): Promise<Record<string, unknown>> {
+    return this.post(`/sessions/${encodeURIComponent(id)}/undo`, {});
+  }
+
+  async compactSession(id: string, focusTopic = ""): Promise<Record<string, unknown>> {
+    return this.post(`/sessions/${encodeURIComponent(id)}/compact`, { focusTopic });
+  }
+
+  async branchSession(id: string, title = ""): Promise<Record<string, unknown>> {
+    return this.post(`/sessions/${encodeURIComponent(id)}/branch`, { title });
   }
 
   async listPlans(): Promise<Array<Record<string, unknown>>> {
@@ -411,11 +488,13 @@ export class AgentixBackend {
     stimulus: string;
     sessionId?: string;
     metadata?: Record<string, unknown>;
+    deliver?: boolean;
   }): Promise<Record<string, unknown>> {
     return this.post(`/gateway/${encodeURIComponent(input.gatewayId)}/message`, {
       stimulus: input.stimulus,
       sessionId: input.sessionId,
       metadata: input.metadata,
+      deliver: input.deliver,
     });
   }
 

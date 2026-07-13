@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { timingSafeEqual } from "node:crypto";
 import { defaultAuthTokenStore, roleMeets, type AuthRole } from "./AuthTokenStore.js";
 
 export interface AuthDecision {
@@ -8,11 +9,18 @@ export interface AuthDecision {
   error?: string;
 }
 
+function secretsEqual(expected: string, provided: string | null | undefined): boolean {
+  if (!provided) return false;
+  const expectedBytes = Buffer.from(expected);
+  const providedBytes = Buffer.from(provided);
+  return expectedBytes.length === providedBytes.length && timingSafeEqual(expectedBytes, providedBytes);
+}
+
 export function isSessionTokenAuthorized(
   configuredToken: string | null | undefined,
   providedToken: string | null | undefined,
 ): boolean {
-  return !configuredToken || providedToken === configuredToken;
+  return !configuredToken || secretsEqual(configuredToken, providedToken);
 }
 
 export function authenticateSessionToken(
@@ -23,7 +31,7 @@ export function authenticateSessionToken(
   if (!configuredToken && !hasStoredTokens) {
     return { ok: true, role: "admin", source: "dev-open" };
   }
-  if (configuredToken && providedToken === configuredToken) {
+  if (configuredToken && secretsEqual(configuredToken, providedToken)) {
     return { ok: true, role: "admin", source: "env" };
   }
   const stored = defaultAuthTokenStore.authenticate(providedToken);
@@ -75,7 +83,7 @@ export function assertSafeListenHost(host: string | undefined, configuredToken: 
 
 export function requiredRoleForRequest(method: string, pathname: string): AuthRole {
   if (pathname.startsWith("/auth")) return "admin";
-  if (pathname === "/config" && method !== "GET") return "admin";
+  if (pathname.startsWith("/config") && method !== "GET") return "admin";
   if (pathname === "/memory/reset") return "admin";
   if (method === "GET") return "viewer";
   return "operator";

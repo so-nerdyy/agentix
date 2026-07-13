@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - "codex/**"
   pull_request:
 
 jobs:
@@ -14,20 +13,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -37,8 +36,21 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Build packaged terminal UI
+        run: npm run build:tui
+
+      - name: Terminal UI type-check
+        run: npm run type-check --prefix hermes-agent/ui-tui
+
+      - name: Terminal UI tests
+        timeout-minutes: 10
+        run: npm test --prefix hermes-agent/ui-tui
+
       - name: Unit tests
         run: npm test
+
+      - name: Python backend adapter tests
+        run: python -m unittest tests/python/test_agentix_backend_adapter.py
 
       - name: Release smoke
         timeout-minutes: 25
@@ -62,7 +74,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Build Agentix runtime image
         run: docker build -t agentix:ci .

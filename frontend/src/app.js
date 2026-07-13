@@ -246,7 +246,11 @@ function saveFilterState() {
 }
 
 async function api(path, opts = {}) {
-  const headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
+  const headers = { ...(opts.headers || {}) };
+  const hasContentType = Object.keys(headers).some((name) => name.toLowerCase() === "content-type");
+  if (opts.body !== undefined && !hasContentType) {
+    headers["Content-Type"] = "application/json";
+  }
   if (state.sessionToken) {
     headers.Authorization = `Bearer ${state.sessionToken}`;
   }
@@ -425,7 +429,7 @@ function renderEvents() {
 function renderStats() {
   const stats = [
     ["Session", state.sessionId || "none", state.health?.version || "Agentix"],
-    ["Tasks", String(state.tasks.length), `${state.tasks.filter((task) => task.status !== "complete").length} open`],
+    ["Tasks", String(state.tasks.length), `${state.tasks.filter((task) => ["queued", "running", "awaiting-approval"].includes(task.status)).length} open`],
     ["Plans", String(state.plans.length), `${state.plans.filter((plan) => plan.status === "awaiting-approval").length} paused`],
     ["Approvals", String(state.approvals.length), "awaiting decisions"],
     ["Scheduler", String(state.jobs.length), `${state.jobs.filter((job) => job.enabled).length} enabled`],
@@ -607,7 +611,7 @@ function taskCard(task) {
 }
 
 function planCard(plan) {
-  const tone = plan.status === "complete" ? "success" : plan.status === "failed" ? "danger" : "warn";
+  const tone = plan.status === "complete" ? "success" : ["failed", "cancelled"].includes(plan.status) ? "danger" : "warn";
   const progress = `${plan.completedSteps || 0}/${plan.stepCount || 0} steps`;
   return `
     <div class="card ${state.selectedPlanId === plan.id ? "selected" : ""}">
@@ -1535,6 +1539,11 @@ function renderLists() {
     state.selectedApprovalId = visibleApprovals[0].id;
     saveFilterState();
   }
+  if (state.selectedApprovalId && !visibleApprovals.some((approval) => approval.id === state.selectedApprovalId)) {
+    state.selectedApprovalId = visibleApprovals[0]?.id || "";
+    state.approvalDetail = null;
+    saveFilterState();
+  }
   if (state.selectedApprovalId && (!state.approvalDetail || state.approvalDetail.approval.id !== state.selectedApprovalId) && !state.approvalDetailLoading) {
     void loadApprovalDetail(state.selectedApprovalId);
   }
@@ -1901,7 +1910,7 @@ async function refreshAll() {
       state.selectedGatewayId = state.gateways[0].id;
       saveFilterState();
     }
-    if (state.selectedGatewayId && (!state.gatewayDetail || state.gatewayDetail.gateway.id !== state.selectedGatewayId) && !state.gatewayDetailLoading) {
+    if (state.selectedGatewayId && !state.gatewayDetailLoading) {
       await loadGatewayDetail(state.selectedGatewayId);
     } else if (!state.selectedGatewayId) {
       state.gatewayDetail = null;
@@ -1997,7 +2006,8 @@ async function loadAuthTokens() {
 
 async function createAuthToken(event) {
   event.preventDefault();
-  const form = new FormData(event.currentTarget);
+  const formElement = event.currentTarget;
+  const form = new FormData(formElement);
   const result = await api("/auth/tokens", {
     method: "POST",
     body: JSON.stringify({
@@ -2006,7 +2016,7 @@ async function createAuthToken(event) {
     }),
   });
   state.authTokenSecret = result.token || "";
-  event.currentTarget.reset();
+  formElement.reset();
   await loadAuthTokens();
   appendEvent("auth token created", `${result.record?.id || "token"} (${result.record?.role || "operator"})`, "success");
 }
@@ -2376,8 +2386,8 @@ async function submitCompose(event) {
   event.preventDefault();
   const stimulus = refs.composeInput.value.trim();
   if (!stimulus) return;
-  if (state.sessionSelect.value) {
-    setSessionId(state.sessionSelect.value);
+  if (refs.sessionSelect.value) {
+    setSessionId(refs.sessionSelect.value);
   }
   if (stimulus.startsWith("/")) {
     appendEvent("command", stimulus);
@@ -2475,7 +2485,8 @@ async function handleSlash(text) {
 
 async function createJob(event) {
   event.preventDefault();
-  const form = new FormData(event.currentTarget);
+  const formElement = event.currentTarget;
+  const form = new FormData(formElement);
   try {
     const job = await api("/scheduler/jobs", {
       method: "POST",
@@ -2490,8 +2501,8 @@ async function createJob(event) {
         enabled: true,
       }),
     });
-    event.currentTarget.reset();
-    event.currentTarget.elements.schedule.value = "every 1m";
+    formElement.reset();
+    formElement.elements.schedule.value = "every 1m";
     state.selectedJobId = job.id || "";
     saveFilterState();
     const message = `Created scheduled job ${job.name || job.id}.`;

@@ -184,7 +184,7 @@ _stdio_transport = StdioTransport(lambda: _real_stdout, _stdout_lock)
 
 def _using_agentix_backend() -> bool:
     return (
-        os.environ.get("AGENTIX_FRONTEND") == "hermes"
+        os.environ.get("AGENTIX_FRONTEND") in {"agentix", "hermes"}
         and os.environ.get("AGENTIX_DISABLE_BACKEND_CHAT") != "1"
     )
 
@@ -200,14 +200,35 @@ class _AgentixTuiProxy:
     reasoning_config: dict = {}
     service_tier = ""
 
-    def __init__(self, session_key: str, model: str | None = None):
+    def __init__(
+        self,
+        session_key: str,
+        model: str | None = None,
+        *,
+        backend=None,
+        create_session: bool = True,
+    ):
         from agentix_backend import AgentixBackend
 
         self.model = model or os.environ.get("AGENTIX_MODEL") or "agentix-powerhouse"
         self.session_id = session_key
-        self._backend = AgentixBackend(model=self.model)
-        created = self._backend.create_session(model=self.model)
-        self.session_id = created.get("id") or session_key
+        self._backend = backend or AgentixBackend(model=self.model, session_id=session_key)
+        if create_session:
+            created = self._backend.create_session(model=self.model)
+            self.session_id = created.get("id") or session_key
+        backend_tools = self._backend.list_tools()
+        self.tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": str(tool.get("name") or "agentix-tool"),
+                    "description": str(tool.get("description") or "Agentix backend tool"),
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+            for tool in (backend_tools if isinstance(backend_tools, list) else [])
+            if isinstance(tool, dict)
+        ]
         self.session_input_tokens = 0
         self.session_output_tokens = 0
         self.session_total_tokens = 0
@@ -227,16 +248,75 @@ class _AgentixTuiProxy:
             session_id=self.session_id,
             stream_callback=stream_callback,
         )
+        if self._backend.session_id:
+            self.session_id = self._backend.session_id
         history = list(conversation_history or [])
         history.append({"role": "user", "content": prompt})
         history.append({"role": "assistant", "content": response})
         self.session_api_calls += 1
+        interrupted = self._backend.was_interrupted
         return {
             "error": None,
             "final_response": response,
-            "interrupted": False,
+            "interrupted": interrupted,
             "messages": history,
         }
+
+    def interrupt(self) -> None:
+        self._backend.interrupt()
+
+
+def _agentix_history(detail: dict | None) -> list[dict]:
+    history: list[dict] = []
+    for message in (detail or {}).get("messages", []) or []:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "")
+        content = message.get("content")
+        if role not in {"system", "user", "assistant"} or not isinstance(content, str):
+            continue
+        history.append({"role": role, "content": content})
+    return history
+
+
+def _agentix_timestamp(value, fallback: float | None = None) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str) and value:
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            pass
+    return fallback if fallback is not None else time.time()
+
+
+def _agentix_session_list_item(row: dict) -> dict:
+    metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+    return {
+        "id": str(row.get("id") or ""),
+        "title": str(metadata.get("title") or ""),
+        "preview": str(row.get("preview") or ""),
+        "started_at": _agentix_timestamp(row.get("createdAt")),
+        "message_count": int(row.get("messageCount") or 0),
+        "source": str(metadata.get("source") or "agentix"),
+    }
+
+
+def _refresh_agentix_proxy_model(session: dict | None) -> None:
+    if not session:
+        return
+    agent = session.get("agent")
+    backend = getattr(agent, "_backend", None)
+    if agent is None or backend is None:
+        return
+    try:
+        config = backend.config()
+        model = str(config.get("model") or "").strip()
+        if model:
+            agent.model = model
+            backend.model = model
+    except Exception:
+        pass
 
 
 class _SlashWorker:
@@ -610,15 +690,27 @@ def _start_agent_build(sid: str, session: dict) -> None:
         worker = None
         notify_registered = False
         try:
-            tokens = _set_session_context(key)
-            try:
-                agent = _make_agent(sid, key)
-            finally:
-                _clear_session_context(tokens)
+            if _using_agentix_backend():
+                agent = _AgentixTuiProxy(
+                    key,
+                    model=_resolve_model(),
+                    backend=current.pop("agentix_backend", None),
+                    create_session=False,
+                )
+            else:
+                tokens = _set_session_context(key)
+                try:
+                    agent = _make_agent(sid, key)
+                finally:
+                    _clear_session_context(tokens)
 
             # Session DB row deferred to first run_conversation() call.
             # pending_title applied post-first-message (see cli.exec handler).
             current["agent"] = agent
+
+            if _using_agentix_backend():
+                _emit("session.info", sid, _session_info(agent, current))
+                return
 
             try:
                 worker = _SlashWorker(key, getattr(agent, "model", _resolve_model()))
@@ -900,7 +992,7 @@ def resolve_skin() -> dict:
 
         init_skin_from_config(_load_cfg())
         skin = get_active_skin()
-        return {
+        payload = {
             "name": skin.name,
             "colors": skin.colors,
             "branding": skin.branding,
@@ -909,6 +1001,25 @@ def resolve_skin() -> dict:
             "tool_prefix": skin.tool_prefix,
             "help_header": (skin.branding or {}).get("help_header", ""),
         }
+        if _using_agentix_backend():
+            payload.update(
+                {
+                    "name": "agentix",
+                    "branding": {
+                        **(skin.branding or {}),
+                        "agent_name": "Agentix",
+                        "welcome": "Powerhouse orchestrates. Symphony plans. Pi agents execute.",
+                        "goodbye": "Agentix session closed.",
+                        "prompt_symbol": "agentix>",
+                        "response_label": "Agentix",
+                        "help_header": "Agentix commands",
+                    },
+                    "banner_logo": "AGENTIX",
+                    "banner_hero": "Powerhouse\n  |\nSymphony\n  |\nPi agents",
+                    "help_header": "Agentix commands",
+                }
+            )
+        return payload
     except Exception:
         return {}
 
@@ -1610,6 +1721,9 @@ def _session_info(agent, session: dict | None = None) -> dict:
         info["release_date"] = __release_date__
     except Exception:
         pass
+    if _using_agentix_backend():
+        info["version"] = os.environ.get("AGENTIX_VERSION", "")
+        info["release_date"] = ""
     try:
         from model_tools import get_toolset_for_tool
 
@@ -1623,13 +1737,13 @@ def _session_info(agent, session: dict | None = None) -> dict:
     try:
         from hermes_cli.banner import get_available_skills
 
-        info["skills"] = get_available_skills()
+        info["skills"] = {} if _using_agentix_backend() else get_available_skills()
     except Exception:
         pass
     try:
         from tools.mcp_tool import get_mcp_status
 
-        info["mcp_servers"] = get_mcp_status()
+        info["mcp_servers"] = [] if _using_agentix_backend() else get_mcp_status()
     except Exception:
         info["mcp_servers"] = []
     try:
@@ -1644,9 +1758,13 @@ def _session_info(agent, session: dict | None = None) -> dict:
         info["update_command"] = recommended_update_command()
     except Exception:
         pass
-    warn = _probe_credentials(agent)
-    if warn:
-        info["credential_warning"] = warn
+    if _using_agentix_backend():
+        info["update_behind"] = None
+        info["update_command"] = "agentix update"
+    if not _using_agentix_backend():
+        warn = _probe_credentials(agent)
+        if warn:
+            info["credential_warning"] = warn
     return info
 
 
@@ -2306,7 +2424,11 @@ def _reset_session_agent(sid: str, session: dict) -> dict:
 
 def _make_agent(sid: str, key: str, session_id: str | None = None):
     if _using_agentix_backend():
-        return _AgentixTuiProxy(session_id or key, model=_resolve_model())
+        return _AgentixTuiProxy(
+            session_id or key,
+            model=_resolve_model(),
+            create_session=session_id is None,
+        )
 
     from run_agent import AIAgent
     from hermes_cli.runtime_provider import resolve_runtime_provider
@@ -2402,6 +2524,10 @@ def _init_session(sid: str, key: str, agent, history: list, cols: int = 80):
         # session (stdio for Ink, JSON-RPC WS for the dashboard sidebar).
         "transport": current_transport() or _stdio_transport,
     }
+    if _using_agentix_backend():
+        _register_session_cwd(_sessions[sid])
+        _emit("session.info", sid, _session_info(agent, _sessions[sid]))
+        return
     db = _get_db()
     if db is not None:
         row = db.get_session(key)
@@ -2776,11 +2902,27 @@ def _inflight_snapshot(session: dict) -> dict | None:
 @method("session.create")
 def _(rid, params: dict) -> dict:
     sid = uuid.uuid4().hex[:8]
-    key = _new_session_key()
     cols = int(params.get("cols", 80))
     history = _coerce_seed_history(params.get("messages"))
     title = str(params.get("title") or "").strip()
-    _enable_gateway_prompts()
+    if not _using_agentix_backend():
+        _enable_gateway_prompts()
+
+    agentix_backend = None
+    if _using_agentix_backend():
+        from agentix_backend import AgentixBackend
+
+        agentix_backend = AgentixBackend(model=_resolve_model())
+        created = agentix_backend.create_session(
+            model=_resolve_model(), messages=history
+        )
+        key = str(created.get("id") or "")
+        if not key:
+            return _err(rid, 5032, "Agentix backend did not create a session")
+        if title:
+            agentix_backend.rename_session(key, title)
+    else:
+        key = _new_session_key()
 
     ready = threading.Event()
     now = time.time()
@@ -2800,7 +2942,7 @@ def _(rid, params: dict) -> dict:
         "cwd": _completion_cwd(params),
         "inflight_turn": None,
         "last_active": now,
-        "pending_title": title or None,
+        "pending_title": None if _using_agentix_backend() else (title or None),
         "running": False,
         "session_key": key,
         "show_reasoning": _load_show_reasoning(),
@@ -2808,9 +2950,11 @@ def _(rid, params: dict) -> dict:
         "tool_progress_mode": _load_tool_progress_mode(),
         "tool_started_at": {},
         "transport": current_transport() or _stdio_transport,
+        "agentix_backend": agentix_backend,
+        "agentix_title_set": bool(title) if _using_agentix_backend() else False,
     }
     _register_session_cwd(_sessions[sid])
-    db = _get_db()
+    db = _get_db() if not _using_agentix_backend() else None
     if db is not None:
         try:
             db.create_session(
@@ -2858,6 +3002,21 @@ def _(rid, params: dict) -> dict:
 
 @method("session.list")
 def _(rid, params: dict) -> dict:
+    if _using_agentix_backend():
+        try:
+            from agentix_backend import AgentixBackend
+
+            limit = max(1, min(500, int(params.get("limit", 200) or 200)))
+            rows = AgentixBackend().list_sessions()
+            sessions = [
+                _agentix_session_list_item(row)
+                for row in rows[:limit]
+                if isinstance(row, dict) and row.get("id")
+            ]
+            return _ok(rid, {"sessions": sessions})
+        except Exception as e:
+            return _err(rid, 5006, f"Agentix session list failed: {e}")
+
     db = _get_db()
     if db is None:
         return _db_unavailable_error(rid, code=5006)
@@ -2917,6 +3076,31 @@ def _(rid, params: dict) -> dict:
     null-result shape (and logged) so callers don't have to special-
     case JSON-RPC error envelopes for what is a normal "no answer".
     """
+    if _using_agentix_backend():
+        try:
+            from agentix_backend import AgentixBackend
+
+            rows = AgentixBackend().list_sessions()
+            first = next(
+                (row for row in rows if isinstance(row, dict) and row.get("id")),
+                None,
+            )
+            if first is None:
+                return _ok(rid, {"session_id": None})
+            item = _agentix_session_list_item(first)
+            return _ok(
+                rid,
+                {
+                    "session_id": item["id"],
+                    "title": item["title"],
+                    "started_at": item["started_at"],
+                    "source": item["source"],
+                },
+            )
+        except Exception:
+            logger.exception("Agentix session.most_recent failed")
+            return _ok(rid, {"session_id": None})
+
     db = _get_db()
     if db is None:
         return _ok(rid, {"session_id": None})
@@ -2951,6 +3135,52 @@ def _(rid, params: dict) -> dict:
     target = params.get("session_id", "")
     if not target:
         return _err(rid, 4006, "session_id required")
+    if _using_agentix_backend():
+        try:
+            from agentix_backend import AgentixBackend
+
+            backend = AgentixBackend(session_id=target)
+            detail = backend.get_session(target)
+            record = detail.get("session") if isinstance(detail, dict) else None
+            if not isinstance(record, dict):
+                return _err(rid, 4007, "session not found")
+            history = _agentix_history(detail)
+            metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+            model = str(metadata.get("model") or _resolve_model())
+            sid = uuid.uuid4().hex[:8]
+            agent = _AgentixTuiProxy(
+                target,
+                model=model,
+                backend=backend,
+                create_session=False,
+            )
+            _init_session(
+                sid,
+                target,
+                agent,
+                history,
+                cols=int(params.get("cols", 80)),
+            )
+            session = _sessions[sid]
+            session["created_at"] = _agentix_timestamp(record.get("createdAt"))
+            session["last_active"] = _agentix_timestamp(
+                record.get("updatedAt"), session["created_at"]
+            )
+            session["pending_title"] = metadata.get("title") or None
+            session["agentix_title_set"] = bool(metadata.get("title"))
+            return _ok(
+                rid,
+                {
+                    "session_id": sid,
+                    "resumed": target,
+                    "message_count": len(history),
+                    "messages": _history_to_messages(history),
+                    "info": _session_info(agent, session),
+                },
+            )
+        except Exception as e:
+            return _err(rid, 5000, f"Agentix resume failed: {e}")
+
     db = _get_db()
     if db is None:
         return _db_unavailable_error(rid, code=5000)
@@ -3044,6 +3274,8 @@ def _message_preview(history: list) -> str:
 
 def _session_live_title(session: dict, key: str) -> str:
     title = str(session.get("pending_title") or "").strip()
+    if _using_agentix_backend():
+        return title
     db = _get_db()
     if db is not None:
         try:
@@ -3162,9 +3394,6 @@ def _(rid, params: dict) -> dict:
     target = params.get("session_id", "")
     if not target:
         return _err(rid, 4006, "session_id required")
-    db = _get_db()
-    if db is None:
-        return _db_unavailable_error(rid, code=5036)
     # Block deletion of any session currently bound to a live TUI session
     # in this process.  The picker hides the active session anyway, but a
     # racing caller could still target it.  Snapshot via ``list(...)``
@@ -3179,6 +3408,18 @@ def _(rid, params: dict) -> dict:
     active = {s.get("session_key") for s in snapshot if s.get("session_key")}
     if target in active:
         return _err(rid, 4023, "cannot delete an active session")
+    if _using_agentix_backend():
+        try:
+            from agentix_backend import AgentixBackend
+
+            AgentixBackend().delete_session(target)
+            return _ok(rid, {"deleted": target})
+        except Exception as e:
+            return _err(rid, 5036, f"Agentix delete failed: {e}")
+
+    db = _get_db()
+    if db is None:
+        return _db_unavailable_error(rid, code=5036)
     sessions_dir = get_hermes_home() / "sessions"
     try:
         deleted = db.delete_session(target, sessions_dir=sessions_dir)
@@ -3194,6 +3435,33 @@ def _(rid, params: dict) -> dict:
     session, err = _sess_nowait(params, rid)
     if err:
         return err
+    if _using_agentix_backend():
+        try:
+            agent = session.get("agent")
+            backend = getattr(agent, "_backend", None)
+            if backend is None:
+                from agentix_backend import AgentixBackend
+
+                backend = AgentixBackend(session_id=session["session_key"])
+            key = session["session_key"]
+            if "title" not in params:
+                detail = backend.get_session(key)
+                record = detail.get("session") if isinstance(detail, dict) else {}
+                metadata = record.get("metadata") if isinstance(record, dict) else {}
+                title = str(metadata.get("title") or session.get("pending_title") or "")
+                return _ok(rid, {"title": title, "session_key": key})
+            title = str(params.get("title") or "").strip()
+            if not title:
+                return _err(rid, 4021, "title required")
+            result = backend.rename_session(key, title)
+            if isinstance(result, dict) and result.get("ok") is False:
+                return _err(rid, 5007, str(result.get("error") or "rename failed"))
+            session["pending_title"] = None
+            session["agentix_title_set"] = True
+            return _ok(rid, {"pending": False, "title": title})
+        except Exception as e:
+            return _err(rid, 5007, f"Agentix title failed: {e}")
+
     db = _get_db()
     if db is None:
         return _db_unavailable_error(rid, code=5007)
@@ -3274,6 +3542,44 @@ def _(rid, params: dict) -> dict:
     if err:
         return err
 
+    if _using_agentix_backend():
+        try:
+            agent = session.get("agent")
+            backend = getattr(agent, "_backend", None)
+            if backend is None:
+                from agentix_backend import AgentixBackend
+
+                backend = AgentixBackend(session_id=session["session_key"])
+            detail = backend.get_session(session["session_key"])
+            record = detail.get("session") if isinstance(detail, dict) else {}
+            metadata = record.get("metadata") if isinstance(record, dict) else {}
+            created = datetime.fromtimestamp(
+                _agentix_timestamp(record.get("createdAt"))
+            )
+            updated = datetime.fromtimestamp(
+                _agentix_timestamp(record.get("updatedAt"), created.timestamp())
+            )
+            lines = [
+                "Agentix TUI Status",
+                "",
+                f"Session ID: {session['session_key']}",
+                f"Workspace: {_session_cwd(session)}",
+            ]
+            title = str(metadata.get("title") or "").strip()
+            if title:
+                lines.append(f"Title: {title}")
+            lines.extend(
+                [
+                    f"Model: {getattr(agent, 'model', '(unknown)')} (agentix)",
+                    f"Created: {created.strftime('%Y-%m-%d %H:%M')}",
+                    f"Last Activity: {updated.strftime('%Y-%m-%d %H:%M')}",
+                    f"Agent Running: {'Yes' if session.get('running') else 'No'}",
+                ]
+            )
+            return _ok(rid, {"output": "\n".join(lines)})
+        except Exception as e:
+            return _err(rid, 5007, f"Agentix status failed: {e}")
+
     from hermes_constants import display_hermes_home
 
     key = session.get("session_key") or params.get("session_id") or ""
@@ -3330,6 +3636,24 @@ def _(rid, params: dict) -> dict:
     session, err = _sess_nowait(params, rid)
     if err:
         return err
+    if _using_agentix_backend():
+        try:
+            agent = session.get("agent")
+            backend = getattr(agent, "_backend", None)
+            if backend is None:
+                from agentix_backend import AgentixBackend
+
+                backend = AgentixBackend(session_id=session["session_key"])
+            history = _agentix_history(backend.get_session(session["session_key"]))
+            with session["history_lock"]:
+                session["history"] = history
+            return _ok(
+                rid,
+                {"count": len(history), "messages": _history_to_messages(history)},
+            )
+        except Exception as e:
+            return _err(rid, 5008, f"Agentix history failed: {e}")
+
     history = list(session.get("history", []))
     db = _get_db()
     if db is not None and session.get("session_key"):
@@ -3362,6 +3686,28 @@ def _(rid, params: dict) -> dict:
         return _err(
             rid, 4009, "session busy — /interrupt the current turn before /undo"
         )
+    if _using_agentix_backend():
+        try:
+            agent = session.get("agent")
+            backend = getattr(agent, "_backend", None)
+            if backend is None:
+                from agentix_backend import AgentixBackend
+
+                backend = AgentixBackend(session_id=session["session_key"])
+            result = backend.undo_session(session["session_key"])
+            history = _agentix_history(result)
+            with session["history_lock"]:
+                session["history"] = history
+                session["history_version"] = int(session.get("history_version", 0)) + 1
+            return _ok(
+                rid,
+                {
+                    "removed": int(result.get("removed") or 0),
+                    "messages": _history_to_messages(history),
+                },
+            )
+        except Exception as e:
+            return _err(rid, 5008, f"Agentix undo failed: {e}")
     removed = 0
     with session["history_lock"]:
         history = session.get("history", [])
@@ -3387,6 +3733,43 @@ def _(rid, params: dict) -> dict:
         )
     sid = params.get("session_id", "")
     focus_topic = str(params.get("focus_topic", "") or "").strip()
+    if _using_agentix_backend():
+        try:
+            agent = session.get("agent")
+            backend = getattr(agent, "_backend", None)
+            if backend is None:
+                from agentix_backend import AgentixBackend
+
+                backend = AgentixBackend(session_id=session["session_key"])
+            result = backend.compact_session(session["session_key"], focus_topic)
+            history = _agentix_history(result)
+            with session["history_lock"]:
+                session["history"] = history
+                session["history_version"] = int(session.get("history_version", 0)) + 1
+            removed = int(result.get("removed") or 0)
+            summary_text = str(result.get("summary") or "")
+            return _ok(
+                rid,
+                {
+                    "status": result.get("status") or "compressed",
+                    "removed": removed,
+                    "before_messages": int(result.get("beforeMessages") or len(history) + removed),
+                    "after_messages": int(result.get("afterMessages") or len(history)),
+                    "summary": {
+                        "headline": (
+                            "Session history compressed"
+                            if removed > 0
+                            else "Session is already compact"
+                        ),
+                        "noop": removed <= 0,
+                        "note": summary_text or None,
+                    },
+                    "messages": _history_to_messages(history),
+                    "info": _session_info(agent, session),
+                },
+            )
+        except Exception as e:
+            return _err(rid, 5005, f"Agentix compaction failed: {e}")
     try:
         from agent.manual_compression_feedback import summarize_manual_compression
         from agent.model_metadata import estimate_request_tokens_rough
@@ -3479,15 +3862,25 @@ def _(rid, params: dict) -> dict:
         return err
     import time as _time
 
+    prefix = "agentix" if _using_agentix_backend() else "hermes"
     filename = os.path.abspath(
-        f"hermes_conversation_{_time.strftime('%Y%m%d_%H%M%S')}.json"
+        f"{prefix}_conversation_{_time.strftime('%Y%m%d_%H%M%S')}.json"
     )
     try:
+        messages = session.get("history", [])
+        if _using_agentix_backend():
+            agent = session.get("agent")
+            backend = getattr(agent, "_backend", None)
+            if backend is None:
+                from agentix_backend import AgentixBackend
+
+                backend = AgentixBackend(session_id=session["session_key"])
+            messages = _agentix_history(backend.get_session(session["session_key"]))
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(
                 {
                     "model": getattr(session["agent"], "model", ""),
-                    "messages": session.get("history", []),
+                    "messages": messages,
                 },
                 f,
                 indent=2,
@@ -3504,6 +3897,8 @@ def _(rid, params: dict) -> dict:
     session = _sessions.pop(sid, None)
     if not session:
         return _ok(rid, {"closed": False})
+    if _using_agentix_backend():
+        return _ok(rid, {"closed": True})
     _finalize_session(session)
     try:
         from tools.approval import unregister_gateway_notify
@@ -3531,6 +3926,40 @@ def _(rid, params: dict) -> dict:
     session, err = _sess(params, rid)
     if err:
         return err
+    if _using_agentix_backend():
+        try:
+            old_key = session["session_key"]
+            branch_name = str(params.get("name") or "").strip()
+            agent = session.get("agent")
+            backend = getattr(agent, "_backend", None)
+            if backend is None:
+                from agentix_backend import AgentixBackend
+
+                backend = AgentixBackend(session_id=old_key)
+            result = backend.branch_session(old_key, branch_name)
+            new_key = str(result.get("id") or "")
+            if not new_key:
+                return _err(rid, 5008, "Agentix branch did not return a session id")
+            history = _agentix_history(result)
+            new_sid = uuid.uuid4().hex[:8]
+            new_agent = _make_agent(new_sid, new_key, session_id=new_key)
+            _init_session(
+                new_sid,
+                new_key,
+                new_agent,
+                history,
+                cols=session.get("cols", 80),
+            )
+            return _ok(
+                rid,
+                {
+                    "session_id": new_sid,
+                    "title": str(result.get("title") or branch_name or "Branch"),
+                    "parent": old_key,
+                },
+            )
+        except Exception as e:
+            return _err(rid, 5008, f"Agentix branch failed: {e}")
     db = _get_db()
     if db is None:
         return _db_unavailable_error(rid, code=5008)
@@ -3611,6 +4040,42 @@ def _(rid, params: dict) -> dict:
 
 @method("delegation.status")
 def _(rid, params: dict) -> dict:
+    if _using_agentix_backend():
+        try:
+            from agentix_backend import AgentixBackend
+
+            active = []
+            for task in AgentixBackend().list_tasks():
+                if not isinstance(task, dict) or task.get("status") not in {
+                    "queued", "running", "awaiting-approval"
+                }:
+                    continue
+                active.append(
+                    {
+                        "subagent_id": str(task.get("id") or ""),
+                        "parent_id": task.get("planId"),
+                        "goal": str(task.get("kind") or "Pi task"),
+                        "status": str(task.get("status") or "queued"),
+                        "depth": 1,
+                        "model": None,
+                        "started_at": _agentix_timestamp(
+                            task.get("startedAt") or task.get("createdAt")
+                        ),
+                        "tool_count": 0,
+                    }
+                )
+            return _ok(
+                rid,
+                {
+                    "active": active,
+                    "paused": False,
+                    "max_spawn_depth": None,
+                    "max_concurrent_children": None,
+                    "backend": "agentix",
+                },
+            )
+        except Exception as exc:
+            return _err(rid, 5000, f"Agentix delegation status failed: {exc}")
     from tools.delegate_tool import (
         is_spawn_paused,
         list_active_subagents,
@@ -3631,6 +4096,12 @@ def _(rid, params: dict) -> dict:
 
 @method("delegation.pause")
 def _(rid, params: dict) -> dict:
+    if _using_agentix_backend():
+        return _err(
+            rid,
+            5010,
+            "Powerhouse does not yet expose a global delegation pause; cancel individual tasks instead.",
+        )
     from tools.delegate_tool import set_spawn_paused
 
     paused = bool(params.get("paused", True))
@@ -3639,11 +4110,26 @@ def _(rid, params: dict) -> dict:
 
 @method("subagent.interrupt")
 def _(rid, params: dict) -> dict:
-    from tools.delegate_tool import interrupt_subagent
-
     subagent_id = str(params.get("subagent_id") or "").strip()
     if not subagent_id:
         return _err(rid, 4000, "subagent_id required")
+    if _using_agentix_backend():
+        try:
+            from agentix_backend import AgentixBackend
+
+            result = AgentixBackend().control_task(subagent_id, "cancel")
+            return _ok(
+                rid,
+                {
+                    "found": bool(result.get("ok")),
+                    "subagent_id": subagent_id,
+                    "result": result,
+                },
+            )
+        except Exception as exc:
+            return _err(rid, 5000, f"Agentix task cancellation failed: {exc}")
+    from tools.delegate_tool import interrupt_subagent
+
     ok = interrupt_subagent(subagent_id)
     return _ok(rid, {"found": ok, "subagent_id": subagent_id})
 
@@ -3713,6 +4199,32 @@ def _read_spawn_tree_index(session_dir) -> list[dict]:
 @method("spawn_tree.save")
 def _(rid, params: dict) -> dict:
     session_id = str(params.get("session_id") or "").strip()
+    if _using_agentix_backend():
+        try:
+            from agentix_backend import AgentixBackend
+
+            session = _sessions.get(session_id)
+            backend_session_id = (
+                session.get("session_key") if session else session_id
+            )
+            plans = [
+                plan
+                for plan in AgentixBackend().list_plans()
+                if isinstance(plan, dict)
+                and str(plan.get("sessionId") or "") == backend_session_id
+            ]
+            plans.sort(key=lambda plan: str(plan.get("updatedAt") or ""), reverse=True)
+            plan_id = str(plans[0].get("id") or "") if plans else ""
+            return _ok(
+                rid,
+                {
+                    "path": f"agentix-plan://{plan_id}" if plan_id else f"agentix-session://{backend_session_id}",
+                    "session_id": backend_session_id,
+                    "backend": "agentix",
+                },
+            )
+        except Exception as exc:
+            return _err(rid, 5000, f"Agentix plan snapshot failed: {exc}")
     subagents = params.get("subagents") or []
     if not isinstance(subagents, list) or not subagents:
         return _err(rid, 4000, "subagents list required")
@@ -3758,6 +4270,34 @@ def _(rid, params: dict) -> dict:
     session_id = str(params.get("session_id") or "").strip()
     limit = int(params.get("limit") or 50)
     cross_session = bool(params.get("cross_session"))
+
+    if _using_agentix_backend():
+        try:
+            from agentix_backend import AgentixBackend
+
+            session = _sessions.get(session_id)
+            backend_session_id = session.get("session_key") if session else session_id
+            plans = AgentixBackend().list_plans()
+            entries = []
+            for plan in plans:
+                if not isinstance(plan, dict):
+                    continue
+                if not cross_session and str(plan.get("sessionId") or "") != backend_session_id:
+                    continue
+                entries.append(
+                    {
+                        "path": f"agentix-plan://{plan.get('id')}",
+                        "session_id": str(plan.get("sessionId") or ""),
+                        "started_at": _agentix_timestamp(plan.get("createdAt")),
+                        "finished_at": _agentix_timestamp(plan.get("updatedAt")),
+                        "label": str(plan.get("stimulus") or "Symphony plan"),
+                        "count": int(plan.get("taskCount") or plan.get("stepCount") or 0),
+                    }
+                )
+            entries.sort(key=lambda entry: entry.get("finished_at") or 0, reverse=True)
+            return _ok(rid, {"entries": entries[: max(1, min(limit, 200))]})
+        except Exception as exc:
+            return _err(rid, 5000, f"Agentix plan history failed: {exc}")
 
     if cross_session:
         root = _spawn_trees_root()
@@ -3812,6 +4352,48 @@ def _(rid, params: dict) -> dict:
     if not raw_path:
         return _err(rid, 4000, "path required")
 
+    if _using_agentix_backend():
+        prefix = "agentix-plan://"
+        if not raw_path.startswith(prefix):
+            return _err(rid, 4030, "Agentix replay paths must reference a Symphony plan")
+        plan_id = raw_path[len(prefix):].strip()
+        if not plan_id:
+            return _err(rid, 4000, "Agentix plan id required")
+        try:
+            from agentix_backend import AgentixBackend
+
+            detail = AgentixBackend().get_plan(plan_id)
+            execution = detail.get("execution") if isinstance(detail, dict) else {}
+            tasks = detail.get("tasks") if isinstance(detail, dict) else []
+            subagents = []
+            for task in tasks or []:
+                if not isinstance(task, dict):
+                    continue
+                subagents.append(
+                    {
+                        "subagent_id": str(task.get("id") or ""),
+                        "parent_id": plan_id,
+                        "goal": str(task.get("kind") or task.get("stepId") or "Pi task"),
+                        "status": str(task.get("status") or "unknown"),
+                        "depth": 1,
+                        "started_at": _agentix_timestamp(
+                            task.get("startedAt") or task.get("createdAt")
+                        ),
+                    }
+                )
+            return _ok(
+                rid,
+                {
+                    "session_id": str((execution or {}).get("sessionId") or ""),
+                    "started_at": _agentix_timestamp((execution or {}).get("createdAt")),
+                    "finished_at": _agentix_timestamp((execution or {}).get("updatedAt")),
+                    "label": str((execution or {}).get("stimulus") or "Symphony plan"),
+                    "subagents": subagents,
+                },
+            )
+        except Exception as exc:
+            return _err(rid, 5000, f"Agentix plan replay failed: {exc}")
+
     # Reject paths escaping the spawn-trees root.
     root = _spawn_trees_root().resolve()
     try:
@@ -3840,6 +4422,12 @@ def _(rid, params: dict) -> dict:
     text = (params.get("text") or "").strip()
     if not text:
         return _err(rid, 4002, "text is required")
+    if _using_agentix_backend():
+        return _err(
+            rid,
+            5010,
+            "Mid-turn steering is unavailable until Powerhouse exposes an approval-safe steering queue.",
+        )
     session, err = _sess_nowait(params, rid)
     if err:
         return err
@@ -3877,6 +4465,24 @@ def _(rid, params: dict) -> dict:
     # or fallback moved the session transport to stdio.
     if (t := current_transport()) is not None:
         session["transport"] = t
+    agentix_truncated_history = None
+    if truncate_user_ordinal is not None and _using_agentix_backend():
+        try:
+            ordinal = int(truncate_user_ordinal)
+        except (TypeError, ValueError):
+            return _err(rid, 4004, "truncate_before_user_ordinal must be an integer")
+        backend = getattr(session.get("agent"), "_backend", None)
+        if backend is None:
+            return _err(rid, 5000, "Agentix backend unavailable for history truncation")
+        try:
+            result = backend.truncate_session_before_user_ordinal(
+                session["session_key"], ordinal
+            )
+        except Exception as exc:
+            return _err(rid, 5008, f"Agentix history truncation failed: {exc}")
+        if not result.get("ok"):
+            return _err(rid, 4018, str(result.get("error") or "history truncation failed"))
+        agentix_truncated_history = _agentix_history(result)
     with session["history_lock"]:
         if session.get("running"):
             return _err(rid, 4009, "session busy")
@@ -3886,13 +4492,16 @@ def _(rid, params: dict) -> dict:
             except (TypeError, ValueError):
                 return _err(rid, 4004, "truncate_before_user_ordinal must be an integer")
             history = session.get("history", [])
-            user_indices = [i for i, m in enumerate(history) if m.get("role") == "user"]
-            if ordinal >= len(user_indices):
-                return _err(rid, 4018, "target user message is no longer in session history")
-            truncated = history[: user_indices[ordinal]]
+            if agentix_truncated_history is not None:
+                truncated = agentix_truncated_history
+            else:
+                user_indices = [i for i, m in enumerate(history) if m.get("role") == "user"]
+                if ordinal >= len(user_indices):
+                    return _err(rid, 4018, "target user message is no longer in session history")
+                truncated = history[: user_indices[ordinal]]
             session["history"] = truncated
             session["history_version"] = int(session.get("history_version", 0)) + 1
-            if (db := _get_db()) is not None:
+            if not _using_agentix_backend() and (db := _get_db()) is not None:
                 try:
                     db.replace_messages(session["session_key"], truncated)
                 except Exception as exc:
@@ -4244,7 +4853,12 @@ def _run_prompt_submit(rid, sid: str, session: dict, text: Any) -> None:
             # ("✓ Goal achieved" / "⏸ budget exhausted") is surfaced as
             # a system line so the user sees progress regardless of
             # outcome. Mirrors gateway/run._post_turn_goal_continuation.
-            if status == "complete" and isinstance(raw, str) and raw.strip():
+            if (
+                not _using_agentix_backend()
+                and status == "complete"
+                and isinstance(raw, str)
+                and raw.strip()
+            ):
                 try:
                     from hermes_cli.goals import GoalManager
 
@@ -4282,9 +4896,22 @@ def _run_prompt_submit(rid, sid: str, session: dict, text: Any) -> None:
                         file=sys.stderr,
                     )
 
-            # Apply pending_title now that the DB row exists.
+            # Apply titles through the backend that owns the active session.
             _pending = session.get("pending_title")
-            if _pending and status == "complete":
+            if (
+                _using_agentix_backend()
+                and status == "complete"
+                and not session.get("agentix_title_set")
+            ):
+                try:
+                    _title = str(_pending or text or "").strip().splitlines()[0][:80]
+                    if _title:
+                        agent._backend.rename_session(session["session_key"], _title)
+                        session["pending_title"] = None
+                        session["agentix_title_set"] = True
+                except Exception:
+                    pass
+            elif _pending and status == "complete":
                 _pdb = _get_db()
                 if _pdb:
                     _session_key = session.get("session_key") or sid
@@ -4304,7 +4931,8 @@ def _run_prompt_submit(rid, sid: str, session: dict, text: Any) -> None:
                         pass
 
             if (
-                status == "complete"
+                not _using_agentix_backend()
+                and status == "complete"
                 and isinstance(raw, str)
                 and raw.strip()
                 and isinstance(text, str)
@@ -4583,6 +5211,71 @@ def _(rid, params: dict) -> dict:
         return _err(rid, 5027, str(e))
 
 
+def _start_agentix_background_execution(
+    session: dict,
+    *,
+    prompt: str,
+    parent: str,
+    task_id: str,
+    complete_event: str,
+    progress_event: str | None = None,
+) -> None:
+    """Run hidden TUI work through a separate Powerhouse-owned session."""
+
+    def run() -> None:
+        try:
+            from agentix_backend import AgentixBackend
+
+            parent_backend = getattr(session.get("agent"), "_backend", None)
+            branch = None
+            if parent_backend is not None:
+                branch = parent_backend.branch_session(
+                    session["session_key"], f"Background task {task_id}"
+                )
+            if not isinstance(branch, dict) or not branch.get("ok"):
+                creator = parent_backend or AgentixBackend()
+                branch = creator.create_session(
+                    model=getattr(session.get("agent"), "model", None),
+                    metadata={
+                        "parentSessionId": session.get("session_key"),
+                        "tuiBackgroundTaskId": task_id,
+                    },
+                    messages=_agentix_history({"messages": session.get("history", [])}),
+                )
+            branch_id = str(branch.get("id") or "")
+            if not branch_id:
+                raise RuntimeError("Powerhouse did not create a background session")
+            if progress_event:
+                _emit(
+                    progress_event,
+                    parent,
+                    {"task_id": task_id, "text": "Starting Powerhouse background task"},
+                )
+            backend = AgentixBackend(
+                model=getattr(session.get("agent"), "model", None),
+                session_id=branch_id,
+            )
+            response = backend.execute(prompt, session_id=branch_id)
+            _emit(
+                complete_event,
+                parent,
+                {
+                    "task_id": task_id,
+                    "text": response,
+                    "session_id": backend.session_id or branch_id,
+                    "task_ids": backend.last_result.get("taskIds") or [],
+                },
+            )
+        except Exception as exc:
+            _emit(
+                complete_event,
+                parent,
+                {"task_id": task_id, "text": f"error: {exc}"},
+            )
+
+    threading.Thread(target=run, daemon=True).start()
+
+
 @method("prompt.background")
 def _(rid, params: dict) -> dict:
     session, err = _sess(params, rid)
@@ -4592,6 +5285,16 @@ def _(rid, params: dict) -> dict:
     if not text:
         return _err(rid, 4012, "text required")
     task_id = f"bg_{uuid.uuid4().hex[:6]}"
+
+    if _using_agentix_backend():
+        _start_agentix_background_execution(
+            session,
+            prompt=text,
+            parent=parent,
+            task_id=task_id,
+            complete_event="background.complete",
+        )
+        return _ok(rid, {"task_id": task_id, "backend": "agentix"})
 
     def run():
         session_tokens = _set_session_context(task_id)
@@ -4679,6 +5382,17 @@ def _(rid, params: dict) -> dict:
         if line
     )
 
+    if _using_agentix_backend():
+        _start_agentix_background_execution(
+            session,
+            prompt=prompt,
+            parent=parent,
+            task_id=task_id,
+            complete_event="preview.restart.complete",
+            progress_event="preview.restart.progress",
+        )
+        return _ok(rid, {"task_id": task_id, "backend": "agentix"})
+
     def run():
         session_tokens = _set_session_context(task_id)
         try:
@@ -4765,6 +5479,31 @@ def _(rid, params: dict) -> dict:
     session, err = _sess(params, rid)
     if err:
         return err
+    if _using_agentix_backend():
+        try:
+            from agentix_backend import AgentixBackend
+
+            backend = getattr(session.get("agent"), "_backend", None) or AgentixBackend()
+            approvals = [
+                task
+                for task in backend.list_approvals()
+                if isinstance(task, dict)
+                and str(task.get("sessionId") or "") == session.get("session_key")
+            ]
+            if not approvals:
+                return _err(rid, 4009, "no pending Powerhouse approval for this session")
+            selected = approvals if params.get("all") else approvals[:1]
+            choice = str(params.get("choice") or "deny").lower()
+            results = []
+            for task in selected:
+                task_id = str(task.get("id") or "")
+                if choice in {"approve", "allow", "yes", "once", "always"}:
+                    results.append(backend.approve(task_id))
+                else:
+                    results.append(backend.reject(task_id, f"Rejected from Agentix TUI ({choice})"))
+            return _ok(rid, {"resolved": len(results), "results": results})
+        except Exception as exc:
+            return _err(rid, 5004, f"Agentix approval decision failed: {exc}")
     try:
         from tools.approval import resolve_gateway_approval
 
@@ -4791,6 +5530,23 @@ def _(rid, params: dict) -> dict:
     session = _sessions.get(params.get("session_id", ""))
 
     if key == "model":
+        if _using_agentix_backend():
+            if session and session.get("running"):
+                return _err(
+                    rid, 4009, "session busy - interrupt the current turn before switching models"
+                )
+            try:
+                from hermes_cli.agentix_commands import dispatch_tui_command
+
+                output = dispatch_tui_command(
+                    f"/model {value}",
+                    session.get("session_key") if session else None,
+                )
+                _refresh_agentix_proxy_model(session)
+                model = str(value).split(maxsplit=1)[0] if str(value).strip() else ""
+                return _ok(rid, {"key": key, "value": model, "warning": "", "output": output})
+            except Exception as e:
+                return _err(rid, 5001, f"Agentix model switch failed: {e}")
         try:
             if not value:
                 return _err(rid, 4002, "model value required")
@@ -5323,6 +6079,15 @@ def _(rid, params: dict) -> dict:
 
 @method("setup.status")
 def _(rid, params: dict) -> dict:
+    if _using_agentix_backend():
+        try:
+            from agentix_backend import AgentixBackend
+
+            config = AgentixBackend().config()
+            configured = bool(config.get("provider") and config.get("model"))
+            return _ok(rid, {"provider_configured": configured})
+        except Exception as e:
+            return _err(rid, 5016, f"Agentix setup status failed: {e}")
     try:
         from hermes_cli.main import _has_any_provider_configured
 
@@ -5342,6 +6107,32 @@ def _(rid, params: dict) -> dict:
     when the user's configured model cannot actually be served, so UIs can
     surface onboarding before the user submits a doomed prompt.
     """
+    if _using_agentix_backend():
+        try:
+            from agentix_backend import AgentixBackend
+
+            config = AgentixBackend().config()
+            provider = str(config.get("provider") or "")
+            model = str(config.get("model") or "")
+            local_provider = provider.lower() in {"local", "ollama", "lmstudio"}
+            key_configured = bool(config.get("llmApiKeyConfigured")) or local_provider
+            return _ok(
+                rid,
+                {
+                    "ok": bool(provider and model and key_configured),
+                    "provider": provider or None,
+                    "model": model or None,
+                    "source": "agentix-backend",
+                    "error": None
+                    if key_configured
+                    else f"No usable credentials found for {provider or 'provider'}.",
+                },
+            )
+        except Exception as e:
+            return _ok(
+                rid, {"ok": False, "error": f"Agentix runtime check failed: {e}"}
+            )
+
     try:
         from hermes_cli.runtime_provider import resolve_runtime_provider
         from hermes_cli.auth import has_usable_secret
@@ -5405,6 +6196,24 @@ def _(rid, params: dict) -> dict:
 
 @method("process.stop")
 def _(rid, params: dict) -> dict:
+    if _using_agentix_backend():
+        try:
+            from agentix_backend import AgentixBackend
+
+            backend = AgentixBackend()
+            killed = 0
+            for task in backend.list_tasks() or []:
+                if str(task.get("status") or "") in {
+                    "queued",
+                    "running",
+                    "awaiting-approval",
+                }:
+                    result = backend.control_task(str(task.get("id") or ""), "cancel")
+                    if result.get("ok"):
+                        killed += 1
+            return _ok(rid, {"killed": killed})
+        except Exception as e:
+            return _err(rid, 5010, f"Agentix process cancellation failed: {e}")
     try:
         from tools.process_registry import process_registry
 
@@ -5415,6 +6224,12 @@ def _(rid, params: dict) -> dict:
 
 @method("reload.mcp")
 def _(rid, params: dict) -> dict:
+    if _using_agentix_backend():
+        return _err(
+            rid,
+            4018,
+            "Agentix MCP reload is unavailable until MCP servers are registered with the Powerhouse tool registry.",
+        )
     session = _sessions.get(params.get("session_id", ""))
     try:
         # Gate: /reload-mcp invalidates the prompt cache for this session.
@@ -5505,6 +6320,14 @@ def _(rid, params: dict) -> dict:
 
 @method("reload.env")
 def _(rid, params: dict) -> dict:
+    if _using_agentix_backend():
+        try:
+            from agentix_backend import AgentixBackend
+
+            AgentixBackend().config()
+            return _ok(rid, {"updated": 1, "source": "Agentix workspace config"})
+        except Exception as e:
+            return _err(rid, 5015, f"Agentix config reload failed: {e}")
     """Re-read ``~/.hermes/.env`` into the gateway process via
     ``hermes_cli.config.reload_env``, matching classic CLI's ``/reload``
     handler.  Newly added API keys take effect on the next agent call
@@ -5684,6 +6507,24 @@ def _(rid, params: dict) -> dict:
     argv = params.get("argv", [])
     if not isinstance(argv, list) or not all(isinstance(x, str) for x in argv):
         return _err(rid, 4003, "argv must be list[str]")
+    if _using_agentix_backend():
+        if not argv:
+            return _ok(
+                rid,
+                {
+                    "blocked": True,
+                    "hint": "Use the Agentix TUI prompt or `agentix --help` in another terminal.",
+                    "code": -1,
+                    "output": "",
+                },
+            )
+        try:
+            from hermes_cli.agentix_commands import dispatch_tui_command
+
+            output = dispatch_tui_command("/" + " ".join(argv), None)
+            return _ok(rid, {"blocked": False, "code": 0, "output": output})
+        except Exception as e:
+            return _err(rid, 5017, f"Agentix command failed: {e}")
     hint = _cli_exec_blocked(argv)
     if hint:
         return _ok(rid, {"blocked": True, "hint": hint, "code": -1, "output": ""})
@@ -5744,6 +6585,52 @@ def _(rid, params: dict) -> dict:
     if resolved != name:
         name = resolved
     session = _sessions.get(params.get("session_id", ""))
+
+    if _using_agentix_backend():
+        if name in {"queue", "q", "steer"}:
+            if not arg.strip():
+                return _err(rid, 4004, f"usage: /{name} <prompt>")
+            return _ok(rid, {"type": "send", "message": arg.strip()})
+        if name == "retry":
+            if not session:
+                return _err(rid, 4001, "no active Agentix session to retry")
+            if session.get("running"):
+                return _err(
+                    rid, 4009, "session busy - interrupt the current turn before /retry"
+                )
+            try:
+                agent = session.get("agent")
+                backend = getattr(agent, "_backend", None)
+                if backend is None:
+                    from agentix_backend import AgentixBackend
+
+                    backend = AgentixBackend(session_id=session["session_key"])
+                history = _agentix_history(backend.get_session(session["session_key"]))
+                last_user = next(
+                    (
+                        str(message.get("content") or "")
+                        for message in reversed(history)
+                        if message.get("role") == "user"
+                    ),
+                    "",
+                )
+                if not last_user:
+                    return _err(rid, 4018, "no previous Agentix user message to retry")
+                return _ok(rid, {"type": "send", "message": last_user})
+            except Exception as e:
+                return _err(rid, 5008, f"Agentix retry failed: {e}")
+        try:
+            from hermes_cli.agentix_commands import dispatch_tui_command
+
+            output = dispatch_tui_command(
+                f"/{name} {arg}".rstrip(),
+                session.get("session_key") if session else None,
+            )
+            if name == "model":
+                _refresh_agentix_proxy_model(session)
+            return _ok(rid, {"type": "exec", "output": output})
+        except Exception as e:
+            return _err(rid, 5030, f"Agentix command failed: {e}")
 
     qcmds = _load_cfg().get("quick_commands", {})
     if name in qcmds:
@@ -6492,6 +7379,56 @@ def _(rid, params: dict) -> dict:
     if not text.startswith("/"):
         return _ok(rid, {"items": []})
 
+    if _using_agentix_backend():
+        commands = {
+            "help": "Show Agentix TUI commands",
+            "new": "Start a Powerhouse session",
+            "clear": "Clear the visible transcript",
+            "resume": "Resume a Powerhouse session",
+            "sessions": "List Powerhouse sessions",
+            "title": "Rename the current session",
+            "history": "Show persisted Agentix history",
+            "undo": "Remove the latest completed turn",
+            "compress": "Compact older history through the configured model",
+            "branch": "Create a Powerhouse session branch",
+            "retry": "Retry the latest user prompt",
+            "queue": "Queue a prompt",
+            "steer": "Send a follow-up prompt",
+            "stop": "Interrupt active Agentix work",
+            "approve": "Approve a Powerhouse task",
+            "deny": "Reject a Powerhouse task",
+            "status": "Show Agentix runtime status",
+            "usage": "Show backend usage",
+            "config": "Show Agentix configuration",
+            "model": "Open model selection",
+            "tools": "List Pi tools",
+            "skills": "Manage Powerhouse-integrated skills",
+            "reload-skills": "Rescan Agentix skills",
+            "memory": "Inspect Agentix memory",
+            "cron": "Manage scheduled jobs",
+            "gateway": "Manage Agentix gateways",
+            "plans": "List Symphony plans",
+            "plan": "Inspect or control a Symphony plan",
+            "tasks": "List Powerhouse tasks",
+            "task": "Inspect or control a task",
+            "approvals": "List pending approvals",
+            "audit": "Inspect Agentix audit records",
+            "healing": "Inspect bounded self-healing",
+            "logs": "Show backend logs",
+            "update": "Show the safe update path",
+            "version": "Show Agentix version",
+            "copy": "Copy the latest response",
+            "paste": "Paste clipboard content",
+            "image": "Attach an image",
+            "quit": "Exit Agentix",
+        }
+        command_prefix = text[1:].split(maxsplit=1)[0].lower()
+        items = [
+            {"text": f"/{name}", "display": f"/{name}", "meta": description}
+            for name, description in commands.items()
+            if name.startswith(command_prefix)
+        ]
+        return _ok(rid, {"items": items[:30], "replace_from": 1})
     try:
         from hermes_cli.commands import SlashCommandCompleter
         from prompt_toolkit.document import Document
@@ -6572,16 +7509,29 @@ def _(rid, params: dict) -> dict:
 
         session = _sessions.get(params.get("session_id", ""))
         agent = session.get("agent") if session else None
+        agentix_config = {}
+        if _using_agentix_backend():
+            from agentix_backend import AgentixBackend
+
+            agentix_config = AgentixBackend().config()
         # Layer agent-session state on top of disk config — once an agent
         # is spawned, IT owns the live provider/model/base_url. Empty
         # agent attributes must NOT clobber disk config (with_overrides
         # is truthy-only).
         ctx = load_picker_context().with_overrides(
-            current_provider=getattr(agent, "provider", "") if agent else "",
-            current_model=(
-                (getattr(agent, "model", "") if agent else "") or _resolve_model()
+            current_provider=(
+                str(agentix_config.get("provider") or "")
+                or (getattr(agent, "provider", "") if agent else "")
             ),
-            current_base_url=getattr(agent, "base_url", "") if agent else "",
+            current_model=(
+                str(agentix_config.get("model") or "")
+                or (getattr(agent, "model", "") if agent else "")
+                or _resolve_model()
+            ),
+            current_base_url=(
+                str(agentix_config.get("baseUrl") or "")
+                or (getattr(agent, "base_url", "") if agent else "")
+            ),
         )
         # picker_hints + canonical_order produce the TUI's required shape:
         # `authenticated`/`auth_type`/`key_env`/`warning` per row, in
@@ -6599,6 +7549,23 @@ def _(rid, params: dict) -> dict:
             pricing=True,
             max_models=50,
         )
+        if _using_agentix_backend():
+            current_provider = str(agentix_config.get("provider") or "").lower()
+            aliases = (
+                {"kilo", "kilocode"}
+                if current_provider in {"kilo", "kilocode"}
+                else {current_provider}
+            )
+            configured = bool(agentix_config.get("llmApiKeyConfigured"))
+            for provider in payload.get("providers", []):
+                slug = str(provider.get("slug") or "").lower()
+                if slug in aliases:
+                    provider["is_current"] = True
+                    provider["authenticated"] = configured or slug in {
+                        "local",
+                        "ollama",
+                        "lmstudio",
+                    }
         return _ok(rid, payload)
     except Exception as e:
         return _err(rid, 5033, str(e))
@@ -6625,7 +7592,7 @@ def _(rid, params: dict) -> dict:
         if not slug or not api_key:
             return _err(rid, 4001, "slug and api_key are required")
 
-        if is_managed():
+        if not _using_agentix_backend() and is_managed():
             return _err(rid, 4006, "managed install — credentials are read-only")
 
         pconfig = PROVIDER_REGISTRY.get(slug)
@@ -6636,17 +7603,25 @@ def _(rid, params: dict) -> dict:
                 rid,
                 4003,
                 f"{pconfig.name} uses {pconfig.auth_type} auth — "
-                f"run `hermes model` to configure",
+                f"run `{'agentix' if _using_agentix_backend() else 'hermes'} model` to configure",
             )
         if not pconfig.api_key_env_vars:
             return _err(rid, 4004, f"no env var defined for {pconfig.name}")
 
-        # Save the key to ~/.hermes/.env
         env_var = pconfig.api_key_env_vars[0]
-        save_env_value(env_var, api_key)
-        # Also set in current process so the refreshed inventory sees it.
         import os
 
+        if _using_agentix_backend():
+            from agentix_backend import AgentixBackend
+
+            backend = AgentixBackend()
+            backend.set_llm_api_key(api_key)
+            backend.set_config("provider", slug)
+            os.environ["AGENTIX_LLM_API_KEY"] = api_key
+            os.environ["AGENTIX_PROVIDER"] = slug
+        else:
+            # Native Hermes stores its provider-specific key in ~/.hermes/.env.
+            save_env_value(env_var, api_key)
         os.environ[env_var] = api_key
 
         # Refresh provider data via the shared inventory builder so this
@@ -6704,6 +7679,33 @@ def _(rid, params: dict) -> dict:
             return _err(rid, 4001, "slug is required")
 
         pconfig = PROVIDER_REGISTRY.get(slug)
+        if _using_agentix_backend():
+            from agentix_backend import AgentixBackend
+
+            backend = AgentixBackend()
+            config = backend.config()
+            current_provider = str(config.get("provider") or "").lower()
+            aliases = (
+                {"kilo", "kilocode"}
+                if slug in {"kilo", "kilocode"}
+                else {slug}
+            )
+            if current_provider not in aliases:
+                return _err(rid, 4005, f"{slug} is not the active Agentix provider")
+            backend.set_llm_api_key(None)
+            os.environ.pop("AGENTIX_LLM_API_KEY", None)
+            if pconfig and pconfig.api_key_env_vars:
+                for env_var in pconfig.api_key_env_vars:
+                    os.environ.pop(env_var, None)
+            return _ok(
+                rid,
+                {
+                    "slug": slug,
+                    "name": pconfig.name if pconfig else slug,
+                    "disconnected": True,
+                },
+            )
+
         cleared_env = False
         cleared_auth = False
 
@@ -6798,6 +7800,17 @@ def _(rid, params: dict) -> dict:
     cmd = params.get("command", "").strip()
     if not cmd:
         return _err(rid, 4004, "empty command")
+
+    if _using_agentix_backend():
+        try:
+            from hermes_cli.agentix_commands import dispatch_tui_command
+
+            output = dispatch_tui_command(cmd, session.get("session_key"))
+            if cmd.lstrip("/").split(maxsplit=1)[0].lower() == "model":
+                _refresh_agentix_proxy_model(session)
+            return _ok(rid, {"output": output or "(no output)"})
+        except Exception as e:
+            return _err(rid, 5030, f"Agentix command failed: {e}")
 
     # Skill slash commands and _pending_input commands must NOT go through the
     # slash worker — see _PENDING_INPUT_COMMANDS definition above. Plugin
@@ -7166,6 +8179,15 @@ def _(rid, params: dict) -> dict:
     session, err = _sess(params, rid)
     if err:
         return err
+    if _using_agentix_backend():
+        return _ok(
+            rid,
+            {
+                "enabled": False,
+                "checkpoints": [],
+                "reason": "Workspace rollback is disabled until it is owned by Powerhouse policy and approvals.",
+            },
+        )
     try:
 
         def go(mgr, cwd):
@@ -7196,6 +8218,12 @@ def _(rid, params: dict) -> dict:
     session, err = _sess(params, rid)
     if err:
         return err
+    if _using_agentix_backend():
+        return _err(
+            rid,
+            5010,
+            "Workspace rollback cannot bypass Powerhouse policy and is not available yet.",
+        )
     target = params.get("hash", "")
     file_path = params.get("file_path", "")
     if not target:
@@ -7243,6 +8271,12 @@ def _(rid, params: dict) -> dict:
     session, err = _sess(params, rid)
     if err:
         return err
+    if _using_agentix_backend():
+        return _err(
+            rid,
+            5010,
+            "Workspace rollback cannot bypass Powerhouse policy and is not available yet.",
+        )
     target = params.get("hash", "")
     if not target:
         return _err(rid, 4014, "hash required")
@@ -7365,6 +8399,12 @@ def _failure_messages(url: str, port: int, system: str) -> list[str]:
 
 @method("browser.manage")
 def _(rid, params: dict) -> dict:
+    if _using_agentix_backend():
+        return _err(
+            rid,
+            4018,
+            "Agentix browser integration is unavailable until the browser tool is registered as a Powerhouse Pi tool.",
+        )
     action = params.get("action", "status")
 
     if action == "status":
@@ -7505,6 +8545,12 @@ def _browser_disconnect(rid) -> dict:
 
 @method("plugins.list")
 def _(rid, params: dict) -> dict:
+    if _using_agentix_backend():
+        return _err(
+            rid,
+            4018,
+            "Agentix plugin management is unavailable until plugins are registered with the Powerhouse tool registry.",
+        )
     try:
         from hermes_cli.plugins import get_plugin_manager
 
@@ -7527,6 +8573,41 @@ def _(rid, params: dict) -> dict:
 
 @method("config.show")
 def _(rid, params: dict) -> dict:
+    if _using_agentix_backend():
+        try:
+            from agentix_backend import AgentixBackend
+
+            config = AgentixBackend().config()
+            return _ok(
+                rid,
+                {
+                    "sections": [
+                        {
+                            "title": "Model",
+                            "rows": [
+                                ["Provider", str(config.get("provider") or "auto")],
+                                ["Model", str(config.get("model") or "(not set)")],
+                                ["Base URL", str(config.get("baseUrl") or "(default)")],
+                                [
+                                    "API Key",
+                                    "configured"
+                                    if config.get("llmApiKeyConfigured")
+                                    else "not set",
+                                ],
+                            ],
+                        },
+                        {
+                            "title": "Environment",
+                            "rows": [
+                                ["Working Dir", os.getcwd()],
+                                ["Config File", str(config.get("configFile") or "")],
+                            ],
+                        },
+                    ]
+                },
+            )
+        except Exception as e:
+            return _err(rid, 5030, f"Agentix config failed: {e}")
     try:
         cfg = _load_cfg()
         model = _resolve_model()
@@ -7566,6 +8647,27 @@ def _(rid, params: dict) -> dict:
 
 @method("tools.list")
 def _(rid, params: dict) -> dict:
+    if _using_agentix_backend():
+        try:
+            from agentix_backend import AgentixBackend
+
+            tools = AgentixBackend().list_tools() or []
+            return _ok(
+                rid,
+                {
+                    "toolsets": [
+                        {
+                            "name": "Agentix Pi agents",
+                            "description": "Powerhouse-registered task executors",
+                            "tool_count": len(tools),
+                            "enabled": True,
+                            "tools": [str(tool.get("name") or "") for tool in tools],
+                        }
+                    ]
+                },
+            )
+        except Exception as e:
+            return _err(rid, 5031, f"Agentix tools failed: {e}")
     try:
         from toolsets import get_all_toolsets, get_toolset_info
 
@@ -7597,6 +8699,31 @@ def _(rid, params: dict) -> dict:
 
 @method("tools.show")
 def _(rid, params: dict) -> dict:
+    if _using_agentix_backend():
+        try:
+            from agentix_backend import AgentixBackend
+
+            tools = AgentixBackend().list_tools() or []
+            return _ok(
+                rid,
+                {
+                    "sections": [
+                        {
+                            "name": "Agentix Pi agents",
+                            "tools": [
+                                {
+                                    "name": str(tool.get("name") or ""),
+                                    "description": str(tool.get("description") or ""),
+                                }
+                                for tool in tools
+                            ],
+                        }
+                    ],
+                    "total": len(tools),
+                },
+            )
+        except Exception as e:
+            return _err(rid, 5034, f"Agentix tools failed: {e}")
     try:
         from model_tools import get_toolset_for_tool, get_tool_definitions
 
@@ -7637,6 +8764,12 @@ def _(rid, params: dict) -> dict:
 
 @method("tools.configure")
 def _(rid, params: dict) -> dict:
+    if _using_agentix_backend():
+        return _err(
+            rid,
+            4018,
+            "Agentix tool configuration must use Powerhouse agent profiles; run `/agents` or `agentix agents --help`.",
+        )
     action = str(params.get("action", "") or "").strip().lower()
     targets = [
         str(name).strip() for name in params.get("names", []) or [] if str(name).strip()
@@ -7706,6 +8839,26 @@ def _(rid, params: dict) -> dict:
 
 @method("toolsets.list")
 def _(rid, params: dict) -> dict:
+    if _using_agentix_backend():
+        try:
+            from agentix_backend import AgentixBackend
+
+            tools = AgentixBackend().list_tools() or []
+            return _ok(
+                rid,
+                {
+                    "toolsets": [
+                        {
+                            "name": "Agentix Pi agents",
+                            "description": "Powerhouse-registered task executors",
+                            "tool_count": len(tools),
+                            "enabled": True,
+                        }
+                    ]
+                },
+            )
+        except Exception as e:
+            return _err(rid, 5032, f"Agentix toolsets failed: {e}")
     try:
         from toolsets import get_all_toolsets, get_toolset_info
 
@@ -7736,6 +8889,23 @@ def _(rid, params: dict) -> dict:
 
 @method("agents.list")
 def _(rid, params: dict) -> dict:
+    if _using_agentix_backend():
+        try:
+            from agentix_backend import AgentixBackend
+
+            profiles = AgentixBackend().list_agent_profiles()
+            processes = [
+                {
+                    "session_id": str(agent.get("id") or ""),
+                    "command": str(agent.get("kind") or ""),
+                    "status": "healthy" if agent.get("healthy") else "unhealthy",
+                    "uptime": 0,
+                }
+                for agent in profiles.get("registeredAgents", [])
+            ]
+            return _ok(rid, {"processes": processes, **profiles})
+        except Exception as e:
+            return _err(rid, 5033, f"Agentix agents failed: {e}")
     try:
         from tools.process_registry import process_registry
 
@@ -7761,6 +8931,32 @@ def _(rid, params: dict) -> dict:
 @method("cron.manage")
 def _(rid, params: dict) -> dict:
     action, jid = params.get("action", "list"), params.get("name", "")
+    if _using_agentix_backend():
+        try:
+            from agentix_backend import AgentixBackend
+
+            backend = AgentixBackend()
+            if action == "list":
+                return _ok(rid, {"jobs": backend.list_scheduled_jobs() or []})
+            if action == "add":
+                return _ok(
+                    rid,
+                    backend.create_scheduled_job(
+                        name=str(jid or "Agentix scheduled task"),
+                        stimulus=str(params.get("prompt") or ""),
+                        schedule=str(params.get("schedule") or "every 1h"),
+                    ),
+                )
+            if action == "remove":
+                return _ok(rid, backend.delete_scheduled_job(str(jid)))
+            if action in {"pause", "resume"}:
+                return _ok(
+                    rid,
+                    backend.set_scheduled_job_enabled(str(jid), action == "resume"),
+                )
+            return _err(rid, 4016, f"unknown cron action: {action}")
+        except Exception as e:
+            return _err(rid, 5023, f"Agentix cron failed: {e}")
     try:
         from tools.cronjob_tools import cronjob
 
@@ -7788,6 +8984,73 @@ def _(rid, params: dict) -> dict:
 @method("skills.manage")
 def _(rid, params: dict) -> dict:
     action, query = params.get("action", "list"), params.get("query", "")
+    if _using_agentix_backend():
+        try:
+            from agentix_backend import AgentixBackend
+
+            backend = AgentixBackend()
+            if action == "list":
+                grouped: dict[str, list[str]] = {}
+                for skill in backend.list_skills() or []:
+                    category = str(skill.get("category") or "uncategorized")
+                    marker = " ✓" if skill.get("enabled") else ""
+                    grouped.setdefault(category, []).append(
+                        f"{skill.get('name') or skill.get('id')}{marker}"
+                    )
+                return _ok(rid, {"skills": grouped})
+            if action == "inspect":
+                return _ok(rid, {"info": backend.get_skill(str(query))})
+            if action in {"enable", "disable"}:
+                return _ok(
+                    rid,
+                    backend.set_skill_enabled(str(query), action == "enable"),
+                )
+            if action == "install":
+                from hermes_cli.skills_hub import do_install
+
+                before = {
+                    str(skill.get("id") or "") for skill in backend.list_skills() or []
+                }
+
+                class _Q:
+                    def print(self, *a, **k):
+                        pass
+
+                do_install(str(query), skip_confirm=True, console=_Q())
+                refreshed = backend.reload_skills()
+                skills = refreshed.get("skills") or []
+                added = [
+                    skill
+                    for skill in skills
+                    if str(skill.get("id") or "") not in before
+                ]
+                selected = added[0] if len(added) == 1 else next(
+                    (
+                        skill
+                        for skill in skills
+                        if str(skill.get("id") or "").lower()
+                        == str(query).lower()
+                    ),
+                    None,
+                )
+                if selected:
+                    skill_id = str(selected.get("id") or "")
+                    backend.set_skill_enabled(skill_id, True)
+                    return _ok(rid, {"installed": True, "name": skill_id})
+                return _ok(
+                    rid,
+                    {
+                        "installed": False,
+                        "name": str(query),
+                        "warning": "The installer did not add a discoverable Agentix skill.",
+                    },
+                )
+            if action not in {"search", "browse"}:
+                return _err(rid, 4017, f"unknown skills action: {action}")
+            # Search and browse remain Hermes-derived catalog integrations;
+            # installation and runtime enablement are Agentix-owned above.
+        except Exception as e:
+            return _err(rid, 5024, f"Agentix skill operation failed: {e}")
     try:
         if action == "list":
             from hermes_cli.banner import get_available_skills
@@ -7846,6 +9109,21 @@ def _(rid, params: dict) -> dict:
 
 @method("skills.reload")
 def _(rid, params: dict) -> dict:
+    if _using_agentix_backend():
+        try:
+            from agentix_backend import AgentixBackend
+
+            result = AgentixBackend().reload_skills()
+            total = int(result.get("count") or 0)
+            return _ok(
+                rid,
+                {
+                    "output": f"Reloaded {total} Agentix skill(s).",
+                    "result": result,
+                },
+            )
+        except Exception as e:
+            return _err(rid, 5025, f"Agentix skill reload failed: {e}")
     try:
         from agent.skill_commands import reload_skills
 
@@ -7877,6 +9155,18 @@ def _(rid, params: dict) -> dict:
     cmd = params.get("command", "")
     if not cmd:
         return _err(rid, 4004, "empty command")
+    if _using_agentix_backend():
+        return _ok(
+            rid,
+            {
+                "stdout": "",
+                "stderr": (
+                    "Direct shell execution is disabled in Agentix because it would bypass "
+                    "Powerhouse approvals. Ask Agentix to run the command as an approved task."
+                ),
+                "code": 126,
+            },
+        )
     try:
         from tools.approval import detect_dangerous_command
 

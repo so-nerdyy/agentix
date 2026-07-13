@@ -1,6 +1,6 @@
 {
   "name": "@nerdyy/agentix",
-  "version": "2.1.12",
+  "version": "2.2.0",
   "description": "Agentix CLI - AI coding agent with Agentix shell and orchestration backend",
   "type": "module",
   "license": "MIT",
@@ -47,6 +47,7 @@
     "hermes-agent/tools",
     "hermes-agent/tui_gateway",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
     "install.ps1",
     "install.sh",
@@ -58,7 +59,8 @@
   "scripts": {
     "build": "tsc && node frontend/build.mjs",
     "build:frontend": "node frontend/build.mjs",
-    "prepack": "npm run build",
+    "build:tui": "node scripts/build-tui.mjs",
+    "prepack": "npm run build && npm run build:tui",
     "release:manifest": "node scripts/release-manifest.mjs",
     "release:preflight": "node scripts/release-preflight.mjs",
     "release:verify": "node scripts/verify-public-release.mjs",

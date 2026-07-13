@@ -9,6 +9,8 @@ const envBackup = {
   AGENTIX_PROVIDER: process.env.AGENTIX_PROVIDER,
   AGENTIX_MODEL: process.env.AGENTIX_MODEL,
   AGENTIX_LLM_API_KEY: process.env.AGENTIX_LLM_API_KEY,
+  AGENTIX_LUNA_MODEL: process.env.AGENTIX_LUNA_MODEL,
+  AGENTIX_TERRA_MODEL: process.env.AGENTIX_TERRA_MODEL,
 };
 
 function tempDir(): string {
@@ -38,6 +40,8 @@ describe("TaskPlanner", () => {
     restoreEnv("AGENTIX_PROVIDER");
     restoreEnv("AGENTIX_MODEL");
     restoreEnv("AGENTIX_LLM_API_KEY");
+    restoreEnv("AGENTIX_LUNA_MODEL");
+    restoreEnv("AGENTIX_TERRA_MODEL");
     vi.unstubAllGlobals();
     vi.resetModules();
     while (dirs.length > 0) {
@@ -124,6 +128,26 @@ describe("TaskPlanner", () => {
     });
   });
 
+  it("stops planning on cancellation instead of falling back to execution", async () => {
+    process.env.AGENTIX_DATA_DIR = tempDir();
+    process.env.AGENTIX_PROVIDER = "openai";
+    process.env.AGENTIX_MODEL = "planner-model";
+    process.env.AGENTIX_LLM_API_KEY = "planner-key";
+    vi.stubGlobal("fetch", vi.fn((_input: unknown, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      const abort = () => reject(signal?.reason ?? new Error("cancelled"));
+      if (signal?.aborted) abort();
+      else signal?.addEventListener("abort", abort, { once: true });
+    })));
+    const controller = new AbortController();
+    const TaskPlanner = await importPlanner();
+
+    const planning = new TaskPlanner().plan("plan a cancellable task", { signal: controller.signal });
+    controller.abort(new Error("terminal client disconnected"));
+
+    await expect(planning).rejects.toThrow("terminal client disconnected");
+  });
+
   it("does not invoke the LLM planner for explicit shell commands", async () => {
     process.env.AGENTIX_DATA_DIR = tempDir();
     process.env.AGENTIX_PROVIDER = "openai";
@@ -139,6 +163,83 @@ describe("TaskPlanner", () => {
     expect(plan.steps[0]).toMatchObject({
       kind: "bash",
       requiresApproval: true,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("routes focused fallback work to configured Luna", async () => {
+    process.env.AGENTIX_DATA_DIR = tempDir();
+    process.env.AGENTIX_PROVIDER = "openai";
+    process.env.AGENTIX_MODEL = "planner-model";
+    process.env.AGENTIX_LLM_API_KEY = "planner-key";
+    process.env.AGENTIX_LUNA_MODEL = "luna-worker";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ message: { content: "invalid planner output" } }],
+    }), { status: 200 })));
+
+    const TaskPlanner = await importPlanner();
+    const plan = await new TaskPlanner().plan("review the tests and summarize the documentation gaps");
+
+    expect(plan.planner).toBe("static");
+    expect(plan.steps[0]).toMatchObject({
+      kind: "luna-message",
+      requiresApproval: false,
+      payload: { userRequest: "review the tests and summarize the documentation gaps" },
+    });
+  });
+
+  it("enforces configured Terra routing for complex one-step plans", async () => {
+    process.env.AGENTIX_DATA_DIR = tempDir();
+    process.env.AGENTIX_PROVIDER = "openai";
+    process.env.AGENTIX_MODEL = "planner-model";
+    process.env.AGENTIX_LLM_API_KEY = "planner-key";
+    process.env.AGENTIX_LUNA_MODEL = "luna-worker";
+    process.env.AGENTIX_TERRA_MODEL = "terra-worker";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            reasoning: "Use a conversational worker.",
+            steps: [{
+              id: "analyze",
+              kind: "user-message",
+              priority: "user",
+              payload: { stimulus: "analyze" },
+              dependsOn: [],
+              requiresApproval: false,
+              maxAttempts: 1,
+            }],
+          }),
+        },
+      }],
+    }), { status: 200 })));
+
+    const TaskPlanner = await importPlanner();
+    const plan = await new TaskPlanner().plan(
+      "redesign the production architecture and debug the concurrency orchestration root cause end to end",
+    );
+
+    expect(plan.planner).toBe("llm");
+    expect(plan.steps[0]?.kind).toBe("terra-message");
+    expect(plan.steps[0]?.requiresApproval).toBe(false);
+  });
+
+  it("supports explicit Terra delegation without calling the planner model", async () => {
+    process.env.AGENTIX_DATA_DIR = tempDir();
+    process.env.AGENTIX_TERRA_MODEL = "terra-worker";
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const TaskPlanner = await importPlanner();
+    const plan = await new TaskPlanner().plan("terra: investigate the architecture deeply");
+
+    expect(plan.planner).toBe("static");
+    expect(plan.steps[0]).toMatchObject({
+      kind: "terra-message",
+      payload: {
+        stimulus: "investigate the architecture deeply",
+        userRequest: "investigate the architecture deeply",
+      },
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });

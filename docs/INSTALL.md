@@ -35,24 +35,24 @@ agentix
 The installer scripts require Node.js/npm first, then install the global `agentix` package and verify `agentix version`. To install a specific release or tarball, set `AGENTIX_PACKAGE`, for example:
 
 ```powershell
-$env:AGENTIX_PACKAGE = "@nerdyy/agentix@2.1.12"
+$env:AGENTIX_PACKAGE = "@nerdyy/agentix@2.2.0"
 irm https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.ps1 | iex
 ```
 
 ```sh
-AGENTIX_PACKAGE=@nerdyy/agentix@2.1.12 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
+AGENTIX_PACKAGE=@nerdyy/agentix@2.2.0 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
 ```
 
 For versioned GitHub release installs, set `AGENTIX_VERSION`; the installer downloads the release manifest,
 downloads the matching tarball, verifies SHA256, then installs that tarball:
 
 ```powershell
-$env:AGENTIX_VERSION = "2.1.12"
+$env:AGENTIX_VERSION = "2.2.0"
 irm https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.ps1 | iex
 ```
 
 ```sh
-AGENTIX_VERSION=2.1.12 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
+AGENTIX_VERSION=2.2.0 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
 ```
 
 If Python is not discoverable under the default command names, set
@@ -62,14 +62,14 @@ For verified tarball installs, generate a release manifest and pass the expected
 
 ```powershell
 npm run release:manifest
-$env:AGENTIX_PACKAGE='.release/nerdyy-agentix-2.1.12.tgz'
+$env:AGENTIX_PACKAGE='.release/nerdyy-agentix-2.2.0.tgz'
 $env:AGENTIX_EXPECTED_SHA256='<sha256 from manifest>'
 .\install.ps1
 ```
 
 ```bash
 npm run release:manifest
-AGENTIX_PACKAGE=.release/nerdyy-agentix-2.1.12.tgz \
+AGENTIX_PACKAGE=.release/nerdyy-agentix-2.2.0.tgz \
 AGENTIX_EXPECTED_SHA256=<sha256 from manifest> \
 sh install.sh
 ```
@@ -88,7 +88,10 @@ For release validation, run `npm run smoke:release` after build and tests. It pa
 
 ## First Run
 
-`agentix setup` writes workspace-local API secrets to `.env.local`, syncs non-secret backend defaults into `data/config.json`, and prepares the shell for the current folder. The default `agentix` command opens the interactive Agentix shell.
+`agentix setup` writes workspace-local API secrets to `.env.local`, syncs non-secret
+backend defaults into `data/config.json`, and prepares the current folder. The
+default `agentix` command opens the full-screen Agentix terminal UI; `agentix --tui`
+selects the same interface explicitly. Non-TTY input uses the automation shell.
 Use `agentix dashboard` to start the web control surface by itself. The full backend + dashboard stack is served by `agentix server` at `http://127.0.0.1:3000/ui/` by default.
 
 ## Update Path

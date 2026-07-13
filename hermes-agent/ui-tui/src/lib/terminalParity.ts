@@ -5,6 +5,8 @@ import {
   shouldPromptForTerminalSetup
 } from './terminalSetup.js'
 
+const PRODUCT_NAME = process.env.AGENTIX_FRONTEND === 'agentix' ? 'Agentix' : 'Hermes'
+
 export type MacTerminalHint = {
   key: string
   message: string
@@ -31,14 +33,19 @@ export function detectMacTerminalContext(env: NodeJS.ProcessEnv = process.env): 
 
 export async function terminalParityHints(
   env: NodeJS.ProcessEnv = process.env,
-  options?: { fileOps?: Partial<FileOps>; homeDir?: string }
+  options?: { fileOps?: Partial<FileOps>; homeDir?: string; platform?: NodeJS.Platform }
 ): Promise<MacTerminalHint[]> {
   const ctx = detectMacTerminalContext(env)
   const hints: MacTerminalHint[] = []
 
   if (
     ctx.vscodeLike &&
-    (await shouldPromptForTerminalSetup({ env, fileOps: options?.fileOps, homeDir: options?.homeDir }))
+    (await shouldPromptForTerminalSetup({
+      env,
+      fileOps: options?.fileOps,
+      homeDir: options?.homeDir,
+      platform: options?.platform
+    }))
   ) {
     hints.push({
       key: 'ide-setup',
@@ -70,7 +77,7 @@ export async function terminalParityHints(
       key: 'remote',
       tone: 'warn',
       message:
-        'SSH session detected · text clipboard can bridge via OSC52, but image clipboard and local screenshot paths still depend on the machine running Hermes'
+        `SSH session detected · text clipboard can bridge via OSC52, but image clipboard and local screenshot paths still depend on the machine running ${PRODUCT_NAME}`
     })
   }
 

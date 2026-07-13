@@ -333,8 +333,7 @@ async function main() {
             console.log("Usage: agentix sessions delete <session-id>");
             return;
           }
-          runtime.deleteSession(idOrValue);
-          printJson({ ok: true, deleted: idOrValue });
+          printJson(runtime.deleteSession(idOrValue));
           return;
         }
         if (action === "prune") {

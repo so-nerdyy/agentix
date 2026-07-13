@@ -177,6 +177,10 @@ button:disabled {
   z-index: 40;
 }
 
+.palette-backdrop[hidden] {
+  display: none;
+}
+
 .palette {
   width: min(760px, 100%);
   border: 1px solid var(--border);

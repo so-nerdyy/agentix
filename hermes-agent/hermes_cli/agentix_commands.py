@@ -177,6 +177,64 @@ def handle_model(args: Any) -> bool:
     return True
 
 
+def handle_skills(args: Any) -> bool:
+    if not using_agentix_backend():
+        return False
+
+    action = getattr(args, "skills_action", None) or "list"
+    backend = _backend()
+    if action == "list":
+        skills = list(_iter_entries(backend.list_skills()))
+        if not skills:
+            print("No Agentix skills discovered.")
+            return True
+        print(f"{'Enabled':<8} {'Source':<10} {'Category':<20} Skill")
+        print("-" * 82)
+        for skill in skills:
+            print(
+                f"{str(bool(skill.get('enabled'))).lower():<8} "
+                f"{_clip(skill.get('source'), 10):<10} "
+                f"{_clip(skill.get('category'), 20):<20} "
+                f"{skill.get('id')}"
+            )
+        return True
+
+    if action in {"enable", "disable"}:
+        skill_id = str(getattr(args, "name", "") or "").strip()
+        result = backend.set_skill_enabled(skill_id, action == "enable")
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return True
+
+    if action == "config":
+        print("Agentix skill configuration is backend-owned.")
+        print("Use `agentix skills list`, `agentix skills enable <name>`, or `agentix skills disable <name>`. ")
+        return True
+
+    if action == "inspect":
+        identifier = str(getattr(args, "identifier", "") or "").strip()
+        try:
+            _dump(backend.get_skill(identifier))
+            return True
+        except Exception:
+            return False
+
+    if action in {"install", "uninstall", "update", "audit", "reset", "opt-in", "opt-out", "repair-official"}:
+        before = {str(skill.get("id") or "") for skill in _iter_entries(backend.list_skills())}
+        from hermes_cli.skills_hub import skills_command
+
+        skills_command(args)
+        refreshed = backend.reload_skills()
+        after = list(_iter_entries(refreshed.get("skills")))
+        if action == "install":
+            added = [skill for skill in after if str(skill.get("id") or "") not in before]
+            if len(added) == 1:
+                backend.set_skill_enabled(str(added[0].get("id") or ""), True)
+                print(f"Enabled Agentix skill: {added[0].get('id')}")
+        return True
+
+    return False
+
+
 def _print_doctor_report(report: dict[str, Any]) -> None:
     checks = list(_iter_entries(report.get("checks")))
     counts = report.get("counts") if isinstance(report.get("counts"), dict) else {}
@@ -304,6 +362,8 @@ def handle_config(args: Any) -> bool:
         print("Agentix backend configuration")
         print(f"  Path: {config.get('configFile', _data_dir() / 'config.json')}")
         print(f"  Model: {config.get('provider', 'n/a')} / {config.get('model', 'n/a')}")
+        print(f"  Luna Pi: {config.get('lunaModel') or 'not configured'}")
+        print(f"  Terra Pi: {config.get('terraModel') or 'not configured'}")
         print(f"  LLM key: {'configured' if config.get('llmApiKeyConfigured') else 'missing'}")
         print(f"  Session token: {'configured' if config.get('sessionTokenConfigured') else 'missing'}")
         print(f"  Status: {'incomplete' if missing else 'ok'}")
@@ -314,7 +374,7 @@ def handle_config(args: Any) -> bool:
         value = getattr(args, "value", None)
         if not key or value is None:
             print("Usage: agentix config set <key> <value>")
-            print("Keys: model, provider, baseUrl, sessionTtlMs, approvalTimeoutMs, inboxPort, bridgePort")
+            print("Keys: model, provider, baseUrl, lunaModel, terraModel, sessionTtlMs, approvalTimeoutMs, inboxPort, bridgePort")
             return True
         aliases = {
             "base_url": "baseUrl",
@@ -327,6 +387,10 @@ def handle_config(args: Any) -> bool:
             "inbox-port": "inboxPort",
             "bridge_port": "bridgePort",
             "bridge-port": "bridgePort",
+            "luna_model": "lunaModel",
+            "luna-model": "lunaModel",
+            "terra_model": "terraModel",
+            "terra-model": "terraModel",
         }
         normalized = aliases.get(key, key)
         result = backend.set_config(normalized, value)
@@ -1055,3 +1119,226 @@ def handle_gateway(args: Any) -> bool:
         return True
 
     return False
+
+
+def dispatch_tui_command(command: str, session_id: str | None = None) -> str:
+    """Execute a TUI slash command without entering the Hermes agent runtime."""
+    if not using_agentix_backend():
+        raise RuntimeError("Agentix backend mode is not active")
+    try:
+        parts = shlex.split(command.lstrip("/"))
+    except ValueError as exc:
+        return f"Invalid command: {exc}"
+    if not parts:
+        return "Empty Agentix command."
+
+    name = parts[0].lower()
+    args = parts[1:]
+    backend = _backend()
+
+    def dump(value: Any) -> str:
+        text = json.dumps(value, indent=2, ensure_ascii=False, default=str)
+        if len(text) <= 64 * 1024:
+            return text
+        return text[: 64 * 1024] + "\n... Agentix output truncated ..."
+
+    if name in {"help", "commands"}:
+        return (
+            "Agentix TUI backend commands\n"
+            "  /sessions | /session <id> [delete|rename <title>]\n"
+            "  /undo | /compress [focus] | /branch [title]\n"
+            "  /plans | /plan <id> [cancel|replay|retry-failed]\n"
+            "  /tasks | /task <id> [cancel|retry|restart]\n"
+            "  /approvals | /approve <task-id> | /deny <task-id> [reason]\n"
+            "  /memory [query] | /tools | /cron | /gateway | /logs\n"
+            "  /audit | /healing | /doctor | /usage | /config | /version\n"
+            "Frontend commands such as /new, /resume, /title, /history, and /quit "
+            "remain available in the TUI."
+        )
+    if name in {"version"}:
+        return f"Agentix v{os.environ.get('AGENTIX_VERSION') or 'unknown'}"
+    if name in {"doctor", "status"}:
+        return dump(backend.doctor())
+    if name == "usage":
+        return dump(backend.usage())
+    if name == "config":
+        if len(args) >= 3 and args[0].lower() == "set":
+            return dump(backend.set_config(args[1], " ".join(args[2:])))
+        return dump(backend.config())
+    if name == "model":
+        if not args:
+            return dump(backend.config())
+        provider = ""
+        model = ""
+        index = 0
+        while index < len(args):
+            arg = args[index]
+            if arg == "--provider" and index + 1 < len(args):
+                provider = args[index + 1]
+                index += 2
+                continue
+            if arg in {"--global", "--workspace"}:
+                index += 1
+                continue
+            if not arg.startswith("--") and not model:
+                model = arg
+            index += 1
+        if not model:
+            return "Usage: /model <model-id> [--provider <provider>]"
+        model_result = backend.set_config("model", model)
+        provider_result = backend.set_config("provider", provider) if provider else None
+        os.environ["AGENTIX_MODEL"] = model
+        if provider:
+            os.environ["AGENTIX_PROVIDER"] = provider
+        return dump(
+            {
+                "ok": bool(model_result.get("ok"))
+                and (provider_result is None or bool(provider_result.get("ok"))),
+                "model": model,
+                "provider": provider or backend.config().get("provider"),
+                "scope": "workspace" if "--global" in args else "session-and-workspace",
+            }
+        )
+    if name in {"sessions", "resume"}:
+        return dump(backend.list_sessions())
+    if name == "session":
+        if not args:
+            return dump(backend.list_sessions())
+        target = args[0]
+        action = args[1].lower() if len(args) > 1 else "inspect"
+        if action in {"delete", "remove"}:
+            return dump(backend.delete_session(target))
+        if action == "rename":
+            title = " ".join(args[2:]).strip()
+            return dump(backend.rename_session(target, title))
+        return dump(backend.get_session(target))
+    if name == "history":
+        return dump(backend.get_session(session_id)) if session_id else "No active Agentix session."
+    if name == "undo":
+        return dump(backend.undo_session(session_id)) if session_id else "No active Agentix session."
+    if name in {"compress", "compact"}:
+        return (
+            dump(backend.compact_session(session_id, " ".join(args).strip()))
+            if session_id
+            else "No active Agentix session."
+        )
+    if name in {"branch", "fork"}:
+        return (
+            dump(backend.branch_session(session_id, " ".join(args).strip()))
+            if session_id
+            else "No active Agentix session."
+        )
+    if name == "plans":
+        return dump(backend.list_plans())
+    if name == "plan":
+        if not args:
+            return dump(backend.list_plans())
+        action = args[1].lower() if len(args) > 1 else "inspect"
+        return (
+            dump(backend.control_plan(args[0], action))
+            if action in {"cancel", "replay", "retry-failed"}
+            else dump(backend.get_plan(args[0]))
+        )
+    if name == "tasks":
+        return dump(backend.list_tasks(session_id))
+    if name == "task":
+        if not args:
+            return dump(backend.list_tasks(session_id))
+        action = args[1].lower() if len(args) > 1 else "inspect"
+        return (
+            dump(backend.control_task(args[0], action))
+            if action in {"cancel", "retry", "restart"}
+            else dump(backend.get_task(args[0]))
+        )
+    if name in {"approvals", "approval"} and not args:
+        return dump(backend.list_approvals())
+    if name in {"approve", "deny", "reject"} or name == "approval":
+        if name == "approval":
+            if not args:
+                return dump(backend.list_approvals())
+            task_id = args[0]
+            action = args[1].lower() if len(args) > 1 else "inspect"
+            remaining = args[2:]
+        else:
+            if not args:
+                return f"Usage: /{name} <task-id> [reason]"
+            task_id = args[0]
+            action = name
+            remaining = args[1:]
+        if action == "approve":
+            return dump(backend.approve(task_id))
+        if action in {"deny", "reject"}:
+            return dump(backend.reject(task_id, " ".join(remaining).strip() or None))
+        return dump(backend.get_approval(task_id))
+    if name == "memory":
+        if args and args[0].lower() == "consolidate":
+            return dump(backend.consolidate_memory(session_id))
+        if args and args[0].lower() == "reset":
+            return "Use `agentix memory reset` outside the TUI so destructive confirmation remains explicit."
+        query = " ".join(args).strip()
+        return dump(backend.memory_search(query) if query else backend.list_memory(session_id))
+    if name in {"tools", "toolsets"}:
+        return dump(backend.list_tools())
+    if name == "skills":
+        if not args or args[0].lower() in {"list", "status"}:
+            return dump(backend.list_skills())
+        action = args[0].lower()
+        if action == "reload":
+            return dump(backend.reload_skills())
+        if len(args) < 2:
+            return "Usage: /skills [list|inspect|search|enable|disable|reload] [name]"
+        skill_id = args[1]
+        if action == "inspect":
+            return dump(backend.get_skill(skill_id))
+        if action == "search":
+            return dump(backend.list_skills(" ".join(args[1:])))
+        if action in {"enable", "disable"}:
+            return dump(backend.set_skill_enabled(skill_id, action == "enable"))
+        return "Install skills with `/skills install <name>` in the TUI or `agentix skills install <name>`."
+    if name in {"cron", "scheduler"}:
+        if not args or args[0].lower() in {"list", "status"}:
+            return dump(backend.list_scheduled_jobs())
+        action = args[0].lower()
+        if len(args) < 2:
+            return "Usage: /cron [list|run|pause|resume|delete] <job-id>"
+        job_id = args[1]
+        if action == "run":
+            return dump(backend.run_scheduled_job(job_id))
+        if action in {"pause", "resume"}:
+            return dump(backend.set_scheduled_job_enabled(job_id, action == "resume"))
+        if action in {"delete", "remove"}:
+            return dump(backend.delete_scheduled_job(job_id))
+        return "Create and edit jobs with `agentix cron`; the backend remains authoritative."
+    if name in {"gateway", "gateways", "platform", "platforms"}:
+        if not args or args[0].lower() in {"list", "status"}:
+            return dump(backend.list_gateways())
+        action = args[0].lower()
+        if len(args) < 2:
+            return "Usage: /gateway [list|enable|disable] <gateway-id>"
+        if action in {"enable", "disable"}:
+            return dump(backend.set_gateway_enabled(args[1], action == "enable"))
+        return dump(backend.get_gateway(args[1]))
+    if name in {"logs", "log"}:
+        limit = int(args[0]) if args and args[0].isdigit() else 100
+        return dump(backend.list_logs(limit=min(500, max(1, limit))))
+    if name in {"audit", "audits"}:
+        return dump(backend.get_audit(args[0]) if args else backend.list_audit())
+    if name == "healing":
+        if len(args) >= 2 and args[0].lower() in {"promote", "deprecate"}:
+            return dump(
+                backend.promote_healing_procedure(args[1])
+                if args[0].lower() == "promote"
+                else backend.deprecate_healing_procedure(args[1])
+            )
+        return dump(backend.healing_stats())
+    if name == "update":
+        return "Exit the TUI and run `agentix update` so the launcher can replace the installed package safely."
+    if name in {"plugins", "reload-mcp", "reload-skills", "goal", "subgoal"}:
+        return (
+            f"/{name} is not available until its state is implemented by the Agentix backend. "
+            "It was not sent to the Hermes runtime."
+        )
+    return (
+        f"Unknown or unsupported Agentix command: /{name}. "
+        "It was not sent to the Hermes runtime. Run /help for supported commands."
+    )

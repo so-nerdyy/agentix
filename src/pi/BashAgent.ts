@@ -4,6 +4,9 @@
 
 import { spawn } from "node:child_process";
 import { BasePIAgent } from "./BasePIAgent.js";
+import type { AgentExecutionContext } from "./BasePIAgent.js";
+import { terminateProcessTree, USE_DETACHED_PROCESS_GROUP } from "./processControl.js";
+import { OutputBuffer, resolveOutputLimit } from "./OutputBuffer.js";
 import type { Task, TaskResult } from "../powerhouse/types.js";
 
 export interface BashAgentOpts {
@@ -11,22 +14,26 @@ export interface BashAgentOpts {
   /** Wall-clock timeout in ms. Default 60s. */
   timeoutMs?: number;
   env?: NodeJS.ProcessEnv;
+  maxOutputBytes?: number;
 }
 
 export class BashAgent extends BasePIAgent {
   private readonly cwd: string;
   private readonly timeoutMs: number;
   private readonly env: NodeJS.ProcessEnv;
+  private readonly maxOutputBytes: number;
 
   constructor(opts: BashAgentOpts = {}) {
     super("bash");
     this.cwd = opts.cwd ?? process.cwd();
     this.timeoutMs = opts.timeoutMs ?? 60_000;
     this.env = opts.env ?? process.env;
+    this.maxOutputBytes = resolveOutputLimit(opts.maxOutputBytes);
   }
 
-  async execute(task: Task): Promise<TaskResult> {
+  async execute(task: Task, context: AgentExecutionContext = {}): Promise<TaskResult> {
     this.emitStart(task);
+    if (context.signal?.aborted) return { ok: false, error: "cancelled" };
     const payload = task.payload as {
       command?: string;
       args?: string[];
@@ -46,44 +53,64 @@ export class BashAgent extends BasePIAgent {
         env: this.env,
         stdio: ["ignore", "pipe", "pipe"],
         shell: false,
+        detached: USE_DETACHED_PROCESS_GROUP,
+        windowsHide: true,
       });
 
-      let stdout = "";
-      let stderr = "";
+      const stdout = new OutputBuffer(this.maxOutputBytes);
+      const stderr = new OutputBuffer(this.maxOutputBytes);
       let timedOut = false;
+      let cancelled = false;
+      let settled = false;
 
-      const killTimer = setTimeout(() => {
-        timedOut = true;
-        try {
-          child.kill("SIGKILL");
-        } catch {
-          /* ignore */
-        }
-      }, this.timeoutMs);
-      killTimer.unref?.();
+      const onAbort = () => {
+        cancelled = true;
+        terminateProcessTree(child);
+      };
+      context.signal?.addEventListener("abort", onAbort, { once: true });
 
-      child.stdout?.on("data", (b) => (stdout += b.toString()));
-      child.stderr?.on("data", (b) => (stderr += b.toString()));
-
-      child.on("error", (err) => {
+      const finish = (result: TaskResult) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(killTimer);
-        const msg = `BashAgent spawn error: ${err.message}`;
-        this.emitError(task, msg);
-        resolve({ ok: false, error: msg });
-      });
-
-      child.on("close", (code) => {
-        clearTimeout(killTimer);
-        const duration = Date.now() - (task.startedAt ?? Date.now());
-        const result: TaskResult = timedOut
-          ? { ok: false, error: `timeout after ${this.timeoutMs}ms`, output: { stdout, stderr, duration } }
-          : code === 0
-            ? { ok: true, output: { stdout, stderr, exitCode: code, duration } }
-            : { ok: false, error: `exit ${code}`, output: { stdout, stderr, exitCode: code, duration } };
+        context.signal?.removeEventListener("abort", onAbort);
         if (result.ok) this.emitComplete(task, result);
         else this.emitError(task, result.error ?? "bash failed");
         resolve(result);
+      };
+
+      const killTimer = setTimeout(() => {
+        timedOut = true;
+        terminateProcessTree(child);
+      }, this.timeoutMs);
+      killTimer.unref?.();
+
+      child.stdout?.on("data", (chunk) => stdout.append(chunk));
+      child.stderr?.on("data", (chunk) => stderr.append(chunk));
+
+      child.on("error", (err) => {
+        const msg = `BashAgent spawn error: ${err.message}`;
+        finish({ ok: false, error: msg });
       });
+
+      child.on("close", (code) => {
+        const duration = Date.now() - (task.startedAt ?? Date.now());
+        const output = {
+          stdout: stdout.toString(),
+          stderr: stderr.toString(),
+          duration,
+          truncated: stdout.truncated || stderr.truncated,
+        };
+        const result: TaskResult = cancelled
+          ? { ok: false, error: "cancelled", output }
+          : timedOut
+          ? { ok: false, error: `timeout after ${this.timeoutMs}ms`, output }
+          : code === 0
+            ? { ok: true, output: { ...output, exitCode: code } }
+            : { ok: false, error: `exit ${code}`, output: { ...output, exitCode: code } };
+        finish(result);
+      });
+      if (context.signal?.aborted) onAbort();
     });
   }
 

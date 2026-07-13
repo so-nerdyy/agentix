@@ -16171,6 +16171,14 @@ class GatewayRunner:
         if _lock:
             with _lock:
                 self._agent_cache.pop(session_key, None)
+        agentix_cache = getattr(self, "_agentix_gateway_backends", None)
+        if isinstance(agentix_cache, dict):
+            backend = agentix_cache.pop(session_key, None)
+            if backend is not None:
+                try:
+                    backend.interrupt("gateway session evicted")
+                except Exception:
+                    pass
 
     @staticmethod
     def _init_cached_agent_for_turn(agent: Any, interrupt_depth: int) -> None:
@@ -16643,6 +16651,123 @@ class GatewayRunner:
 
     # ------------------------------------------------------------------
 
+    async def _run_agent_via_agentix(
+        self,
+        message: str,
+        history: List[Dict[str, Any]],
+        source: SessionSource,
+        session_id: str,
+        session_key: str = None,
+        run_generation: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Use Hermes platform adapters as I/O while Agentix owns execution."""
+        from agentix_backend import AgentixBackend
+
+        cache = getattr(self, "_agentix_gateway_backends", None)
+        if cache is None:
+            cache = {}
+            self._agentix_gateway_backends = cache
+        cache_key = session_key or session_id or (
+            f"{getattr(source.platform, 'value', source.platform)}:{source.chat_id}"
+        )
+        backend = cache.get(cache_key)
+        if backend is None:
+            backend = AgentixBackend(session_id=None)
+            cache[cache_key] = backend
+        elif backend.request_active:
+            backend = AgentixBackend(model=backend.model, session_id=backend.session_id)
+            cache[cache_key] = backend
+        else:
+            backend.reset_interrupt()
+
+        platform = str(getattr(source.platform, "value", source.platform) or "").lower()
+        if platform == "local":
+            platform = "webhook"
+        metadata = {
+            "transport": "hermes-derived-gateway",
+            "platform": platform,
+            "userId": str(source.user_id or "")[:256],
+            "chatId": str(source.chat_id or "")[:256],
+        }
+
+        if session_key:
+            if run_generation is not None and not self._is_session_run_current(
+                session_key, run_generation
+            ):
+                return {
+                    "final_response": "",
+                    "messages": [],
+                    "api_calls": 0,
+                    "tools": [],
+                    "completed": False,
+                    "interrupted": True,
+                    "history_offset": len(history),
+                    "session_id": backend.session_id or session_id,
+                    "agentix_backend": True,
+                }
+            self._running_agents[session_key] = backend
+            self._running_agents_ts[session_key] = time.time()
+
+        def _execute():
+            if not backend.session_id:
+                created = backend.create_session(
+                    model=backend.model,
+                    metadata=metadata,
+                )
+                backend.session_id = str(created.get("id") or "") or None
+                if not backend.session_id:
+                    raise RuntimeError("Powerhouse did not create a gateway session")
+            response = backend.execute(
+                message,
+                session_id=backend.session_id,
+                gateway_id=platform,
+                metadata=metadata,
+                deliver=False,
+                preserve_interrupt=True,
+            )
+            return {
+                **backend.last_result,
+                "response": response,
+            }
+
+        try:
+            result = await asyncio.to_thread(_execute)
+        except Exception as exc:
+            logger.exception("Agentix gateway execution failed for %s", platform)
+            return {
+                "final_response": "⚠️ Agentix could not process this gateway message. Check `agentix logs`.",
+                "messages": [],
+                "api_calls": 0,
+                "tools": [],
+                "completed": False,
+                "history_offset": len(history),
+                "session_id": backend.session_id or session_id,
+                "error": str(exc),
+            }
+        finally:
+            if session_key and self._running_agents.get(session_key) is backend:
+                self._release_running_agent_state(
+                    session_key, run_generation=run_generation
+                )
+
+        response = str(result.get("response") or "")
+        interrupted = backend.was_interrupted or result.get("status") == "cancelled"
+        return {
+            "final_response": response,
+            "messages": [
+                {"role": "user", "content": message},
+                {"role": "assistant", "content": response},
+            ],
+            "api_calls": 1,
+            "tools": [],
+            "completed": result.get("status") == "complete" and not interrupted,
+            "interrupted": interrupted,
+            "history_offset": len(history),
+            "session_id": result.get("sessionId") or backend.session_id or session_id,
+            "response_previewed": False,
+            "agentix_backend": True,
+        }
+
     async def _run_agent(
         self,
         message: str,
@@ -16668,6 +16793,15 @@ class GatewayRunner:
         This is run in a thread pool to not block the event loop.
         Supports interruption via new messages.
         """
+        if os.getenv("AGENTIX_FRONTEND", "").strip().lower() == "agentix":
+            return await self._run_agent_via_agentix(
+                message=message,
+                history=history,
+                source=source,
+                session_id=session_id,
+                session_key=session_key,
+                run_generation=run_generation,
+            )
         # ---- Proxy mode: delegate to remote API server ----
         if self._get_proxy_url():
             return await self._run_agent_via_proxy(

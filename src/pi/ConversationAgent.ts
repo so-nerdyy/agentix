@@ -1,6 +1,7 @@
 import { BasePIAgent } from "./BasePIAgent.js";
 import { loadConfig } from "../config/index.js";
 import { LLMClient } from "../llm/LLMClient.js";
+import type { AgentExecutionContext } from "./BasePIAgent.js";
 import type { Task, TaskResult } from "../powerhouse/types.js";
 
 export class ConversationAgent extends BasePIAgent {
@@ -8,12 +9,13 @@ export class ConversationAgent extends BasePIAgent {
     super("user-message", "pi-conversation");
   }
 
-  async execute(task: Task): Promise<TaskResult> {
+  async execute(task: Task, executionContext: AgentExecutionContext = {}): Promise<TaskResult> {
     this.emitStart(task);
     const stimulus = String(task.payload.stimulus ?? "").trim();
     const userRequest = String(task.payload.userRequest ?? stimulus).trim();
     const plannedInstruction = String(task.payload.plannedInstruction ?? "").trim();
     const context = task.payload.context;
+    const skillInstructions = String(task.payload.skillInstructions ?? "").trim();
     const execution = typeof task.payload.execution === "object" && task.payload.execution !== null
       ? task.payload.execution as Record<string, unknown>
       : {};
@@ -38,8 +40,9 @@ export class ConversationAgent extends BasePIAgent {
           "You are Agentix, an autonomous software agent backend.",
           "The Agentix shell owns the terminal UI, setup, commands, and integrations.",
           "The Agentix backend owns Powerhouse orchestration, Symphony planning, Pi agents, memory, approvals, validation, and healing.",
+          skillInstructions,
           "Answer the user directly and be concise unless the task requires detail.",
-        ].join(" "),
+        ].filter(Boolean).join("\n\n"),
       },
       {
         role: "user",
@@ -53,7 +56,7 @@ export class ConversationAgent extends BasePIAgent {
             : "",
         ].join(""),
       },
-    ]);
+    ], { signal: executionContext.signal, onDelta: executionContext.onDelta });
 
     if (llmResult.ok && llmResult.text) {
       const result = { ok: true, output: llmResult.text };
@@ -61,30 +64,9 @@ export class ConversationAgent extends BasePIAgent {
       return result;
     }
 
-    const lines = [
-      "Agentix is running with the Agentix shell and backend.",
-      "",
-      "Backend path:",
-      "- Powerhouse accepted the task.",
-      "- Symphony planned the task.",
-      "- A Pi agent executed the selected step.",
-      "- Validator checked the result.",
-      "- Memory recorded the interaction.",
-      "",
-      stimulus ? `Input: ${stimulus}` : "Input: empty message",
-    ];
-
-    if (llmResult.error) {
-      lines.push("", `LLM fallback: ${llmResult.error}`);
-    }
-
-    if (typeof context === "string" && context.trim()) {
-      lines.push("", `Context: ${context.trim()}`);
-    }
-
-    const result = { ok: true, output: lines.join("\n") };
-    this.emitComplete(task, result);
-    return result;
+    const error = llmResult.error ?? "LLM call failed";
+    this.emitError(task, error);
+    return { ok: false, error, output: error };
   }
 
   override shutdown(): void {

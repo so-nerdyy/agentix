@@ -268,7 +268,7 @@ export function useComposerState({
   )
 
   const openEditor = useCallback(async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hermes-'))
+    const dir = mkdtempSync(join(tmpdir(), process.env.AGENTIX_FRONTEND === 'agentix' ? 'agentix-' : 'hermes-'))
     const file = join(dir, 'prompt.md')
     const [cmd, ...args] = resolveEditor()
 

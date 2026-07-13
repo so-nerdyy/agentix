@@ -1,5 +1,7 @@
 node_modules/
 dist/
+!hermes-agent/hermes_cli/tui_dist/
+!hermes-agent/hermes_cli/tui_dist/entry.js
 !frontend/dist/
 !frontend/dist/**
 .env
@@ -8,11 +10,14 @@ dist/
 .vscode/
 .idea/
 coverage/
+.pytest-cache/
 tmp/
 temp/
 sandboxes/
 data/
-.agentix/
+.agentix/*
+!.agentix/progress.md
+!.agentix/test-matrix.md
 .smoke/
 *.pyc
 __pycache__/

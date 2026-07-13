@@ -1,5 +1,6 @@
 import * as readline from "readline";
 import { createRequire } from "node:module";
+import { Transform } from "node:stream";
 import { AgentixBackend } from "../agentix_backend.js";
 
 const require = createRequire(import.meta.url);
@@ -12,13 +13,16 @@ export class AgentixShell {
   private history: Array<{ role: string; content: string }> = [];
   private closed = false;
   private commandQueue: Promise<void> = Promise.resolve();
+  private activeExecutionController: AbortController | null = null;
+  private nonTtyInput: Transform | null = null;
 
   async start(): Promise<void> {
     await this.initializeSession();
+    const input = this.createInput();
     this.rl = readline.createInterface({
-      input: process.stdin,
+      input,
       output: process.stdout,
-      terminal: true,
+      terminal: Boolean(process.stdin.isTTY && process.stdout.isTTY),
     });
     return new Promise((resolve) => {
       this.rl.setPrompt("agentix> ");
@@ -43,13 +47,29 @@ export class AgentixShell {
         });
       });
 
+      this.rl.on("SIGINT", () => this.handleInterrupt());
+
       this.rl.on("close", () => {
         this.closed = true;
+        if (this.nonTtyInput) {
+          process.stdin.unpipe(this.nonTtyInput);
+          this.nonTtyInput.destroy();
+          this.nonTtyInput = null;
+        }
         void this.commandQueue.finally(resolve);
       });
 
       this.rl.prompt();
     });
+  }
+
+  async interruptAndClose(): Promise<void> {
+    this.activeExecutionController?.abort(new Error("Agentix interrupted by Ctrl+C"));
+    if (!this.closed && this.rl) this.rl.close();
+    await Promise.race([
+      this.commandQueue.catch(() => undefined),
+      new Promise<void>((resolve) => setTimeout(resolve, 2_000)),
+    ]);
   }
 
   private printBanner(): void {
@@ -135,10 +155,26 @@ export class AgentixShell {
     const sessions = await this.backend.listSessions({ limit: 20 });
     const active = sessions.find((session) => session.status === "active");
     if (active) {
-      this.sessionId = active.id;
-      return;
+      if (await this.loadSessionHistory(active.id)) return;
     }
     this.sessionId = (await this.backend.createSession()).id;
+    this.history = [];
+  }
+
+  private async loadSessionHistory(sessionId: string): Promise<boolean> {
+    const detail = await this.backend.getSession(sessionId) as {
+      session?: { id?: unknown };
+      messages?: Array<{ role?: unknown; content?: unknown }>;
+    } | null;
+    if (!detail?.session || String(detail.session.id ?? "") !== sessionId) return false;
+    this.sessionId = sessionId;
+    this.history = (Array.isArray(detail.messages) ? detail.messages : [])
+      .filter((message) =>
+        ["user", "assistant"].includes(String(message.role)) && typeof message.content === "string",
+      )
+      .slice(-1_000)
+      .map((message) => ({ role: String(message.role), content: String(message.content) }));
+    return true;
   }
 
   private formatTasks(tasks: Array<Record<string, unknown>>): string {
@@ -343,13 +379,28 @@ export class AgentixShell {
             console.log(this.formatSessions(await this.backend.listSessions({ limit: 20 })));
             break;
           }
-          if (!action || action === "inspect" || action === "open") {
+          if (!action || action === "inspect") {
             const detail = await this.backend.getSession(sessionId);
             console.log(this.formatSessionDetail(detail));
             break;
           }
+          if (action === "open") {
+            if (await this.loadSessionHistory(sessionId)) {
+              console.log(`-> Opened session ${sessionId} (${this.history.length} messages).\n`);
+            } else {
+              console.log(`Session not found: ${sessionId}\n`);
+            }
+            break;
+          }
           if (action === "close") {
-            console.log(JSON.stringify(await this.backend.deleteSession(sessionId), null, 2));
+            await this.backend.deleteSession(sessionId);
+            if (sessionId === this.sessionId) {
+              this.sessionId = (await this.backend.createSession()).id;
+              this.history = [];
+              console.log(`-> Closed ${sessionId}; opened ${this.sessionId}.\n`);
+            } else {
+              console.log(`-> Closed session ${sessionId}.\n`);
+            }
             break;
           }
           console.log(`Unknown /session action: ${action}\n`);
@@ -548,6 +599,8 @@ export class AgentixShell {
 
   private async handleMessage(input: string): Promise<void> {
     this.history.push({ role: "user", content: input });
+    const controller = new AbortController();
+    this.activeExecutionController = controller;
 
     try {
       process.stdout.write("-> ");
@@ -559,14 +612,48 @@ export class AgentixShell {
           process.stdout.write(delta);
           response += delta;
         },
+        signal: controller.signal,
       });
       this.sessionId = result.sessionId;
       this.history.push({ role: "assistant", content: response });
       console.log();
     } catch (err) {
+      if (controller.signal.aborted) {
+        console.log("\nCancelled active task.\n");
+        return;
+      }
       const message = err instanceof Error ? err.message : String(err);
       console.error(`\nError: ${message}\n`);
+    } finally {
+      if (this.activeExecutionController === controller) {
+        this.activeExecutionController = null;
+      }
     }
+  }
+
+  private handleInterrupt(): void {
+    if (this.activeExecutionController && !this.activeExecutionController.signal.aborted) {
+      console.log("^C\nCancelling active task...");
+      this.activeExecutionController.abort(new Error("Agentix interrupted by Ctrl+C"));
+      return;
+    }
+    console.log("^C");
+    this.rl.close();
+  }
+
+  private createInput(): NodeJS.ReadableStream {
+    if (process.stdin.isTTY) return process.stdin;
+    this.nonTtyInput = new Transform({
+      transform: (chunk: Buffer, _encoding, callback) => {
+        const input = Buffer.from(chunk);
+        const interrupted = input.includes(3);
+        const filtered = interrupted ? input.filter((byte) => byte !== 3) : input;
+        if (interrupted) queueMicrotask(() => this.handleInterrupt());
+        callback(null, filtered.length > 0 ? filtered : undefined);
+      },
+    });
+    process.stdin.pipe(this.nonTtyInput);
+    return this.nonTtyInput;
   }
 
   private printHelp(): void {
@@ -638,9 +725,11 @@ export class AgentixShell {
     console.log();
   }
 
-  private formatSessionDetail(detail: Record<string, unknown>): string {
-    const session = (detail.session as Record<string, unknown> | undefined) ?? {};
+  private formatSessionDetail(detail: Record<string, unknown> | null): string {
+    if (!detail?.session) return "Session not found.";
+    const session = detail.session as Record<string, unknown>;
     const tasks = (detail.tasks as Array<Record<string, unknown>> | undefined) ?? [];
+    const messages = (detail.messages as Array<Record<string, unknown>> | undefined) ?? [];
     const memory = (detail.memory as Array<Record<string, unknown>> | undefined) ?? [];
     const audit = (detail.audit as Array<Record<string, unknown>> | undefined) ?? [];
     const logs = (detail.logs as Array<Record<string, unknown>> | undefined) ?? [];
@@ -651,6 +740,8 @@ export class AgentixShell {
       `Updated: ${String(session.updatedAt ?? "")}`,
       `Tasks (${tasks.length})`,
       ...tasks.slice(0, 5).map((task) => `  - ${String(task.id ?? "")} [${String(task.status ?? "")}] ${String(task.kind ?? "")}`),
+      `Messages (${messages.length})`,
+      ...messages.slice(-5).map((message) => `  - ${String(message.role ?? "")} ${String(message.content ?? "").slice(0, 120)}`),
       `Memory (${memory.length})`,
       ...memory.slice(0, 5).map((entry) => `  - ${String(entry.role ?? "memory")} ${String(entry.content ?? "").slice(0, 120)}`),
       `Audit (${audit.length})`,
@@ -691,8 +782,13 @@ export class AgentixShell {
     ].join("\n");
   }
 
-  private formatPlan(detail: Record<string, unknown>): string {
-    const plan = (detail.plan as Record<string, unknown> | undefined) ?? {};
+  private formatPlan(detail: Record<string, unknown> | null): string {
+    if (!detail) return "Symphony plan not found.";
+    const plan = (
+      detail.execution as Record<string, unknown> | undefined
+    ) ?? (
+      detail.plan as Record<string, unknown> | undefined
+    ) ?? {};
     const steps = (detail.steps as Array<Record<string, unknown>> | undefined) ?? [];
     const tasks = (detail.tasks as Array<Record<string, unknown>> | undefined) ?? [];
     const audit = (detail.audit as Array<Record<string, unknown>> | undefined) ?? [];
@@ -703,9 +799,10 @@ export class AgentixShell {
       plan.reasoning ? `Reasoning: ${String(plan.reasoning)}` : "",
       plan.fallbackReason ? `Fallback: ${String(plan.fallbackReason)}` : "",
       `Steps (${steps.length})`,
-      ...steps.map((step) =>
-        `  - ${String(step.id ?? "")} [${String(step.status ?? "pending")}] ${String(step.kind ?? "")} depends=${String((step.dependsOn as unknown[] | undefined)?.join(",") ?? "none")} task=${String(step.taskId ?? "-")}`,
-      ),
+      ...steps.map((step) => {
+        const task = step.task as Record<string, unknown> | null | undefined;
+        return `  - ${String(step.id ?? "")} [${String(task?.status ?? step.status ?? "pending")}] ${String(step.kind ?? "")} depends=${String((step.dependsOn as unknown[] | undefined)?.join(",") || "none")} task=${String(task?.id ?? step.taskId ?? "-")}`;
+      }),
       `Tasks (${tasks.length})`,
       ...tasks.slice(0, 8).map((task) =>
         `  - ${String(task.id ?? "")} [${String(task.status ?? "")}] ${String(task.kind ?? "")}`,

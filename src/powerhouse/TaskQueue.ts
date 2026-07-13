@@ -1,6 +1,6 @@
 // TaskQueue — in-memory priority queue of pending tasks per session.
 // Backed by a per-session list. State machine:
-//   queued → running → (awaiting-approval → running) → complete | rejected | failed
+//   queued -> running -> (awaiting-approval -> running) -> complete | cancelled | rejected | failed
 //
 // Higher-priority tasks (user) are dequeued first. Within the same priority
 // class, FIFO ordering is preserved.
@@ -8,10 +8,11 @@
 import type { Task, TaskPriority, TaskStatus } from "./types.js";
 
 const STATUS_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
-  queued: ["running", "rejected"],
-  running: ["awaiting-approval", "complete", "failed"],
-  "awaiting-approval": ["running", "rejected", "failed"],
+  queued: ["running", "cancelled", "rejected"],
+  running: ["awaiting-approval", "complete", "cancelled", "failed"],
+  "awaiting-approval": ["running", "cancelled", "rejected", "failed"],
   complete: [],
+  cancelled: [],
   rejected: [],
   failed: [],
 };
@@ -85,6 +86,7 @@ export class TaskQueue {
     if (!task) return undefined;
     this.transition(task, "running");
     task.startedAt = Date.now();
+    task.attempts += 1;
     return task;
   }
 
@@ -100,6 +102,7 @@ export class TaskQueue {
     }
     this.transition(task, "running");
     task.startedAt = Date.now();
+    task.attempts += 1;
     return task;
   }
 
@@ -119,7 +122,7 @@ export class TaskQueue {
       );
     }
     task.status = next;
-    if (next === "complete" || next === "rejected" || next === "failed") {
+    if (["complete", "cancelled", "rejected", "failed"].includes(next)) {
       task.finishedAt = Date.now();
     }
   }
@@ -144,7 +147,7 @@ export class TaskQueue {
       return undefined;
     }
     this.remove(taskId);
-    task.status = "rejected";
+    task.status = "cancelled";
     task.finishedAt = Date.now();
     task.error = task.error ?? "cancelled";
     return task;

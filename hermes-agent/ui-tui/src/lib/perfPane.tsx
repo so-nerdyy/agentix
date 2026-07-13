@@ -21,7 +21,10 @@ import { Profiler, type ProfilerOnRenderCallback, type ReactNode } from 'react'
 
 const ENABLED = /^(?:1|true|yes|on)$/i.test((process.env.HERMES_DEV_PERF ?? '').trim())
 const THRESHOLD_MS = Number(process.env.HERMES_DEV_PERF_MS ?? '2') || 0
-const LOG_PATH = process.env.HERMES_DEV_PERF_LOG?.trim() || join(homedir(), '.hermes', 'perf.log')
+const AGENTIX_MODE = process.env.AGENTIX_FRONTEND === 'agentix'
+const LOG_PATH = AGENTIX_MODE
+  ? process.env.AGENTIX_DEV_PERF_LOG?.trim() || join(homedir(), '.agentix', 'perf.log')
+  : process.env.HERMES_DEV_PERF_LOG?.trim() || join(homedir(), '.hermes', 'perf.log')
 
 let logReady = false
 

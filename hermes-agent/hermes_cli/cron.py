@@ -59,7 +59,7 @@ def _cron_api(**kwargs):
 
 
 def _using_agentix_backend() -> bool:
-    return os.environ.get("AGENTIX_FRONTEND") == "hermes" and os.environ.get("AGENTIX_DISABLE_BACKEND_CRON") != "1"
+    return os.environ.get("AGENTIX_FRONTEND") in {"agentix", "hermes"} and os.environ.get("AGENTIX_DISABLE_BACKEND_CRON") != "1"
 
 
 def cron_list(show_all: bool = False):

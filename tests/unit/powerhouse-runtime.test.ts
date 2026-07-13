@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -15,12 +15,15 @@ import { PIAgentRegistry } from "../../src/powerhouse/PIAgentRegistry.js";
 import { Powerhouse } from "../../src/powerhouse/Powerhouse.js";
 import { SessionCoordinator } from "../../src/powerhouse/SessionCoordinator.js";
 import { TaskQueue } from "../../src/powerhouse/TaskQueue.js";
+import { SkillRegistry } from "../../src/powerhouse/SkillRegistry.js";
 import { LocalAgentixRuntime } from "../../src/runtime/LocalAgentixRuntime.js";
 import { TaskStore } from "../../src/powerhouse/TaskStore.js";
 import { SchedulerService } from "../../src/scheduler/SchedulerService.js";
 import { ScheduledJobStore } from "../../src/scheduler/ScheduledJobStore.js";
 import { PlanStore } from "../../src/symphony/PlanStore.js";
+import type { SymphonyPlan } from "../../src/symphony/types.js";
 import { resetConfigCache } from "../../src/config/index.js";
+import { RuntimeLogStore } from "../../src/logging/RuntimeLogStore.js";
 import type { Task, TaskResult } from "../../src/powerhouse/types.js";
 
 const tempDirs: string[] = [];
@@ -31,10 +34,13 @@ function tempDir(name: string): string {
   return dir;
 }
 
-function makePowerhouse(): Powerhouse {
+function makePowerhouse(
+  agent: BasePIAgent = new ConversationAgent(),
+  skills?: SkillRegistry,
+): Powerhouse {
   const dir = tempDir("agentix-powerhouse-");
   const registry = new PIAgentRegistry();
-  registry.register(new ConversationAgent());
+  registry.register(agent);
 
   return new Powerhouse({
     sessions: new SessionCoordinator(join(dir, "sessions")),
@@ -46,6 +52,7 @@ function makePowerhouse(): Powerhouse {
     planStore: new PlanStore(join(dir, "plans.json")),
     taskStore: new TaskStore(join(dir, "tasks.json")),
     audit: new AuditLog(join(dir, "audit.jsonl")),
+    skills,
   });
 }
 
@@ -81,12 +88,117 @@ class HealingResistantAgent extends BasePIAgent {
   }
 }
 
+class CancellableAgent extends BasePIAgent {
+  readonly started: Promise<void>;
+  private markStarted!: () => void;
+
+  constructor() {
+    super("user-message", "pi-cancellable-test");
+    this.started = new Promise((resolve) => {
+      this.markStarted = resolve;
+    });
+  }
+
+  async execute(task: Task, context: { signal?: AbortSignal } = {}): Promise<TaskResult> {
+    this.emitStart(task);
+    this.markStarted();
+    return await new Promise<TaskResult>((resolve) => {
+      const onAbort = () => {
+        const result = { ok: false, error: "cancelled by test" };
+        this.emitError(task, result.error);
+        resolve(result);
+      };
+      if (context.signal?.aborted) {
+        onAbort();
+        return;
+      }
+      context.signal?.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+}
+
+class ThrowingAgent extends BasePIAgent {
+  constructor() {
+    super("user-message", "pi-throwing-test");
+  }
+
+  async execute(task: Task): Promise<TaskResult> {
+    this.emitStart(task);
+    throw new Error("synthetic Pi crash");
+  }
+}
+
+class RecoveryAgent extends BasePIAgent {
+  readonly calls: Array<{ stepId: string | undefined; context: string }> = [];
+
+  constructor() {
+    super("user-message", "pi-recovery-test");
+  }
+
+  async execute(task: Task): Promise<TaskResult> {
+    this.emitStart(task);
+    this.calls.push({
+      stepId: task.stepId,
+      context: String(task.payload.context ?? ""),
+    });
+    const result = { ok: true, output: `${task.stepId}-recovered-output` };
+    this.emitComplete(task, result);
+    return result;
+  }
+}
+
+class RetryPlanAgent extends BasePIAgent {
+  private failedOnce = false;
+
+  constructor() {
+    super("user-message", "pi-retry-plan-test");
+  }
+
+  async execute(task: Task): Promise<TaskResult> {
+    this.emitStart(task);
+    if (task.stepId === "flaky" && !this.failedOnce) {
+      this.failedOnce = true;
+      const error = "transient plan failure";
+      this.emitError(task, error);
+      return { ok: false, error };
+    }
+    const result = { ok: true, output: `${task.stepId}-success` };
+    this.emitComplete(task, result);
+    return result;
+  }
+}
+
+beforeEach(() => {
+  process.env.AGENTIX_PROVIDER = "openai";
+  process.env.AGENTIX_MODEL = "test-model";
+  process.env.AGENTIX_LLM_API_KEY = "test-key";
+  resetConfigCache();
+  const nativeFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (url.endsWith("/chat/completions") || url.endsWith("/messages")) {
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: [
+          "Agentix is running with the Agentix shell and backend.",
+          "Powerhouse accepted the task.",
+          "Symphony planned the task.",
+          "A Pi agent executed the selected step.",
+        ].join("\n") } }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return nativeFetch(input, init);
+  }));
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env.AGENTIX_PROVIDER;
   delete process.env.AGENTIX_MODEL;
   delete process.env.AGENTIX_BASE_URL;
   delete process.env.AGENTIX_LLM_API_KEY;
+  delete process.env.AGENTIX_SESSION_TOKEN;
+  delete process.env.AGENTIX_LUNA_MODEL;
+  delete process.env.AGENTIX_TERRA_MODEL;
   resetConfigCache();
   while (tempDirs.length > 0) {
     rmSync(tempDirs.pop()!, { recursive: true, force: true });
@@ -143,6 +255,231 @@ describe("Powerhouse restored runtime", () => {
       toolsets: ["web"],
     });
 
+    powerhouse.stop();
+  });
+
+  it("injects only explicitly enabled Agentix skills into Pi prompts", async () => {
+    const dir = tempDir("agentix-skills-");
+    const skills = new SkillRegistry(join(dir, "skills.json"));
+    const discovered = skills.list("apple-notes").find((skill) => skill.id === "apple-notes");
+    expect(discovered).toBeDefined();
+    expect(discovered?.enabled).toBe(false);
+    expect(skills.setEnabled("apple-notes", true)?.enabled).toBe(true);
+
+    const systemPrompts: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ role?: string; content?: string }>;
+      };
+      systemPrompts.push(String(body.messages?.find((message) => message.role === "system")?.content ?? ""));
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: "skill prompt response" } }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const powerhouse = makePowerhouse(new ConversationAgent(), skills);
+
+    const enabled = await powerhouse.executeStimulus({ stimulus: "create an Apple note" });
+    expect(enabled.status).toBe("complete");
+    expect(powerhouse.listTasks()[0]?.payload.activeSkills).toEqual(["apple-notes"]);
+    expect(systemPrompts.at(-1)).toContain('<agentix-skill name="apple-notes">');
+    expect(systemPrompts.at(-1)).toContain("Manage Apple Notes");
+
+    expect(skills.setEnabled("apple-notes", false)?.enabled).toBe(false);
+    await powerhouse.executeStimulus({ stimulus: "answer without a skill" });
+    expect(systemPrompts.at(-1)).not.toContain("<agentix-skill");
+    expect(powerhouse.audit.list().some((entry) => entry.type === "session.created")).toBe(true);
+    powerhouse.stop();
+  });
+
+  it("fails the task when the configured provider rejects authentication", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      error: { message: "invalid credential detail must stay private" },
+    }), { status: 401, statusText: "Unauthorized" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const powerhouse = makePowerhouse();
+
+    const result = await powerhouse.executeStimulus({ stimulus: "do not fake success" });
+
+    expect(result.status).toBe("failed");
+    expect(result.response).toContain("authentication failed");
+    expect(result.response).not.toContain("invalid credential detail");
+    expect(result.response).not.toContain("Powerhouse accepted the task");
+    expect(powerhouse.listTasks()[0]?.status).toBe("failed");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    powerhouse.stop();
+  });
+
+  it("executes configured Luna and Terra models as first-class Pi agents", async () => {
+    process.env.AGENTIX_LUNA_MODEL = "luna-worker-model";
+    process.env.AGENTIX_TERRA_MODEL = "terra-worker-model";
+    resetConfigCache();
+    const requestedModels: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { model?: string };
+      requestedModels.push(String(body.model));
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: `delegate response from ${body.model}` } }],
+      }), { status: 200 });
+    }));
+    const powerhouse = makePowerhouse();
+
+    const luna = await powerhouse.executeStimulus({ stimulus: "luna: review this focused change" });
+    const terra = await powerhouse.executeStimulus({ stimulus: "terra: redesign this architecture" });
+    const tasks = powerhouse.listTasks();
+
+    expect(luna).toMatchObject({ status: "complete" });
+    expect(luna.response).toContain("luna-worker-model");
+    expect(terra).toMatchObject({ status: "complete" });
+    expect(terra.response).toContain("terra-worker-model");
+    expect(tasks.map((task) => task.kind)).toEqual(["luna-message", "terra-message"]);
+    expect(requestedModels).toEqual(["luna-worker-model", "terra-worker-model"]);
+    expect(powerhouse.agents.forKind("luna-message")?.id).toBe("pi-luna");
+    expect(powerhouse.agents.forKind("terra-message")?.id).toBe("pi-terra");
+    powerhouse.stop();
+  });
+
+  it("aborts an active Pi task and preserves cancelled as its terminal state", async () => {
+    const agent = new CancellableAgent();
+    const powerhouse = makePowerhouse(agent);
+
+    const execution = powerhouse.executeStimulus({
+      stimulus: `plan: ${JSON.stringify({
+        steps: [{
+          id: "cancelled-step",
+          kind: "user-message",
+          payload: { stimulus: "wait until cancelled" },
+          maxAttempts: 3,
+        }],
+      })}`,
+    });
+    await agent.started;
+    const taskId = powerhouse.listTasks()[0]?.id;
+    expect(taskId).toBeDefined();
+
+    const cancellation = await powerhouse.controlTask(taskId!, "cancel");
+    const result = await execution;
+
+    expect(cancellation).toMatchObject({
+      ok: true,
+      output: { action: "cancel", taskId, status: "cancelled" },
+    });
+    expect(result.status).toBe("cancelled");
+    expect(powerhouse.taskStore.get(taskId!)?.status).toBe("cancelled");
+    expect(powerhouse.planStore.list()[0]?.status).toBe("cancelled");
+    expect(powerhouse.audit.list().filter((entry) => entry.type === "task.cancelled")).toHaveLength(1);
+    expect(powerhouse.audit.list().filter((entry) => entry.type === "plan.cancelled")).toHaveLength(1);
+    expect(powerhouse.audit.list().some((entry) => entry.type === "task.completed")).toBe(false);
+    expect(powerhouse.taskStore.list()).toHaveLength(1);
+    powerhouse.stop();
+  });
+
+  it("closes an approval-waiting plan when its task is cancelled directly", async () => {
+    const powerhouse = makePowerhouse();
+    const paused = await powerhouse.executeStimulus({ stimulus: "run: echo should-not-run" });
+    const taskId = paused.taskIds[0]!;
+
+    expect(paused.status).toBe("awaiting-approval");
+    const cancellation = await powerhouse.controlTask(taskId, "cancel");
+
+    expect(cancellation.ok).toBe(true);
+    expect(powerhouse.taskStore.get(taskId)?.status).toBe("cancelled");
+    expect(powerhouse.planStore.list()[0]?.status).toBe("cancelled");
+    expect(powerhouse.listApprovals()).toHaveLength(0);
+    powerhouse.stop();
+  });
+
+  it("propagates an interrupted request through Symphony and the active Pi task", async () => {
+    const agent = new CancellableAgent();
+    const powerhouse = makePowerhouse(agent);
+    const controller = new AbortController();
+
+    const execution = powerhouse.executeStimulus({
+      stimulus: "cancel the complete orchestration request",
+      signal: controller.signal,
+    });
+    await agent.started;
+    controller.abort(new Error("terminal client disconnected"));
+    const result = await execution;
+    const task = powerhouse.taskStore.list()[0];
+    const plan = powerhouse.planStore.list()[0];
+
+    expect(result.status).toBe("cancelled");
+    expect(result.response).toBe("Agentix execution cancelled.");
+    expect(task).toMatchObject({ status: "cancelled", error: "cancelled by interrupted request" });
+    expect(plan).toMatchObject({ status: "cancelled", taskIds: [task!.id] });
+    expect(powerhouse.audit.list().filter((entry) => entry.type === "task.cancelled")).toHaveLength(1);
+    expect(powerhouse.audit.list().some((entry) => entry.type === "task.completed")).toBe(false);
+    powerhouse.stop();
+  });
+
+  it("checkpoints active work on shutdown and resumes it after restart", async () => {
+    const dir = tempDir("agentix-shutdown-recovery-");
+    const sessions = new SessionCoordinator(join(dir, "sessions"));
+    const taskStore = new TaskStore(join(dir, "tasks.json"));
+    const planStore = new PlanStore(join(dir, "plans.json"));
+    const memory = new MemoryStore(join(dir, "memory.jsonl"));
+    const healing = new HealingEngine(join(dir, "healing.json"));
+    const audit = new AuditLog(join(dir, "audit.jsonl"));
+    const makePersistent = (agent: BasePIAgent) => {
+      const registry = new PIAgentRegistry();
+      registry.register(agent);
+      return new Powerhouse({
+        sessions,
+        queue: new TaskQueue(),
+        approvals: new ApprovalWorkflow({ timeoutMs: 10_000 }),
+        agents: registry,
+        memory,
+        healing,
+        planStore,
+        taskStore,
+        audit,
+      });
+    };
+    const blockingAgent = new CancellableAgent();
+    const first = makePersistent(blockingAgent);
+
+    const inFlight = first.executeStimulus({ stimulus: "survive graceful shutdown" });
+    await blockingAgent.started;
+    const taskId = first.listTasks()[0]?.id;
+    const planId = first.planStore.list()[0]?.plan.id;
+    expect(taskId).toBeDefined();
+    expect(planId).toBeDefined();
+
+    first.stop();
+    await inFlight;
+
+    expect(taskStore.get(taskId!)?.status).toBe("queued");
+    expect(planStore.get(planId!)?.status).toBe("running");
+    expect(audit.list().some((entry) => entry.type === "task.interrupted")).toBe(true);
+
+    const restarted = makePersistent(new RecoveryAgent());
+    restarted.start();
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      if (planStore.get(planId!)?.status === "complete") break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    expect(taskStore.get(taskId!)?.status).toBe("complete");
+    expect(planStore.get(planId!)?.status).toBe("complete");
+    restarted.stop();
+  });
+
+  it("turns a thrown Pi exception into persisted task and plan failure", async () => {
+    const powerhouse = makePowerhouse(new ThrowingAgent());
+
+    const result = await powerhouse.executeStimulus({ stimulus: "trigger a Pi crash" });
+    const task = powerhouse.listTasks()[0];
+    const plan = powerhouse.planStore.list()[0];
+
+    expect(result.status).toBe("failed");
+    expect(result.response).toContain("synthetic Pi crash");
+    expect(task).toMatchObject({ status: "failed", error: "synthetic Pi crash" });
+    expect(powerhouse.taskStore.get(task!.id)).toMatchObject({
+      status: "failed",
+      error: "synthetic Pi crash",
+    });
+    expect(plan).toMatchObject({ status: "failed", taskIds: [task!.id] });
+    expect(powerhouse.audit.list().some((entry) => entry.type === "task.failed")).toBe(true);
     powerhouse.stop();
   });
 
@@ -217,7 +554,7 @@ describe("Powerhouse restored runtime", () => {
 
       const cancelled = await restarted.controlTask(taskId, "cancel");
       expect(cancelled.ok).toBe(true);
-      expect(restarted.listTasks().find((task) => task.id === taskId)?.status).toBe("rejected");
+      expect(restarted.listTasks().find((task) => task.id === taskId)?.status).toBe("cancelled");
 
       const restartedTask = await restarted.controlTask(taskId, "restart");
       expect(restartedTask.ok).toBe(true);
@@ -246,7 +583,11 @@ describe("Powerhouse restored runtime", () => {
       expect(powerhouse.listApprovals()).toHaveLength(0);
       expect(task?.status).toBe("rejected");
       expect(task?.error).toContain("approval timeout");
+      expect(powerhouse.planStore.list()[0]?.status).toBe("cancelled");
       expect(powerhouse.audit.list().some((entry) => entry.type === "approval.timeout_rejected")).toBe(true);
+      expect(
+        powerhouse.audit.list().some((entry) => entry.type === "plan.cancelled_after_approval_rejection"),
+      ).toBe(true);
     } finally {
       powerhouse.stop();
       vi.useRealTimers();
@@ -284,6 +625,10 @@ describe("Powerhouse restored runtime", () => {
     expect(listedSession?.status).toBe("active");
     expect(listedSession?.metadata.model).toBe("test-model");
     expect(listedSession?.updatedAt).toBeTruthy();
+    expect(runtime.getSession(session.id)?.messages.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+    ]);
     expect(runtime.listTasks(session.id)).toHaveLength(1);
     const sessionPlans = runtime.listPlans().filter((plan) => plan.sessionId === session.id);
     expect(sessionPlans).toHaveLength(1);
@@ -292,7 +637,8 @@ describe("Powerhouse restored runtime", () => {
     expect(replayedPlan.ok).toBe(true);
     expect(JSON.stringify(replayedPlan)).toContain("sourcePlanId");
     const cancelledPlan = await runtime.controlPlan(String(sessionPlans[0]?.id), "cancel");
-    expect(cancelledPlan).toMatchObject({ ok: true, action: "cancel" });
+    expect(cancelledPlan).toMatchObject({ ok: false, action: "cancel", status: "complete" });
+    expect(String(cancelledPlan.error)).toContain("plan cannot be cancelled from complete");
     expect(runtime.listMemory(session.id).some((item) => String(item.content).includes("test runtime facade"))).toBe(true);
     expect(runtime.listTools().some((tool) => tool.name === "user-message")).toBe(true);
     expect(Array.isArray(runtime.listApprovals())).toBe(true);
@@ -759,15 +1105,23 @@ describe("Powerhouse restored runtime", () => {
   it("deletes sessions through the runtime facade", async () => {
     const runtime = new LocalAgentixRuntime();
 
-    const session = runtime.createSession({ model: "test-model" });
-    expect(runtime.listSessions().some((item) => item.id === session.id)).toBe(true);
+    const session = runtime.createSession({
+      model: "test-model",
+      messages: [
+        { role: "user", content: "seeded TUI handoff" },
+        { role: "assistant", content: "seeded response" },
+      ],
+    });
+    const summary = runtime.listSessions().find((item) => item.id === session.id);
+    expect(summary?.messageCount).toBe(2);
+    expect(summary?.preview).toBe("seeded response");
+    expect(runtime.getSession(session.id)?.messages).toHaveLength(2);
     expect(runtime.listAudit().some((item) => item.type === "session.created" && item.subjectId === session.id)).toBe(true);
 
-    runtime.deleteSession(session.id);
+    expect(runtime.deleteSession(session.id)).toEqual({ ok: true, deleted: session.id });
 
-    const archived = runtime.listSessions().find((item) => item.id === session.id);
-    expect(archived?.status).toBe("complete");
-    expect(runtime.listAudit().some((item) => item.type === "session.closed" && item.subjectId === session.id)).toBe(true);
+    expect(runtime.listSessions().some((item) => item.id === session.id)).toBe(false);
+    expect(runtime.listAudit().some((item) => item.type === "session.deleted" && item.subjectId === session.id)).toBe(true);
 
     runtime.shutdown();
   });
@@ -786,6 +1140,23 @@ describe("Powerhouse restored runtime", () => {
     expect(active).toHaveLength(0);
     expect(historical?.status).toBe("complete");
     expect(historical?.metadata.title).toBe("Historical Session");
+  });
+
+  it("reactivates a closed session only when new work resumes it", async () => {
+    const powerhouse = makePowerhouse();
+    const session = powerhouse.createSession();
+    powerhouse.closeSession(session.id);
+
+    expect(powerhouse.listSessions().find((item) => item.id === session.id)?.status).toBe("complete");
+    const result = await powerhouse.executeStimulus({
+      sessionId: session.id,
+      stimulus: "resume closed context",
+    });
+
+    expect(result.sessionId).toBe(session.id);
+    expect(powerhouse.listSessions().find((item) => item.id === session.id)?.status).toBe("active");
+    expect(powerhouse.audit.list().some((entry) => entry.type === "session.reopened")).toBe(true);
+    powerhouse.stop();
   });
 
   it("renames, prunes, and optimizes sessions through the runtime facade", async () => {
@@ -872,6 +1243,231 @@ describe("Powerhouse restored runtime", () => {
     powerhouse.stop();
   });
 
+  it("recovers an interrupted Symphony plan and continues dependent steps", async () => {
+    const dir = tempDir("agentix-plan-recovery-");
+    const sessions = new SessionCoordinator(join(dir, "sessions"));
+    const taskStore = new TaskStore(join(dir, "tasks.json"));
+    const planStore = new PlanStore(join(dir, "plans.json"));
+    const session = sessions.create({ source: "plan-recovery-test" });
+    const plan: SymphonyPlan = {
+      id: "plan-recovery",
+      stimulus: "recover the entire plan",
+      planner: "static",
+      createdAt: Date.now(),
+      steps: [
+        {
+          id: "first",
+          kind: "user-message",
+          priority: "user",
+          payload: { stimulus: "first" },
+          dependsOn: [],
+          requiresApproval: false,
+          maxAttempts: 1,
+        },
+        {
+          id: "second",
+          kind: "user-message",
+          priority: "user",
+          payload: { stimulus: "second" },
+          dependsOn: ["first"],
+          requiresApproval: false,
+          maxAttempts: 1,
+        },
+        {
+          id: "third",
+          kind: "user-message",
+          priority: "user",
+          payload: { stimulus: "third" },
+          dependsOn: ["second"],
+          requiresApproval: false,
+          maxAttempts: 1,
+        },
+      ],
+    };
+    const firstTask: Task = {
+      id: "task-recovery-first",
+      sessionId: session.id,
+      planId: plan.id,
+      stepId: "first",
+      dependsOn: [],
+      kind: "user-message",
+      priority: "user",
+      status: "complete",
+      payload: { stimulus: "first" },
+      result: "first-persisted-output",
+      createdAt: Date.now() - 100,
+      startedAt: Date.now() - 90,
+      finishedAt: Date.now() - 80,
+      attempts: 1,
+      maxAttempts: 1,
+      requiresApproval: false,
+    };
+    const interruptedTask: Task = {
+      id: "task-recovery-second",
+      sessionId: session.id,
+      planId: plan.id,
+      stepId: "second",
+      dependsOn: ["first"],
+      kind: "user-message",
+      priority: "user",
+      status: "running",
+      payload: { stimulus: "second" },
+      createdAt: Date.now() - 50,
+      startedAt: Date.now() - 40,
+      attempts: 1,
+      maxAttempts: 1,
+      requiresApproval: false,
+    };
+    taskStore.upsert(firstTask);
+    taskStore.upsert(interruptedTask);
+    sessions.addPendingTask(session.id, interruptedTask.id);
+    planStore.upsert({
+      plan,
+      sessionId: session.id,
+      taskIds: [firstTask.id, interruptedTask.id],
+      status: "running",
+    });
+    const agent = new RecoveryAgent();
+    const registry = new PIAgentRegistry();
+    registry.register(agent);
+    const powerhouse = new Powerhouse({
+      sessions,
+      queue: new TaskQueue(),
+      approvals: new ApprovalWorkflow({ timeoutMs: 10_000 }),
+      agents: registry,
+      memory: new MemoryStore(join(dir, "memory.jsonl")),
+      healing: new HealingEngine(join(dir, "healing.json")),
+      planStore,
+      taskStore,
+      audit: new AuditLog(join(dir, "audit.jsonl")),
+    });
+
+    powerhouse.start();
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      if (planStore.get(plan.id)?.status === "complete") break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    const execution = planStore.get(plan.id);
+    const tasks = taskStore.list(session.id).filter((task) => task.planId === plan.id);
+    expect(execution?.status).toBe("complete");
+    expect(agent.calls.map((call) => call.stepId)).toEqual(["second", "third"]);
+    expect(agent.calls[1]?.context).toContain("second-recovered-output");
+    expect(tasks.find((task) => task.id === firstTask.id)?.status).toBe("complete");
+    expect(tasks.find((task) => task.id === interruptedTask.id)?.status).toBe("complete");
+    expect(tasks.find((task) => task.stepId === "third")?.status).toBe("complete");
+    expect(execution?.taskIds).toHaveLength(3);
+    expect(powerhouse.audit.list().some((entry) => entry.type === "plan.recovered")).toBe(true);
+    powerhouse.stop();
+  });
+
+  it("retry-failed resumes the failed Symphony step and all dependents", async () => {
+    const powerhouse = makePowerhouse(new RetryPlanAgent());
+    const runtime = new LocalAgentixRuntime({ powerhouse, startScheduler: false });
+    const plan = {
+      steps: [
+        {
+          id: "flaky",
+          kind: "user-message",
+          payload: { stimulus: "flaky" },
+          maxAttempts: 1,
+        },
+        {
+          id: "dependent",
+          kind: "user-message",
+          dependsOn: ["flaky"],
+          payload: { stimulus: "dependent" },
+          maxAttempts: 1,
+        },
+      ],
+    };
+
+    const initial = await runtime.execute({ stimulus: "plan: " + JSON.stringify(plan) });
+    const planId = powerhouse.planStore.list()[0]?.plan.id;
+    expect(initial.status).toBe("failed");
+    expect(planId).toBeDefined();
+
+    const retried = await runtime.controlPlan(planId!, "retry-failed");
+    const execution = powerhouse.planStore.get(planId!);
+    const tasks = powerhouse.listTasks().filter((task) => task.planId === planId);
+
+    expect(retried).toMatchObject({ ok: true, action: "retry-failed", count: 2 });
+    expect(execution?.status).toBe("complete");
+    expect(tasks.filter((task) => task.stepId === "flaky").map((task) => task.status)).toEqual([
+      "failed",
+      "complete",
+    ]);
+    expect(tasks.find((task) => task.stepId === "dependent")?.status).toBe("complete");
+    expect(String(tasks.find((task) => task.stepId === "dependent")?.payload.context)).toContain(
+      "flaky-success",
+    );
+    expect(execution?.taskIds).toHaveLength(3);
+    runtime.shutdown();
+  });
+
+  it("owns session undo, branching, and model-backed compaction in Powerhouse", async () => {
+    const powerhouse = makePowerhouse();
+    const runtime = new LocalAgentixRuntime({ powerhouse, startScheduler: false });
+    const messages = Array.from({ length: 4 }, (_, index) => [
+      { role: "user" as const, content: `request ${index + 1}` },
+      { role: "assistant" as const, content: `response ${index + 1}` },
+    ]).flat();
+    const session = runtime.createSession({
+      model: "test-model",
+      provider: "kilo",
+      baseUrl: "https://api.kilo.ai/api/gateway",
+      skills: ["release-audit"],
+      metadata: { source: "untrusted", workspace: "test" },
+      messages,
+    });
+    expect(runtime.getSession(session.id)?.session.metadata).toMatchObject({
+      source: "agentix-runtime",
+      provider: "kilo",
+      baseUrl: "https://api.kilo.ai/api/gateway",
+      skills: ["release-audit"],
+      workspace: "test",
+    });
+
+    const branched = runtime.branchSession(session.id, "Backend-owned branch");
+    const branchId = String(branched.id);
+    expect(branched).toMatchObject({
+      ok: true,
+      parentSessionId: session.id,
+      title: "Backend-owned branch",
+    });
+    expect(runtime.getSession(branchId)?.messages).toHaveLength(8);
+
+    const editBranch = runtime.branchSession(session.id, "Editable branch");
+    const truncated = runtime.truncateSessionBeforeUserOrdinal(String(editBranch.id), 2);
+    expect(truncated).toMatchObject({ ok: true, ordinal: 2, removed: 4 });
+    expect(runtime.getSession(String(editBranch.id))?.messages).toHaveLength(4);
+    expect(runtime.truncateSessionBeforeUserOrdinal(String(editBranch.id), 8)).toMatchObject({
+      ok: false,
+      error: "target user message is no longer in session history",
+    });
+
+    const undone = runtime.undoSession(branchId);
+    expect(undone).toMatchObject({ ok: true, removed: 2 });
+    expect(runtime.getSession(branchId)?.messages).toHaveLength(6);
+
+    const compacted = await runtime.compactSession(session.id, "retain implementation decisions");
+    expect(compacted).toMatchObject({
+      ok: true,
+      status: "compressed",
+      beforeMessages: 8,
+      afterMessages: 3,
+      removed: 5,
+    });
+    const compactedMessages = runtime.getSession(session.id)?.messages ?? [];
+    expect(compactedMessages[0]).toMatchObject({ role: "system" });
+    expect(compactedMessages[0]?.content).toContain("Earlier session summary");
+    expect(powerhouse.audit.list().some((entry) => entry.type === "session.branched")).toBe(true);
+    expect(powerhouse.audit.list().some((entry) => entry.type === "session.undone")).toBe(true);
+    expect(powerhouse.audit.list().some((entry) => entry.type === "session.history_replaced")).toBe(true);
+
+    runtime.shutdown();
+  });
+
   it("returns a detailed task view with related memory and audit entries", async () => {
     const runtime = new LocalAgentixRuntime();
 
@@ -938,6 +1534,7 @@ describe("Powerhouse restored runtime", () => {
     expect(deltas.some((delta) => delta.includes("Running step"))).toBe(true);
     expect(deltas.some((delta) => delta.includes("Execution complete"))).toBe(true);
     expect(deltas.join("")).toContain(result.response);
+    expect(deltas.join("")).toContain(`${result.response}\n[agentix] Step`);
 
     powerhouse.stop();
   });
@@ -1398,6 +1995,62 @@ describe("Powerhouse restored runtime", () => {
     powerhouse.stop();
   });
 
+  it("bounds scheduled script output and terminates timed-out process trees", async () => {
+    const powerhouse = makePowerhouse();
+    const dir = tempDir("agentix-script-scheduler-bounds-");
+    const outputScript = join(dir, "large-output.js");
+    const timeoutScript = join(dir, "hang.js");
+    writeFileSync(outputScript, "process.stdout.write('x'.repeat(10000))\n", "utf-8");
+    writeFileSync(timeoutScript, "setInterval(() => {}, 1000)\n", "utf-8");
+    const scheduler = new SchedulerService(
+      powerhouse,
+      new ScheduledJobStore(join(dir, "jobs.json")),
+      new AuditLog(join(dir, "audit.jsonl")),
+      [dir],
+      { scriptTimeoutMs: 1_000, maxOutputBytes: 1024 },
+    );
+    const outputJob = scheduler.create({
+      name: "bounded output",
+      stimulus: "",
+      schedule: "every 1m",
+      script: outputScript,
+      noAgent: true,
+    });
+    const timeoutJob = scheduler.create({
+      name: "bounded timeout",
+      stimulus: "",
+      schedule: "every 1m",
+      script: timeoutScript,
+      noAgent: true,
+    });
+
+    expect((await scheduler.runNow(outputJob.id)).ok).toBe(true);
+    expect(Buffer.byteLength(scheduler.jobs.get(outputJob.id)?.lastOutput ?? "")).toBeLessThanOrEqual(1_100);
+    expect(scheduler.jobs.get(outputJob.id)?.lastOutput).toContain("[output truncated]");
+    const timeoutResult = await scheduler.runNow(timeoutJob.id);
+    expect(timeoutResult.ok).toBe(false);
+    expect(timeoutResult.error).toBe("scheduled script timed out after 1000ms");
+
+    scheduler.stop();
+    powerhouse.stop();
+  });
+
+  it("clears stale scheduler running locks after process restart", () => {
+    const powerhouse = makePowerhouse();
+    const dir = tempDir("agentix-scheduler-stale-lock-");
+    const jobs = new ScheduledJobStore(join(dir, "jobs.json"));
+    const audit = new AuditLog(join(dir, "audit.jsonl"));
+    const job = jobs.create({ name: "stale", stimulus: "resume", intervalMs: 60_000 });
+    jobs.update(job.id, { running: true });
+
+    const scheduler = new SchedulerService(powerhouse, jobs, audit, [dir]);
+
+    expect(scheduler.jobs.get(job.id)?.running).toBe(false);
+    expect(audit.list().some((entry) => entry.type === "scheduler.job_recovered")).toBe(true);
+    scheduler.stop();
+    powerhouse.stop();
+  });
+
   it("rejects scheduled scripts outside allowed script directories", async () => {
     const powerhouse = makePowerhouse();
     const dir = tempDir("agentix-script-scheduler-");
@@ -1468,12 +2121,52 @@ describe("Powerhouse restored runtime", () => {
       const message = await runtime.receiveGatewayMessage({
         gatewayId: "webhook",
         stimulus: "gateway smoke",
+        metadata: { source: "untrusted", chatId: "channel-1" },
       });
       expect(message.ok).toBe(true);
       expect(message.response).toContain("Powerhouse accepted the task");
       expect(message.delivery).toMatchObject({ attempted: true, ok: true });
       expect(delivered?.gatewayId).toBe("webhook");
       expect(String(delivered?.response)).toContain("Powerhouse accepted the task");
+
+      const gatewaySessionId = String(message.sessionId);
+      const sessionsAfterFirstMessage = runtime.listSessions();
+      const gatewaySession = sessionsAfterFirstMessage.find((session) => session.id === gatewaySessionId);
+      expect(gatewaySession?.metadata).toMatchObject({
+        source: "gateway",
+        gatewayId: "webhook",
+        gatewayPlatform: "webhook",
+        chatId: "channel-1",
+      });
+
+      const followup = await runtime.receiveGatewayMessage({
+        gatewayId: "webhook",
+        stimulus: "gateway followup",
+        sessionId: gatewaySessionId,
+        deliver: false,
+      });
+      expect(followup.sessionId).toBe(gatewaySessionId);
+      expect(followup.delivery).toMatchObject({ attempted: false, error: "delivery disabled" });
+      expect(runtime.listSessions()).toHaveLength(sessionsAfterFirstMessage.length);
+
+      const precreated = runtime.createSession({
+        metadata: { source: "agentix-runtime", transport: "hermes-derived-gateway" },
+      });
+      const sessionCountBeforePrecreatedMessage = runtime.listSessions().length;
+      const precreatedMessage = await runtime.receiveGatewayMessage({
+        gatewayId: "webhook",
+        stimulus: "precreated gateway session",
+        sessionId: precreated.id,
+        metadata: { source: "untrusted", chatId: "channel-2" },
+        deliver: false,
+      });
+      expect(precreatedMessage.sessionId).toBe(precreated.id);
+      expect(runtime.listSessions()).toHaveLength(sessionCountBeforePrecreatedMessage);
+      expect(runtime.getSession(precreated.id)?.session.metadata).toMatchObject({
+        source: "gateway",
+        gatewayId: "webhook",
+        chatId: "channel-2",
+      });
 
       const inbound = await runtime.receiveGatewayInbound({
         gatewayId: "webhook",
@@ -1511,10 +2204,29 @@ describe("Powerhouse restored runtime", () => {
     runtime.shutdown();
   });
 
-  it("creates a support bundle with runtime snapshots", async () => {
-    const runtime = new LocalAgentixRuntime();
+  it("creates a support bundle with redacted runtime snapshots", async () => {
+    const apiKey = "agentix-test-api-key-never-export";
+    const sessionToken = "agentix-test-session-token-never-export";
+    const payloadSecret = "payload-bearer-secret-never-export";
+    process.env.AGENTIX_LLM_API_KEY = apiKey;
+    process.env.AGENTIX_SESSION_TOKEN = sessionToken;
+    resetConfigCache();
+    const powerhouse = makePowerhouse();
+    const runtime = new LocalAgentixRuntime({ powerhouse });
+    const runtimeLogs = new RuntimeLogStore();
 
-    await runtime.execute({ stimulus: "support bundle smoke" });
+    runtimeLogs.record({
+      timestamp: new Date().toISOString(),
+      level: "error",
+      source: "system",
+      message: `provider failure for ${apiKey} using ${sessionToken}`,
+    });
+    const execution = await runtime.execute({ stimulus: `support bundle smoke ${apiKey} ${sessionToken}` });
+    const task = powerhouse.taskStore.get(execution.taskIds[0]!);
+    expect(task).toBeDefined();
+    task!.payload.authorization = `Bearer ${payloadSecret}`;
+    task!.payload.callback = `https://user:${payloadSecret}@example.test/hook`;
+    powerhouse.taskStore.upsert(task!);
     const bundle = runtime.createSupportBundle() as { bundleDir: string; files: string[] };
 
     expect(existsSync(join(bundle.bundleDir, "manifest.json"))).toBe(true);
@@ -1533,6 +2245,21 @@ describe("Powerhouse restored runtime", () => {
     expect(manifest.counts.tasks).toBeGreaterThanOrEqual(1);
     expect(manifest.counts.plans).toBeGreaterThanOrEqual(1);
     expect(manifest.counts.sessions).toBeGreaterThanOrEqual(1);
+
+    const config = JSON.parse(readFileSync(join(bundle.bundleDir, "config.json"), "utf-8"));
+    expect(config.llmApiKey).toBe("[redacted]");
+    expect(config.sessionToken).toBe("[redacted]");
+
+    const readBundle = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
+      .flatMap((entry) => {
+        const path = join(dir, entry.name);
+        return entry.isDirectory() ? readBundle(path) : [readFileSync(path, "utf-8")];
+      });
+    const contents = readBundle(bundle.bundleDir).join("\n");
+    expect(contents).not.toContain(apiKey);
+    expect(contents).not.toContain(sessionToken);
+    expect(contents).not.toContain(payloadSecret);
+    expect(contents).toContain("[redacted]");
 
     runtime.shutdown();
   });

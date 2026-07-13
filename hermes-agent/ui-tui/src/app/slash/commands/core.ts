@@ -22,6 +22,8 @@ import { patchOverlayState } from '../../overlayStore.js'
 import { patchUiState } from '../../uiStore.js'
 import type { SlashCommand } from '../types.js'
 
+const PRODUCT_NAME = process.env.AGENTIX_FRONTEND === 'agentix' ? 'Agentix' : 'Hermes'
+
 const flagFromArg = (arg: string, current: boolean): boolean | null => {
   if (!arg) {
     return !current
@@ -111,17 +113,17 @@ export const coreCommands: SlashCommand[] = [
 
   {
     aliases: ['exit'],
-    help: 'exit hermes',
+    help: `exit ${PRODUCT_NAME}`,
     name: 'quit',
     run: (_arg, ctx) => ctx.session.die()
   },
 
   {
-    help: 'update Hermes Agent to the latest version (exits TUI)',
+    help: `update ${PRODUCT_NAME} to the latest version (exits TUI)`,
     name: 'update',
     run: (_arg, ctx) => {
       ctx.transcript.sys('exiting TUI to run update...')
-      // Exit code 42 signals the Python wrapper to exec `hermes update`.
+      // Exit code 42 asks the Python wrapper to launch the product updater.
       // Use dieWithCode for proper cleanup (gateway kill + Ink unmount).
       setTimeout(() => ctx.session.dieWithCode(42), 100)
     }
@@ -474,7 +476,7 @@ export const coreCommands: SlashCommand[] = [
       const preview = Math.max(80, parseInt(arg, 10) || 400)
 
       const lines = items.map((m, i) => {
-        const tag = m.role === 'user' ? `You #${i + 1}` : `Hermes #${i + 1}`
+        const tag = m.role === 'user' ? `You #${i + 1}` : `${PRODUCT_NAME} #${i + 1}`
         const body = m.text.trim() || (m.tools?.length ? `(${m.tools.length} tool calls)` : '(empty)')
         const clipped = body.length > preview ? `${body.slice(0, preview).trimEnd()}…` : body
 

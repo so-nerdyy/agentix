@@ -29,7 +29,7 @@ export interface StepValidation {
 
 export interface SymphonyResult {
   ok: boolean;
-  status: "complete" | "awaiting-approval" | "failed";
+  status: "complete" | "awaiting-approval" | "failed" | "cancelled";
   plan: SymphonyPlan;
   outputs: Array<{
     stepId: string;
