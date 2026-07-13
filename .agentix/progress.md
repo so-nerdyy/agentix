@@ -28,7 +28,7 @@ Updated: 2026-07-12
   session, and token create/revoke passed; mobile 390x844 passed; zero console errors.
 - Invalid command: local exit status 2, Agentix-only error, no bridge/Python startup.
 - Full slash-command inventory: real isolated shell subprocess passed.
-- PR #21 CI run `29215385410`: Ubuntu and Windows build, 181 tests, packed release
+- PR #21 CI: Ubuntu and Windows build, 181 tests, packed release
   smoke, and native installer dry runs passed; primary/compatibility Docker images
   and Linux/Windows compose validation passed.
 - CI and release workflows use current Node-runtime action majors and no longer run

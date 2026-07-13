@@ -69,6 +69,7 @@ describe("release packaging files", () => {
     expect(verifier).toContain("verifyInstaller");
     expect(verifier).toContain("verifyNpmGlobalInstall");
     expect(verifier).toContain("npmInstall");
+    expect(verifier).toContain("unable to remove verification prefix");
     expect(verifier).toContain("dist.attestations.url");
     expect(verifier).toContain("slsa.dev/provenance");
     expect(verifier).toContain("AGENTIX_VERIFY_SKIP_NPM");

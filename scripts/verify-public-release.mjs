@@ -191,7 +191,9 @@ async function verifyNpmGlobalInstall(packageName, version) {
       helpChecked: true,
     };
   } finally {
-    await rm(prefix, { recursive: true, force: true }).catch(() => {});
+    await rm(prefix, { recursive: true, force: true }).catch((error) => {
+      console.warn(`warning: unable to remove verification prefix ${prefix}: ${error instanceof Error ? error.message : String(error)}`);
+    });
   }
 }
 
