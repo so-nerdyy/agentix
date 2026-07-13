@@ -94,11 +94,17 @@ describe("release packaging files", () => {
     expect(releaseWorkflow).toContain("npm run release:verify -- --out data/release/public-release-proof.json");
     expect(releaseWorkflow).toContain("npm run verify:llm -- --out data/release/live-llm-proof.json");
     expect(releaseWorkflow).toContain("agentix-readiness-proofs");
+    expect(releaseWorkflow).toContain("actions/checkout@v7");
+    expect(releaseWorkflow).toContain("actions/setup-node@v6");
+    expect(releaseWorkflow).toContain("actions/setup-python@v6");
     expect(dockerfile).toContain("dist/cli.js");
     expect(dockerfile).toContain("\"server\"");
     expect(dockerfile).toContain("HEALTHCHECK");
     expect(compose).toContain("AGENTIX_SESSION_TOKEN");
     expect(ciWorkflow).toContain("docker build -t agentix:ci .");
+    expect(ciWorkflow).toContain("actions/checkout@v7");
+    expect(ciWorkflow).toContain("actions/setup-node@v6");
+    expect(ciWorkflow).toContain("actions/setup-python@v6");
     expect(ciWorkflow).not.toContain('      - "codex/**"');
   });
 });
