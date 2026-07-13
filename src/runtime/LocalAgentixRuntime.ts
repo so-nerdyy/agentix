@@ -9,6 +9,7 @@ import {
   loadConfig,
   saveConfig,
   saveWorkspaceConfigOverride,
+  saveWorkspaceLlmApiKey,
   type AgentixConfig,
 } from "../config/index.js";
 import { defaultAuthTokenStore, type AuthRole } from "../config/AuthTokenStore.js";
@@ -26,6 +27,7 @@ import {
 import type { CommandAgentProfile } from "../pi/AgentProfileStore.js";
 import { dockerSandboxAvailable } from "../pi/SandboxAgent.js";
 import { PACKAGE_METADATA } from "../config/package.js";
+import { LLMClient } from "../llm/LLMClient.js";
 
 export type RuntimeSearchResults = {
   query: string;
@@ -365,6 +367,8 @@ export class LocalAgentixRuntime {
     createdAt: string;
     updatedAt: string;
     metadata: Record<string, unknown>;
+    messageCount: number;
+    preview: string;
   }> {
     const sessions = opts.limit
       ? this.powerhouse.sessions.listRecent(opts.limit)
@@ -372,25 +376,53 @@ export class LocalAgentixRuntime {
           this.powerhouse.start({ recover: opts.recover ?? true });
           return this.powerhouse.listSessions();
         })();
-    return sessions.map((session) => ({
-      id: session.id,
-      status: session.status,
-      createdAt: new Date(session.createdAt).toISOString(),
-      updatedAt: new Date(session.updatedAt).toISOString(),
-      metadata: session.metadata,
-    }));
+    return sessions.map((session) => {
+      const messages = session.messages ?? [];
+      const preview = [...messages]
+        .reverse()
+        .map((message) => message.content.trim())
+        .find(Boolean) ?? "";
+      return {
+        id: session.id,
+        status: session.status,
+        createdAt: new Date(session.createdAt).toISOString(),
+        updatedAt: new Date(session.updatedAt).toISOString(),
+        metadata: session.metadata,
+        messageCount: messages.length,
+        preview: preview.replace(/\s+/g, " ").slice(0, 160),
+      };
+    });
   }
 
-  createSession(opts?: { model?: string }): { id: string } {
+  createSession(opts?: {
+    model?: string;
+    provider?: string;
+    baseUrl?: string;
+    toolsets?: unknown;
+    skills?: string[];
+    metadata?: Record<string, unknown>;
+    messages?: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+  }): { id: string } {
     const session = this.powerhouse.createSession({
+      ...(opts?.metadata ?? {}),
       model: opts?.model ?? null,
+      provider: opts?.provider ?? null,
+      baseUrl: opts?.baseUrl ?? null,
+      toolsets: opts?.toolsets ?? null,
+      skills: opts?.skills ?? null,
       source: "agentix-runtime",
     });
+    for (const message of (opts?.messages ?? []).slice(-1000)) {
+      if (!["system", "user", "assistant"].includes(message.role)) continue;
+      if (typeof message.content !== "string" || !message.content.trim()) continue;
+      this.powerhouse.sessions.appendMessage(session.id, message);
+    }
     return { id: session.id };
   }
 
-  deleteSession(id: string): void {
-    this.powerhouse.closeSession(id);
+  deleteSession(id: string): Record<string, unknown> {
+    const result = this.powerhouse.deleteSession(id);
+    return result.ok ? { ok: true, deleted: id } : result;
   }
 
   renameSession(id: string, title: string): Record<string, unknown> {
@@ -478,6 +510,37 @@ export class LocalAgentixRuntime {
       name: agent.kind,
       description: `Pi agent ${agent.id} handles ${agent.kind} tasks.`,
     }));
+  }
+
+  listSkills(query = ""): Array<Record<string, unknown>> {
+    return this.powerhouse.skills.list(query).map((skill) => ({ ...skill }));
+  }
+
+  getSkill(id: string): Record<string, unknown> | null {
+    const skill = this.powerhouse.skills.get(id);
+    return skill ? { ...skill } : null;
+  }
+
+  setSkillEnabled(id: string, enabled: boolean): Record<string, unknown> {
+    const skill = this.powerhouse.skills.setEnabled(id, enabled);
+    if (!skill) return { ok: false, error: `unknown Agentix skill: ${id}` };
+    this.powerhouse.audit.record({
+      type: enabled ? "skill.enabled" : "skill.disabled",
+      actor: "user",
+      subjectId: skill.id,
+      data: { skillId: skill.id, source: skill.source },
+    });
+    return { ok: true, skill };
+  }
+
+  reloadSkills(): Record<string, unknown> {
+    const skills = this.powerhouse.skills.reload().map((skill) => ({ ...skill }));
+    this.powerhouse.audit.record({
+      type: "skills.reloaded",
+      actor: "user",
+      data: { count: skills.length },
+    });
+    return { ok: true, count: skills.length, skills };
   }
 
   getTool(toolId: string): RuntimeToolDetail | null {
@@ -1308,6 +1371,13 @@ export class LocalAgentixRuntime {
     sessionId?: string;
     metadata?: Record<string, unknown>;
     deliver?: boolean;
+    onDelta?: (delta: string) => void;
+    model?: string;
+    provider?: string;
+    baseUrl?: string;
+    toolsets?: unknown;
+    skills?: string[];
+    signal?: AbortSignal;
   }): Promise<Record<string, unknown>> {
     this.powerhouse.start();
     const gateway = this.gateways.get(input.gatewayId);
@@ -1315,17 +1385,35 @@ export class LocalAgentixRuntime {
       throw new Error(`unknown gateway: ${input.gatewayId}`);
     }
     this.gateways.recordMessage(gateway.id, { status: "connected" });
-    const session = this.powerhouse.createSession({
+    const existingSession = input.sessionId
+      ? this.powerhouse.listSessions().find((session) => session.id === input.sessionId)
+      : undefined;
+    if (existingSession) {
+      this.powerhouse.sessions.updateMetadata(existingSession.id, {
+        ...(input.metadata ?? {}),
+        source: "gateway",
+        gatewayId: gateway.id,
+        gatewayPlatform: gateway.platform,
+        gatewayName: gateway.name,
+      });
+    }
+    const session = existingSession ?? this.powerhouse.createSession({
+      ...(input.metadata ?? {}),
       source: "gateway",
       gatewayId: gateway.id,
       gatewayPlatform: gateway.platform,
       gatewayName: gateway.name,
-      ...(input.metadata ?? {}),
     });
     const result = await this.powerhouse.executeStimulus({
       stimulus: input.stimulus,
-      sessionId: input.sessionId ?? session.id,
-      onDelta: undefined,
+      sessionId: session.id,
+      onDelta: input.onDelta,
+      model: input.model,
+      provider: input.provider,
+      baseUrl: input.baseUrl,
+      toolsets: input.toolsets,
+      skills: input.skills,
+      signal: input.signal,
     });
     const delivery = input.deliver === false
       ? { attempted: false, ok: false, target: null, error: "delivery disabled" }
@@ -1698,6 +1786,122 @@ export class LocalAgentixRuntime {
       data: { key: normalized, value: parsed },
     });
     return { ok: true, key: normalized, value: parsed, config: this.config() };
+  }
+
+  setLlmApiKey(value: unknown): Record<string, unknown> {
+    const secret = typeof value === "string" ? value.trim() : "";
+    saveWorkspaceLlmApiKey(secret || null);
+    this.powerhouse.audit.record({
+      type: secret ? "config.secret_updated" : "config.secret_removed",
+      actor: "user",
+      subjectId: "AGENTIX_LLM_API_KEY",
+      data: { key: "AGENTIX_LLM_API_KEY", configured: Boolean(secret) },
+    });
+    return {
+      ok: true,
+      configured: Boolean(secret),
+      config: this.config(),
+    };
+  }
+
+  undoSession(id: string): Record<string, unknown> {
+    return this.powerhouse.undoSession(id);
+  }
+
+  truncateSessionBeforeUserOrdinal(id: string, ordinal: number): Record<string, unknown> {
+    this.powerhouse.start();
+    if (!Number.isSafeInteger(ordinal) || ordinal < 0) {
+      return { ok: false, error: "user ordinal must be a non-negative integer" };
+    }
+    const session = this.powerhouse.sessions.get(id);
+    if (!session) return { ok: false, error: `unknown session: ${id}` };
+    const userIndices = session.messages
+      .map((message, index) => message.role === "user" ? index : -1)
+      .filter((index) => index >= 0);
+    if (ordinal >= userIndices.length) {
+      return { ok: false, error: "target user message is no longer in session history" };
+    }
+    const beforeMessages = session.messages.length;
+    const replacement = session.messages.slice(0, userIndices[ordinal]);
+    const result = this.powerhouse.replaceSessionHistory(
+      id,
+      replacement,
+      `truncate-before-user-${ordinal}`,
+    );
+    return result.ok
+      ? {
+          ...result,
+          removed: beforeMessages - (result.messages?.length ?? 0),
+          ordinal,
+        }
+      : result;
+  }
+
+  branchSession(id: string, title?: string): Record<string, unknown> {
+    const result = this.powerhouse.branchSession(id, title);
+    if (!result.ok || !result.session) return result;
+    return {
+      ok: true,
+      id: result.session.id,
+      parentSessionId: id,
+      title: result.session.metadata.title,
+      messages: result.session.messages,
+    };
+  }
+
+  async compactSession(id: string, focusTopic?: string): Promise<Record<string, unknown>> {
+    this.powerhouse.start();
+    const session = this.powerhouse.sessions.get(id);
+    if (!session) return { ok: false, error: `unknown session: ${id}` };
+    const before = session.messages.map((message) => ({ ...message }));
+    if (before.length < 6) {
+      return {
+        ok: true,
+        status: "unchanged",
+        removed: 0,
+        beforeMessages: before.length,
+        afterMessages: before.length,
+        messages: before,
+        summary: "The session is already compact.",
+      };
+    }
+    const keepCount = Math.min(6, Math.max(2, Math.floor(before.length / 3)));
+    const older = before.slice(0, -keepCount);
+    const recent = before.slice(-keepCount);
+    const focus = String(focusTopic ?? "").trim();
+    const completion = await new LLMClient(loadConfig()).complete([
+      {
+        role: "system",
+        content: [
+          "Summarize this Agentix session history for future continuation.",
+          "Preserve decisions, requirements, file paths, commands, failures, unresolved work, and user preferences.",
+          "Do not invent actions or results.",
+          focus ? `Prioritize this focus: ${focus}` : "",
+        ].filter(Boolean).join(" "),
+      },
+      {
+        role: "user",
+        content: older.map((message) => `${message.role}: ${message.content}`).join("\n\n"),
+      },
+    ], { timeoutMs: 120_000, maxAttempts: 2 });
+    if (!completion.ok || !completion.text) {
+      return { ok: false, error: completion.error || "session compaction failed" };
+    }
+    const replacement = [
+      { role: "system" as const, content: `Earlier session summary:\n${completion.text}` },
+      ...recent,
+    ];
+    const replaced = this.powerhouse.replaceSessionHistory(id, replacement, "model-backed-compaction");
+    if (!replaced.ok) return replaced;
+    return {
+      ok: true,
+      status: "compressed",
+      removed: before.length - (replaced.messages?.length ?? 0),
+      beforeMessages: before.length,
+      afterMessages: replaced.messages?.length ?? 0,
+      messages: replaced.messages,
+      summary: completion.text,
+    };
   }
 
   doctor(): Record<string, unknown> {
@@ -2358,6 +2562,7 @@ export class LocalAgentixRuntime {
       provider?: string;
       baseUrl?: string;
       toolsets?: unknown;
+      skills?: string[];
       signal?: AbortSignal;
     },
   ): Promise<{ response: string; sessionId: string; status: string; taskIds: string[] }> {

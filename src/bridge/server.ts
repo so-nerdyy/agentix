@@ -75,6 +75,10 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
     if (result.ok === false) reply.status(400);
     return result;
   });
+  server.post("/config/secret", async (request) => {
+    const body = request.body as Record<string, unknown> | undefined;
+    return runtime().setLlmApiKey(body?.value);
+  });
 
   server.post("/execute/stream", async (request, reply) => {
     const body = request.body as Record<string, unknown> | undefined;
@@ -106,18 +110,30 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
     heartbeat.unref?.();
 
     try {
-      const result = await runtime().execute({
+      const execution = {
         stimulus,
         sessionId: body?.sessionId as string | undefined,
         model: typeof body?.model === "string" ? body.model : undefined,
         provider: typeof body?.provider === "string" ? body.provider : undefined,
         baseUrl: typeof body?.baseUrl === "string" ? body.baseUrl : undefined,
         toolsets: body?.toolsets,
+        skills: Array.isArray(body?.skills) ? body.skills.map(String) : undefined,
         signal: controller.signal,
         onDelta: (delta: string) => {
           writeEvent(`data: ${JSON.stringify({ delta })}\n\n`);
         },
-      });
+      };
+      const gatewayId = typeof body?.gatewayId === "string" ? body.gatewayId.trim() : "";
+      const result = gatewayId
+        ? await runtime().receiveGatewayMessage({
+            ...execution,
+            gatewayId,
+            metadata: body?.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)
+              ? body.metadata as Record<string, unknown>
+              : undefined,
+            deliver: body?.deliver === undefined ? undefined : Boolean(body.deliver),
+          })
+        : await runtime().execute(execution);
       writeEvent(`data: ${JSON.stringify({
         type: "result",
         sessionId: result.sessionId,
@@ -155,6 +171,7 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
       provider: typeof body?.provider === "string" ? body.provider : undefined,
       baseUrl: typeof body?.baseUrl === "string" ? body.baseUrl : undefined,
       toolsets: body?.toolsets,
+      skills: Array.isArray(body?.skills) ? body.skills.map(String) : undefined,
     });
   });
 
@@ -176,16 +193,61 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
   });
   server.post("/sessions", async (request, reply) => {
     const body = request.body as Record<string, unknown>;
-    return runtime().createSession({ model: body.model as string | undefined });
+    return runtime().createSession({
+      model: body.model as string | undefined,
+      provider: body.provider as string | undefined,
+      baseUrl: body.baseUrl as string | undefined,
+      toolsets: body.toolsets,
+      skills: Array.isArray(body.skills) ? body.skills.map(String) : undefined,
+      metadata: body.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)
+        ? body.metadata as Record<string, unknown>
+        : undefined,
+      messages: Array.isArray(body.messages)
+        ? body.messages as Array<{ role: "system" | "user" | "assistant"; content: string }>
+        : undefined,
+    });
   });
   server.delete("/sessions/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
-    return runtime().deleteSession(id);
+    const result = runtime().deleteSession(id);
+    if (result.ok === false) {
+      reply.status(String(result.error ?? "").includes("active work") ? 409 : 404);
+    }
+    return result;
   });
   server.post("/sessions/:id/rename", async (request) => {
     const { id } = request.params as { id: string };
     const body = request.body as Record<string, unknown>;
     return runtime().renameSession(id, String(body.title ?? ""));
+  });
+  server.post("/sessions/:id/undo", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const result = runtime().undoSession(id);
+    if (result.ok === false) reply.status(String(result.error ?? "").includes("active work") ? 409 : 404);
+    return result;
+  });
+  server.post("/sessions/:id/truncate", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as Record<string, unknown> | undefined;
+    const result = runtime().truncateSessionBeforeUserOrdinal(id, Number(body?.userOrdinal));
+    if (result.ok === false) {
+      reply.status(String(result.error ?? "").includes("active work") ? 409 : 400);
+    }
+    return result;
+  });
+  server.post("/sessions/:id/compact", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as Record<string, unknown> | undefined;
+    const result = await runtime().compactSession(id, String(body?.focusTopic ?? ""));
+    if (result.ok === false) reply.status(String(result.error ?? "").includes("active work") ? 409 : 400);
+    return result;
+  });
+  server.post("/sessions/:id/branch", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = request.body as Record<string, unknown> | undefined;
+    const result = runtime().branchSession(id, String(body?.title ?? ""));
+    if (result.ok === false) reply.status(400);
+    return result;
   });
   server.post("/sessions/prune", async (request) => {
     const body = request.body as Record<string, unknown>;
@@ -225,6 +287,29 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
       return { error: `unknown tool: ${id}` };
     }
     return tool;
+  });
+  server.get("/skills", async (request) => {
+    const query = request.query as Record<string, string | undefined>;
+    return runtime().listSkills(query.q ?? "");
+  });
+  server.post("/skills/reload", async () => runtime().reloadSkills());
+  server.get("/skills/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const skill = runtime().getSkill(id);
+    if (!skill) reply.status(404);
+    return skill ?? { error: `unknown Agentix skill: ${id}` };
+  });
+  server.post("/skills/:id/enable", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const result = runtime().setSkillEnabled(id, true);
+    if (result.ok === false) reply.status(404);
+    return result;
+  });
+  server.post("/skills/:id/disable", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const result = runtime().setSkillEnabled(id, false);
+    if (result.ok === false) reply.status(404);
+    return result;
   });
   server.get("/logs", async (request) => {
     const query = request.query as Record<string, string | undefined>;
@@ -270,6 +355,7 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
       stimulus: String(body?.stimulus ?? body?.text ?? ""),
       sessionId: body?.sessionId as string | undefined,
       metadata: (body?.metadata as Record<string, unknown> | undefined) ?? undefined,
+      deliver: body?.deliver === undefined ? undefined : Boolean(body.deliver),
     });
   });
   server.post("/gateway/:id/inbound", async (request, reply) => {

@@ -237,7 +237,7 @@ function normalizeAnsiForeground(color: string): string {
 // ── Defaults ─────────────────────────────────────────────────────────
 
 const BRAND: ThemeBrand = {
-  name: 'Hermes Agent',
+  name: process.env.AGENTIX_FRONTEND === 'agentix' ? 'Agentix' : 'Hermes Agent',
   icon: '⚕',
   prompt: '❯',
   welcome: 'Type your message or /help for commands.',

@@ -6,6 +6,8 @@ import { DEFAULT_THEME } from '../theme.js'
 
 import { DEFAULT_INDICATOR_STYLE, type UiState } from './interfaces.js'
 
+const STARTUP_STATUS = process.env.AGENTIX_FRONTEND === 'agentix' ? 'starting Agentix…' : 'summoning hermes…'
+
 const buildUiState = (): UiState => ({
   bgTasks: new Set(),
   busy: false,
@@ -24,7 +26,7 @@ const buildUiState = (): UiState => ({
   showCost: false,
   showReasoning: false,
   sid: null,
-  status: 'summoning hermes…',
+  status: STARTUP_STATUS,
   statusBar: 'top',
   streaming: true,
   theme: DEFAULT_THEME,

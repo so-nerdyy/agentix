@@ -15,6 +15,7 @@ export class ConversationAgent extends BasePIAgent {
     const userRequest = String(task.payload.userRequest ?? stimulus).trim();
     const plannedInstruction = String(task.payload.plannedInstruction ?? "").trim();
     const context = task.payload.context;
+    const skillInstructions = String(task.payload.skillInstructions ?? "").trim();
     const execution = typeof task.payload.execution === "object" && task.payload.execution !== null
       ? task.payload.execution as Record<string, unknown>
       : {};
@@ -39,8 +40,9 @@ export class ConversationAgent extends BasePIAgent {
           "You are Agentix, an autonomous software agent backend.",
           "The Agentix shell owns the terminal UI, setup, commands, and integrations.",
           "The Agentix backend owns Powerhouse orchestration, Symphony planning, Pi agents, memory, approvals, validation, and healing.",
+          skillInstructions,
           "Answer the user directly and be concise unless the task requires detail.",
-        ].join(" "),
+        ].filter(Boolean).join("\n\n"),
       },
       {
         role: "user",

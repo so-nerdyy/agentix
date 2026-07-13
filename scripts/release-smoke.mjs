@@ -1104,6 +1104,49 @@ async function smokeServer() {
     assert(tuiProxyOutput.includes("release smoke tui proxy delegation"), "TUI proxy output did not preserve streamed content");
     assert(!/hermes|nous portal/i.test(tuiProxyOutput), "TUI proxy metadata leaked compatibility branding");
 
+    const tuiSessions = await run(python, [
+      "-c",
+      [
+        "import json, itertools",
+        "import tui_gateway.server as gateway",
+        "ids = itertools.count(1)",
+        "def call(method, params=None):",
+        "    response = gateway.handle_request({'jsonrpc': '2.0', 'id': next(ids), 'method': method, 'params': params or {}})",
+        "    assert 'error' not in response, response",
+        "    return response['result']",
+        "created = call('session.create', {'title': 'Agentix TUI session'})",
+        "sid = created['session_id']",
+        "stored = created['stored_session_id']",
+        "assert stored.startswith('sess-')",
+        "assert call('session.title', {'session_id': sid})['title'] == 'Agentix TUI session'",
+        "assert any(row['id'] == stored for row in call('session.list')['sessions'])",
+        "assert call('session.history', {'session_id': sid})['count'] == 0",
+        "assert 'Agentix v2.2.0' in call('slash.exec', {'session_id': sid, 'command': '/version'})['output']",
+        "assert call('command.dispatch', {'session_id': sid, 'name': 'plans', 'arg': ''})['type'] == 'exec'",
+        "assert 'not sent to the Hermes runtime' in call('slash.exec', {'session_id': sid, 'command': '/pet'})['output']",
+        "assert any(item['text'] == '/gateway' for item in call('complete.slash', {'text': '/g'})['items'])",
+        "assert not any(item['text'] in {'/goal', '/gquota'} for item in call('complete.slash', {'text': '/g'})['items'])",
+        "assert gateway._sessions[sid].get('slash_worker') is None",
+        "assert call('session.close', {'session_id': sid})['closed'] is True",
+        "resumed = call('session.resume', {'session_id': stored})",
+        "assert resumed['resumed'] == stored",
+        "assert resumed['message_count'] == 0",
+        "call('session.close', {'session_id': resumed['session_id']})",
+        "disposable = call('session.create')",
+        "call('session.close', {'session_id': disposable['session_id']})",
+        "call('session.delete', {'session_id': disposable['stored_session_id']})",
+        "assert not any(row['id'] == disposable['stored_session_id'] for row in call('session.list')['sessions'])",
+        "assert gateway._db is None",
+        "print(json.dumps({'agentix_session': stored, 'hermes_db_initialized': False}))",
+      ].join("\n"),
+    ], {
+      cwd: smokeRoot,
+      env: compatibilityEnv,
+      timeoutMs: 120_000,
+    });
+    const tuiSessionsOutput = `${tuiSessions.stdout}\n${tuiSessions.stderr}`;
+    assert(tuiSessionsOutput.includes('"hermes_db_initialized": false'), "TUI sessions did not remain Agentix-owned");
+
     const tuiCancellation = await run(python, [
       "-c",
       [

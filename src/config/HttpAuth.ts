@@ -83,7 +83,7 @@ export function assertSafeListenHost(host: string | undefined, configuredToken: 
 
 export function requiredRoleForRequest(method: string, pathname: string): AuthRole {
   if (pathname.startsWith("/auth")) return "admin";
-  if (pathname === "/config" && method !== "GET") return "admin";
+  if (pathname.startsWith("/config") && method !== "GET") return "admin";
   if (pathname === "/memory/reset") return "admin";
   if (method === "GET") return "viewer";
   return "operator";

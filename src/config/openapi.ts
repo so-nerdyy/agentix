@@ -30,6 +30,9 @@ export const openApiSpec = {
       get: { summary: "Read redacted runtime config" },
       post: { summary: "Update allowed non-secret runtime config values" },
     },
+    "/config/secret": {
+      post: { summary: "Replace or remove the workspace LLM API key without returning it" },
+    },
     "/auth/status": { get: { summary: "Inspect authentication mode and token counts" } },
     "/auth/tokens": {
       get: { summary: "List workspace API tokens without secrets" },
@@ -47,6 +50,10 @@ export const openApiSpec = {
       delete: { summary: "Delete session" },
     },
     "/sessions/{id}/rename": { post: { summary: "Rename session" } },
+    "/sessions/{id}/undo": { post: { summary: "Remove the latest completed user turn" } },
+    "/sessions/{id}/truncate": { post: { summary: "Truncate history before a selected user turn" } },
+    "/sessions/{id}/compact": { post: { summary: "Model-compact older session history" } },
+    "/sessions/{id}/branch": { post: { summary: "Create a Powerhouse-owned session branch" } },
     "/sessions/prune": { post: { summary: "Prune old sessions" } },
     "/sessions/optimize": { post: { summary: "Optimize session storage" } },
     "/memory": { get: { summary: "List memory records" } },
@@ -55,6 +62,11 @@ export const openApiSpec = {
     "/memory/reset": { post: { summary: "Reset memory records" } },
     "/tools": { get: { summary: "List registered Pi agents/tools" } },
     "/tools/{id}": { get: { summary: "Inspect Pi agent/tool" } },
+    "/skills": { get: { summary: "List or search Powerhouse-discovered skills" } },
+    "/skills/reload": { post: { summary: "Rescan Agentix skill roots" } },
+    "/skills/{id}": { get: { summary: "Inspect an Agentix skill" } },
+    "/skills/{id}/enable": { post: { summary: "Enable a skill for Pi prompt integration" } },
+    "/skills/{id}/disable": { post: { summary: "Disable a skill" } },
     "/agents/profiles": {
       get: { summary: "List dynamic command-backed Pi agent profiles" },
       post: { summary: "Create or update a dynamic command-backed Pi agent profile" },

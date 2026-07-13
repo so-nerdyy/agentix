@@ -1679,6 +1679,13 @@ def _launch_tui(
     # preserve_inherited=False ensures --tui and other flags are NOT carried
     # into the update subcommand.
     if code == 42:
+        if os.environ.get("AGENTIX_FRONTEND") == "agentix":
+            command = os.environ.get("AGENTIX_BIN") or "agentix"
+            print()
+            print("Launching Agentix update...")
+            print()
+            raise SystemExit(subprocess.call([command, "update", "--install"]))
+
         from hermes_cli.relaunch import relaunch
 
         print()
@@ -13270,6 +13277,15 @@ Examples:
         "which skills will load for that profile.",
     )
 
+    skills_enable = skills_subparsers.add_parser(
+        "enable", help="Enable an installed skill for Agentix Pi agents"
+    )
+    skills_enable.add_argument("name", help="Installed skill name")
+    skills_disable = skills_subparsers.add_parser(
+        "disable", help="Disable an Agentix skill"
+    )
+    skills_disable.add_argument("name", help="Installed skill name")
+
     skills_check = skills_subparsers.add_parser(
         "check", help="Check installed hub skills for updates"
     )
@@ -13431,6 +13447,10 @@ Examples:
     )
 
     def cmd_skills(args):
+        from hermes_cli.agentix_commands import handle_skills
+
+        if handle_skills(args):
+            return
         # Route 'config' action to skills_config module
         if getattr(args, "skills_action", None) == "config":
             _require_tty("skills config")

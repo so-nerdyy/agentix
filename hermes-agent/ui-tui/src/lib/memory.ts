@@ -145,11 +145,14 @@ export async function performHeapDump(trigger: MemoryTrigger = 'manual'): Promis
     // Diagnostics first — heap-snapshot serialization can crash on very large
     // heaps, and the JSON sidecar is the most actionable artifact if so.
     const diagnostics = await captureMemoryDiagnostics(trigger)
-    const dir = process.env.HERMES_HEAPDUMP_DIR?.trim() || join(homedir() || tmpdir(), '.hermes', 'heapdumps')
+    const agentixMode = process.env.AGENTIX_FRONTEND === 'agentix'
+    const dir = agentixMode
+      ? process.env.AGENTIX_HEAPDUMP_DIR?.trim() || join(homedir() || tmpdir(), '.agentix', 'heapdumps')
+      : process.env.HERMES_HEAPDUMP_DIR?.trim() || join(homedir() || tmpdir(), '.hermes', 'heapdumps')
 
     await mkdir(dir, { recursive: true })
 
-    const base = `hermes-${new Date().toISOString().replace(/[:.]/g, '-')}-${process.pid}-${trigger}`
+    const base = `${agentixMode ? 'agentix' : 'hermes'}-${new Date().toISOString().replace(/[:.]/g, '-')}-${process.pid}-${trigger}`
     const heapPath = join(dir, `${base}.heapsnapshot`)
     const diagPath = join(dir, `${base}.diagnostics.json`)
 

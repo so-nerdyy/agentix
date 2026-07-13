@@ -176,9 +176,10 @@ async function captureMemoryDiagnostics(trigger) {
 async function performHeapDump(trigger = "manual") {
   try {
     const diagnostics = await captureMemoryDiagnostics(trigger);
-    const dir2 = process.env.HERMES_HEAPDUMP_DIR?.trim() || join2(homedir2() || tmpdir(), ".hermes", "heapdumps");
+    const agentixMode = process.env.AGENTIX_FRONTEND === "agentix";
+    const dir2 = agentixMode ? process.env.AGENTIX_HEAPDUMP_DIR?.trim() || join2(homedir2() || tmpdir(), ".agentix", "heapdumps") : process.env.HERMES_HEAPDUMP_DIR?.trim() || join2(homedir2() || tmpdir(), ".hermes", "heapdumps");
     await mkdir(dir2, { recursive: true });
-    const base = `hermes-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}-${process.pid}-${trigger}`;
+    const base = `${agentixMode ? "agentix" : "hermes"}-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}-${process.pid}-${trigger}`;
     const heapPath = join2(dir2, `${base}.heapsnapshot`);
     const diagPath = join2(dir2, `${base}.diagnostics.json`);
     await writeFile(diagPath, JSON.stringify(diagnostics, null, 2), { mode: 384 });
@@ -56814,7 +56815,7 @@ var init_theme = __esm({
     ];
     ANSI_MUTED_FOREGROUNDS = ["muted", "sessionLabel", "sessionBorder"];
     BRAND = {
-      name: "Hermes Agent",
+      name: process.env.AGENTIX_FRONTEND === "agentix" ? "Agentix" : "Hermes Agent",
       icon: "\u2695",
       prompt: "\u276F",
       welcome: "Type your message or /help for commands.",
@@ -56930,7 +56931,7 @@ var init_interfaces = __esm({
 });
 
 // src/app/uiStore.ts
-var buildUiState, $uiState, $uiTheme, $uiSessionId, getUiState, patchUiState;
+var STARTUP_STATUS, buildUiState, $uiState, $uiTheme, $uiSessionId, getUiState, patchUiState;
 var init_uiStore = __esm({
   "src/app/uiStore.ts"() {
     "use strict";
@@ -56939,6 +56940,7 @@ var init_uiStore = __esm({
     init_usage();
     init_theme();
     init_interfaces();
+    STARTUP_STATUS = process.env.AGENTIX_FRONTEND === "agentix" ? "starting Agentix\u2026" : "summoning hermes\u2026";
     buildUiState = () => ({
       bgTasks: /* @__PURE__ */ new Set(),
       busy: false,
@@ -56957,7 +56959,7 @@ var init_uiStore = __esm({
       showCost: false,
       showReasoning: false,
       sid: null,
-      status: "summoning hermes\u2026",
+      status: STARTUP_STATUS,
       statusBar: "top",
       streaming: true,
       theme: DEFAULT_THEME,
@@ -58349,15 +58351,17 @@ async function terminalParityHints(env5 = process.env, options) {
     hints.push({
       key: "remote",
       tone: "warn",
-      message: "SSH session detected \xB7 text clipboard can bridge via OSC52, but image clipboard and local screenshot paths still depend on the machine running Hermes"
+      message: `SSH session detected \xB7 text clipboard can bridge via OSC52, but image clipboard and local screenshot paths still depend on the machine running ${PRODUCT_NAME}`
     });
   }
   return hints;
 }
+var PRODUCT_NAME;
 var init_terminalParity = __esm({
   "src/lib/terminalParity.ts"() {
     "use strict";
     init_terminalSetup();
+    PRODUCT_NAME = process.env.AGENTIX_FRONTEND === "agentix" ? "Agentix" : "Hermes";
   }
 });
 
@@ -58469,20 +58473,22 @@ var init_timing = __esm({
 });
 
 // src/content/setup.ts
-var SETUP_REQUIRED_TITLE, buildSetupRequiredSections;
+var SETUP_REQUIRED_TITLE, PRODUCT, COMMAND, buildSetupRequiredSections;
 var init_setup = __esm({
   "src/content/setup.ts"() {
     "use strict";
     SETUP_REQUIRED_TITLE = "Setup Required";
+    PRODUCT = process.env.AGENTIX_FRONTEND === "agentix" ? "Agentix" : "Hermes";
+    COMMAND = PRODUCT.toLowerCase();
     buildSetupRequiredSections = () => [
       {
-        text: "Hermes needs a model provider before the TUI can start a session."
+        text: `${PRODUCT} needs a model provider before the TUI can start a session.`
       },
       {
         rows: [
           ["/model", "configure provider + model in-place"],
           ["/setup", "run full first-time setup wizard in-place"],
-          ["Ctrl+C", "exit and run `hermes setup` manually"]
+          ["Ctrl+C", `exit and run \`${COMMAND} setup\` manually`]
         ],
         title: "Actions"
       }
@@ -60424,7 +60430,7 @@ var init_osc52 = __esm({
 });
 
 // src/app/slash/commands/core.ts
-var flagFromArg, MOUSE_MODE_ALIASES, mouseModeFromArg, RESET_WORDS, CYCLE_WORDS, DETAILS_USAGE, DETAILS_SECTION_USAGE, coreCommands;
+var PRODUCT_NAME2, flagFromArg, MOUSE_MODE_ALIASES, mouseModeFromArg, RESET_WORDS, CYCLE_WORDS, DETAILS_USAGE, DETAILS_SECTION_USAGE, coreCommands;
 var init_core = __esm({
   async "src/app/slash/commands/core.ts"() {
     "use strict";
@@ -60438,6 +60444,7 @@ var init_core = __esm({
     init_terminalSetup();
     init_overlayStore();
     init_uiStore();
+    PRODUCT_NAME2 = process.env.AGENTIX_FRONTEND === "agentix" ? "Agentix" : "Hermes";
     flagFromArg = (arg, current) => {
       if (!arg) {
         return !current;
@@ -60507,12 +60514,12 @@ var init_core = __esm({
       },
       {
         aliases: ["exit"],
-        help: "exit hermes",
+        help: `exit ${PRODUCT_NAME2}`,
         name: "quit",
         run: (_arg, ctx) => ctx.session.die()
       },
       {
-        help: "update Hermes Agent to the latest version (exits TUI)",
+        help: `update ${PRODUCT_NAME2} to the latest version (exits TUI)`,
         name: "update",
         run: (_arg, ctx) => {
           ctx.transcript.sys("exiting TUI to run update...");
@@ -60779,7 +60786,7 @@ var init_core = __esm({
           }
           const preview = Math.max(80, parseInt(arg, 10) || 400);
           const lines = items.map((m, i) => {
-            const tag = m.role === "user" ? `You #${i + 1}` : `Hermes #${i + 1}`;
+            const tag = m.role === "user" ? `You #${i + 1}` : `${PRODUCT_NAME2} #${i + 1}`;
             const body = m.text.trim() || (m.tools?.length ? `(${m.tools.length} tool calls)` : "(empty)");
             const clipped = body.length > preview ? `${body.slice(0, preview).trimEnd()}\u2026` : body;
             return `[${tag}]
@@ -61016,7 +61023,7 @@ var init_ops = __esm({
         }
       },
       {
-        help: "re-read ~/.hermes/.env into the running gateway (CLI parity)",
+        help: process.env.AGENTIX_FRONTEND === "agentix" ? "re-read Agentix workspace configuration" : "re-read ~/.hermes/.env into the running gateway (CLI parity)",
         name: "reload",
         run: (_arg, ctx) => {
           ctx.gateway.rpc("reload.env", {}).then(
@@ -61861,7 +61868,7 @@ var resolveHermesBin, launchHermesCommand;
 var init_externalCli = __esm({
   "src/lib/externalCli.ts"() {
     "use strict";
-    resolveHermesBin = () => process.env.HERMES_BIN?.trim() || "hermes";
+    resolveHermesBin = () => process.env.AGENTIX_FRONTEND === "agentix" ? process.env.AGENTIX_BIN?.trim() || "agentix" : process.env.HERMES_BIN?.trim() || "hermes";
     launchHermesCommand = (args) => new Promise((resolve3) => {
       const child = spawn5(resolveHermesBin(), args, { stdio: "inherit" });
       child.on("error", (err) => resolve3({ code: null, error: err.message }));
@@ -61873,19 +61880,20 @@ var init_externalCli = __esm({
 // src/app/setupHandoff.ts
 async function runExternalSetup({ args, ctx, done, launcher, suspend }) {
   const { gateway, session, transcript } = ctx;
-  transcript.sys(`launching \`hermes ${args.join(" ")}\`\u2026`);
+  const product = process.env.AGENTIX_FRONTEND === "agentix" ? "agentix" : "hermes";
+  transcript.sys(`launching \`${product} ${args.join(" ")}\`\u2026`);
   patchUiState({ status: "setup running\u2026" });
   let result = { code: null };
   await suspend(async () => {
     result = await launcher(args);
   });
   if (result.error) {
-    transcript.sys(`error launching hermes: ${result.error}`);
+    transcript.sys(`error launching ${product}: ${result.error}`);
     patchUiState({ status: "setup required" });
     return;
   }
   if (result.code !== 0) {
-    transcript.sys(`hermes ${args[0]} exited with code ${result.code}`);
+    transcript.sys(`${product} ${args[0]} exited with code ${result.code}`);
     patchUiState({ status: "setup required" });
     return;
   }
@@ -61906,16 +61914,17 @@ var init_setupHandoff = __esm({
 });
 
 // src/app/slash/commands/setup.ts
-var setupCommands;
+var PRODUCT_COMMAND, setupCommands;
 var init_setup2 = __esm({
   async "src/app/slash/commands/setup.ts"() {
     "use strict";
     await init_entry_exports();
     init_externalCli();
     init_setupHandoff();
+    PRODUCT_COMMAND = process.env.AGENTIX_FRONTEND === "agentix" ? "agentix" : "hermes";
     setupCommands = [
       {
-        help: "run full setup wizard (launches `hermes setup`)",
+        help: `run full setup wizard (launches \`${PRODUCT_COMMAND} setup\`)`,
         name: "setup",
         run: (arg, ctx) => void runExternalSetup({
           args: ["setup", ...arg.split(/\s+/).filter(Boolean)],
@@ -62276,13 +62285,14 @@ ${encoded}
   } catch {
   }
 }
-var MAX, dir, file, cache5;
+var MAX, AGENTIX_MODE2, dir, file, cache5;
 var init_history = __esm({
   "src/lib/history.ts"() {
     "use strict";
     MAX = 1e3;
-    dir = process.env.HERMES_HOME ?? join3(homedir4(), ".hermes");
-    file = join3(dir, ".hermes_history");
+    AGENTIX_MODE2 = process.env.AGENTIX_FRONTEND === "agentix";
+    dir = AGENTIX_MODE2 ? process.env.AGENTIX_FRONTEND_HOME ?? join3(homedir4(), ".agentix", "frontend") : process.env.HERMES_HOME ?? join3(homedir4(), ".hermes");
+    file = join3(dir, AGENTIX_MODE2 ? ".agentix_history" : ".hermes_history");
     cache5 = null;
   }
 });
@@ -62565,7 +62575,7 @@ function useComposerState({
     [handleResolvedPaste, onClipboardPaste, querier]
   );
   const openEditor = (0, import_react65.useCallback)(async () => {
-    const dir2 = mkdtempSync(join5(tmpdir2(), "hermes-"));
+    const dir2 = mkdtempSync(join5(tmpdir2(), process.env.AGENTIX_FRONTEND === "agentix" ? "agentix-" : "hermes-"));
     const file2 = join5(dir2, "prompt.md");
     const [cmd, ...args] = resolveEditor();
     writeFileSync(file2, [...inputBuf, input].join("\n"));
@@ -64331,7 +64341,7 @@ function useMainApp(gw2) {
   const model = ui.info?.model?.replace(/^.*\//, "") ?? "";
   const marker = overlay.approval || overlay.sudo || overlay.secret || overlay.clarify ? "\u26A0" : ui.busy ? "\u23F3" : "\u2713";
   const tabCwd = ui.info?.cwd;
-  useTerminalTitle(model ? `${marker} ${model}${tabCwd ? ` \xB7 ${shortCwd(tabCwd, 24)}` : ""}` : "Hermes");
+  useTerminalTitle(model ? `${marker} ${model}${tabCwd ? ` \xB7 ${shortCwd(tabCwd, 24)}` : ""}` : ui.theme.brand.name);
   (0, import_react73.useEffect)(() => {
     if (!ui.sid || !stdout) {
       return;
@@ -64839,7 +64849,7 @@ function PerfPane({ children, id }) {
   }
   return /* @__PURE__ */ (0, import_jsx_runtime17.jsx)(import_react74.Profiler, { id, onRender, children });
 }
-var import_react74, import_jsx_runtime17, ENABLED, THRESHOLD_MS, LOG_PATH, logReady, writeRow, round2, onRender, logFrameEvent, PERF_ENABLED, PERF_LOG_PATH;
+var import_react74, import_jsx_runtime17, ENABLED, THRESHOLD_MS, AGENTIX_MODE3, LOG_PATH, logReady, writeRow, round2, onRender, logFrameEvent, PERF_ENABLED, PERF_LOG_PATH;
 var init_perfPane = __esm({
   async "src/lib/perfPane.tsx"() {
     "use strict";
@@ -64848,7 +64858,8 @@ var init_perfPane = __esm({
     import_jsx_runtime17 = __toESM(require_jsx_runtime(), 1);
     ENABLED = /^(?:1|true|yes|on)$/i.test((process.env.HERMES_DEV_PERF ?? "").trim());
     THRESHOLD_MS = Number(process.env.HERMES_DEV_PERF_MS ?? "2") || 0;
-    LOG_PATH = process.env.HERMES_DEV_PERF_LOG?.trim() || join6(homedir5(), ".hermes", "perf.log");
+    AGENTIX_MODE3 = process.env.AGENTIX_FRONTEND === "agentix";
+    LOG_PATH = AGENTIX_MODE3 ? process.env.AGENTIX_DEV_PERF_LOG?.trim() || join6(homedir5(), ".agentix", "perf.log") : process.env.HERMES_DEV_PERF_LOG?.trim() || join6(homedir5(), ".hermes", "perf.log");
     logReady = false;
     writeRow = (row) => {
       if (!logReady) {
@@ -66698,7 +66709,7 @@ function ModelPicker({ allowPersistGlobal = true, gw: gw2, onCancel, onSelect, s
                   authenticated: false,
                   models: [],
                   total_models: 0,
-                  warning: p.key_env ? `paste ${p.key_env} to activate` : "run `hermes model` to configure"
+                  warning: p.key_env ? `paste ${p.key_env} to activate` : `run \`${AGENTIX_MODE4 ? "agentix" : "hermes"} model\` to configure`
                 } : p
               )
             );
@@ -66789,7 +66800,11 @@ function ModelPicker({ allowPersistGlobal = true, gw: gw2, onCancel, onSelect, s
         "Configure ",
         provider.name
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime21.jsx)(Text, { color: t.color.muted, wrap: "truncate-end", children: "Paste your API key below (saved to ~/.hermes/.env)" }),
+      /* @__PURE__ */ (0, import_jsx_runtime21.jsxs)(Text, { color: t.color.muted, wrap: "truncate-end", children: [
+        "Paste your API key below (saved to ",
+        AGENTIX_MODE4 ? "the Agentix workspace" : "~/.hermes/.env",
+        ")"
+      ] }),
       /* @__PURE__ */ (0, import_jsx_runtime21.jsx)(Text, { color: t.color.muted, wrap: "truncate-end", children: " " }),
       /* @__PURE__ */ (0, import_jsx_runtime21.jsxs)(Text, { color: t.color.muted, wrap: "truncate-end", children: [
         provider.key_env,
@@ -66916,7 +66931,7 @@ function ModelPicker({ allowPersistGlobal = true, gw: gw2, onCancel, onSelect, s
     /* @__PURE__ */ (0, import_jsx_runtime21.jsx)(OverlayHint, { t, children: models.length ? "\u2191/\u2193 select \xB7 Enter switch \xB7 Esc back \xB7 q close" : "Enter/Esc back \xB7 q close" })
   ] });
 }
-var import_react80, import_jsx_runtime21, VISIBLE, MIN_WIDTH, MAX_WIDTH;
+var import_react80, import_jsx_runtime21, VISIBLE, MIN_WIDTH, MAX_WIDTH, AGENTIX_MODE4;
 var init_modelPicker = __esm({
   async "src/components/modelPicker.tsx"() {
     "use strict";
@@ -66930,6 +66945,7 @@ var init_modelPicker = __esm({
     VISIBLE = 12;
     MIN_WIDTH = 40;
     MAX_WIDTH = 90;
+    AGENTIX_MODE4 = process.env.AGENTIX_FRONTEND === "agentix";
   }
 });
 
@@ -69407,7 +69423,7 @@ function SessionPanel({ info, maxWidth, sid, t }) {
           "- run",
           " "
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { bold: true, color: t.color.warn, children: info.update_command || "hermes update" }),
+        /* @__PURE__ */ (0, import_jsx_runtime29.jsx)(Text, { bold: true, color: t.color.warn, children: info.update_command || (AGENTIX_FRONTEND ? "agentix update" : "hermes update") }),
         /* @__PURE__ */ (0, import_jsx_runtime29.jsxs)(Text, { bold: false, color: t.color.warn, dimColor: true, children: [
           " ",
           "to update"
@@ -69569,20 +69585,21 @@ function HelpHint({ t }) {
     }
   ) });
 }
-var import_jsx_runtime31, COMMON_COMMANDS, HOTKEY_PREVIEW;
+var import_jsx_runtime31, PRODUCT_NAME3, COMMON_COMMANDS, HOTKEY_PREVIEW;
 var init_helpHint = __esm({
   async "src/components/helpHint.tsx"() {
     "use strict";
     await init_entry_exports();
     init_hotkeys();
     import_jsx_runtime31 = __toESM(require_jsx_runtime(), 1);
+    PRODUCT_NAME3 = process.env.AGENTIX_FRONTEND === "agentix" ? "Agentix" : "Hermes";
     COMMON_COMMANDS = [
       ["/help", "full list of commands + hotkeys"],
       ["/clear", "start a new session"],
       ["/resume", "resume a prior session"],
       ["/details", "control transcript detail level"],
       ["/copy", "copy selection or last assistant message"],
-      ["/quit", "exit hermes"]
+      ["/quit", `exit ${PRODUCT_NAME3}`]
     ];
     HOTKEY_PREVIEW = HOTKEYS.slice(0, 8);
   }
@@ -73215,7 +73232,9 @@ var CircularBuffer = class {
 import { appendFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-var logDir = join(process.env.HERMES_HOME?.trim() || join(homedir(), ".hermes"), "logs");
+var AGENTIX_MODE = process.env.AGENTIX_FRONTEND === "agentix";
+var frontendHome = AGENTIX_MODE ? process.env.AGENTIX_FRONTEND_HOME?.trim() || join(homedir(), ".agentix", "frontend") : process.env.HERMES_HOME?.trim() || join(homedir(), ".hermes");
+var logDir = join(frontendHome, "logs");
 var CRASH_LOG = join(logDir, "tui_gateway_crash.log");
 var enabled = !process.env.VITEST;
 var MAX_BREADCRUMB = 4096;
@@ -73233,7 +73252,8 @@ function recordParentLifecycle(line) {
   } catch {
     if (!warned) {
       warned = true;
-      process.stderr.write("hermes-tui: parent lifecycle log unavailable\n");
+      process.stderr.write(`${AGENTIX_MODE ? "agentix" : "hermes"}-tui: parent lifecycle log unavailable
+`);
     }
   }
 }

@@ -16,8 +16,9 @@ export interface RunExternalSetupOptions {
 
 export async function runExternalSetup({ args, ctx, done, launcher, suspend }: RunExternalSetupOptions) {
   const { gateway, session, transcript } = ctx
+  const product = process.env.AGENTIX_FRONTEND === 'agentix' ? 'agentix' : 'hermes'
 
-  transcript.sys(`launching \`hermes ${args.join(' ')}\`…`)
+  transcript.sys(`launching \`${product} ${args.join(' ')}\`…`)
   patchUiState({ status: 'setup running…' })
 
   let result: LaunchResult = { code: null }
@@ -27,14 +28,14 @@ export async function runExternalSetup({ args, ctx, done, launcher, suspend }: R
   })
 
   if (result.error) {
-    transcript.sys(`error launching hermes: ${result.error}`)
+    transcript.sys(`error launching ${product}: ${result.error}`)
     patchUiState({ status: 'setup required' })
 
     return
   }
 
   if (result.code !== 0) {
-    transcript.sys(`hermes ${args[0]} exited with code ${result.code}`)
+    transcript.sys(`${product} ${args[0]} exited with code ${result.code}`)
     patchUiState({ status: 'setup required' })
 
     return

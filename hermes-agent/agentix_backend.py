@@ -90,9 +90,24 @@ class AgentixBackend:
         self._response_lock = threading.Lock()
         self._active_response: Any = None
         self.was_interrupted = False
+        self.last_result: Dict[str, Any] = {}
         ensure_bridge_running()
 
-    def interrupt(self) -> None:
+    @property
+    def is_interrupted(self) -> bool:
+        return self.was_interrupted
+
+    @property
+    def request_active(self) -> bool:
+        with self._response_lock:
+            return self._active_response is not None
+
+    def reset_interrupt(self) -> None:
+        self.was_interrupted = False
+        self.last_result = {}
+        self._interrupt_event.clear()
+
+    def interrupt(self, _reason: Optional[str] = None) -> None:
         self.was_interrupted = True
         self._interrupt_event.set()
         with self._response_lock:
@@ -132,7 +147,7 @@ class AgentixBackend:
         except Exception:
             pass
 
-    def _post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    def _post(self, path: str, body: Dict[str, Any], timeout: int = 60) -> Dict[str, Any]:
         data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(
             f"{_get_bridge_url()}{path}",
@@ -140,7 +155,7 @@ class AgentixBackend:
             headers={"Content-Type": "application/json", **_auth_headers()},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
 
     def _get(self, path: str, timeout: int = 10) -> Any:
@@ -162,6 +177,11 @@ class AgentixBackend:
         model: Optional[str] = None,
         provider: Optional[str] = None,
         toolsets: Any = None,
+        skills: Any = None,
+        gateway_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        deliver: Optional[bool] = None,
+        preserve_interrupt: bool = False,
         **extra: Any,
     ) -> str:
         body: Dict[str, Any] = {"stimulus": stimulus}
@@ -172,11 +192,20 @@ class AgentixBackend:
             body["model"] = selected_model
         if provider:
             body["provider"] = provider
-        if toolsets:
+        if toolsets is not None:
             body["toolsets"] = toolsets
+        if skills is not None:
+            body["skills"] = skills
         for key in ("baseUrl", "base_url"):
             if extra.get(key):
                 body["baseUrl"] = extra[key]
+        selected_gateway = gateway_id or extra.get("gatewayId")
+        if selected_gateway:
+            body["gatewayId"] = str(selected_gateway)
+        if metadata:
+            body["metadata"] = metadata
+        if deliver is not None:
+            body["deliver"] = bool(deliver)
 
         req = urllib.request.Request(
             f"{_get_bridge_url()}/execute/stream",
@@ -186,8 +215,19 @@ class AgentixBackend:
         )
 
         response = ""
-        self.was_interrupted = False
-        self._interrupt_event.clear()
+        if not preserve_interrupt:
+            self.reset_interrupt()
+        elif self._interrupt_event.is_set():
+            self.was_interrupted = True
+            self.last_result = {
+                "sessionId": self.session_id,
+                "status": "cancelled",
+                "taskIds": [],
+            }
+            return response
+        else:
+            self.was_interrupted = False
+            self.last_result = {}
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:
                 with self._response_lock:
@@ -205,6 +245,16 @@ class AgentixBackend:
                         parsed = json.loads(payload)
                         if parsed.get("error"):
                             raise RuntimeError(parsed["error"])
+                        if parsed.get("type") == "result":
+                            resolved_session_id = parsed.get("sessionId")
+                            if resolved_session_id:
+                                self.session_id = str(resolved_session_id)
+                            self.last_result = {
+                                "sessionId": self.session_id,
+                                "status": parsed.get("status"),
+                                "taskIds": parsed.get("taskIds") or [],
+                            }
+                            continue
                         delta = parsed.get("delta")
                         if delta:
                             if stream_callback:
@@ -222,6 +272,12 @@ class AgentixBackend:
             with self._response_lock:
                 self._active_response = None
             self.was_interrupted = self._interrupt_event.is_set()
+            if self.was_interrupted and not self.last_result:
+                self.last_result = {
+                    "sessionId": self.session_id,
+                    "status": "cancelled",
+                    "taskIds": [],
+                }
 
         return response
 
@@ -240,6 +296,9 @@ class AgentixBackend:
     def config(self) -> Any:
         return self._get("/config")
 
+    def list_agent_profiles(self) -> Any:
+        return self._get("/agents/profiles")
+
     def auth_status(self) -> Any:
         return self._get("/auth/status")
 
@@ -255,6 +314,28 @@ class AgentixBackend:
     def set_config(self, key: str, value: Any) -> Any:
         return self._post("/config", {"key": key, "value": value})
 
+    def set_llm_api_key(self, value: Optional[str]) -> Any:
+        return self._post("/config/secret", {"value": value})
+
+    def undo_session(self, session_id: str) -> Any:
+        return self._post(f"/sessions/{quote(session_id)}/undo", {})
+
+    def truncate_session_before_user_ordinal(self, session_id: str, user_ordinal: int) -> Any:
+        return self._post(
+            f"/sessions/{quote(session_id)}/truncate",
+            {"userOrdinal": int(user_ordinal)},
+        )
+
+    def compact_session(self, session_id: str, focus_topic: str = "") -> Any:
+        return self._post(
+            f"/sessions/{quote(session_id)}/compact",
+            {"focusTopic": focus_topic},
+            timeout=180,
+        )
+
+    def branch_session(self, session_id: str, title: str = "") -> Any:
+        return self._post(f"/sessions/{quote(session_id)}/branch", {"title": title})
+
     def get_session(self, session_id: str) -> Any:
         return self._get(f"/sessions/{quote(session_id)}")
 
@@ -262,20 +343,31 @@ class AgentixBackend:
         self,
         model: Optional[str] = None,
         provider: Optional[str] = None,
+        base_url: Optional[str] = None,
         toolsets: Any = None,
+        skills: Any = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        messages: Optional[list[Dict[str, Any]]] = None,
     ) -> Any:
         body: Dict[str, Any] = {}
         if model:
             body["model"] = model
         if provider:
             body["provider"] = provider
-        if toolsets:
+        if base_url:
+            body["baseUrl"] = base_url
+        if toolsets is not None:
             body["toolsets"] = toolsets
+        if skills is not None:
+            body["skills"] = skills
+        if metadata:
+            body["metadata"] = metadata
+        if messages:
+            body["messages"] = messages
         return self._post("/sessions", body)
 
-    def delete_session(self, session_id: str) -> None:
-        self._delete(f"/sessions/{quote(session_id)}")
-        return None
+    def delete_session(self, session_id: str) -> Any:
+        return self._delete(f"/sessions/{quote(session_id)}")
 
     def rename_session(self, session_id: str, title: str) -> Any:
         return self._post(f"/sessions/{quote(session_id)}/rename", {"title": title})
@@ -313,6 +405,20 @@ class AgentixBackend:
 
     def list_tools(self) -> Any:
         return self._get("/tools")
+
+    def list_skills(self, query: str = "") -> Any:
+        suffix = f"?q={quote(query)}" if query else ""
+        return self._get(f"/skills{suffix}")
+
+    def get_skill(self, skill_id: str) -> Any:
+        return self._get(f"/skills/{quote(skill_id)}")
+
+    def set_skill_enabled(self, skill_id: str, enabled: bool) -> Any:
+        action = "enable" if enabled else "disable"
+        return self._post(f"/skills/{quote(skill_id)}/{action}", {})
+
+    def reload_skills(self) -> Any:
+        return self._post("/skills/reload", {})
 
     def get_tool(self, tool_id: str) -> Any:
         return self._get(f"/tools/{quote(tool_id)}")
@@ -391,6 +497,7 @@ class AgentixBackend:
         stimulus: str,
         session_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        deliver: Optional[bool] = None,
     ) -> Any:
         body: Dict[str, Any] = {"stimulus": stimulus}
         effective_session_id = session_id or self.session_id
@@ -398,6 +505,8 @@ class AgentixBackend:
             body["sessionId"] = effective_session_id
         if metadata:
             body["metadata"] = metadata
+        if deliver is not None:
+            body["deliver"] = deliver
         return self._post(f"/gateway/{quote(gateway_id)}/message", body)
 
     def receive_gateway_inbound(

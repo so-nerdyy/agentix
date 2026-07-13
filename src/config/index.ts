@@ -325,6 +325,35 @@ export function saveWorkspaceConfigOverride(
   cached = null;
 }
 
+export function saveWorkspaceLlmApiKey(value: string | null): void {
+  const envFile = join(PATHS.workspaceRoot, ".env.local");
+  const values = parseEnvFile(envFile);
+  const normalized = String(value ?? "").replace(/\r?\n/g, "").trim();
+  if (normalized) {
+    values.AGENTIX_LLM_API_KEY = normalized;
+    process.env.AGENTIX_LLM_API_KEY = normalized;
+  } else {
+    delete values.AGENTIX_LLM_API_KEY;
+    delete process.env.AGENTIX_LLM_API_KEY;
+  }
+
+  const temporary = `${envFile}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    const content = Object.entries(values)
+      .map(([name, current]) => `${name}=${current.replace(/\r?\n/g, "")}`)
+      .join("\n");
+    writeFileSync(temporary, content ? `${content}\n` : "", {
+      encoding: "utf-8",
+      mode: 0o600,
+    });
+    renameSync(temporary, envFile);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    throw error;
+  }
+  cached = null;
+}
+
 export function resetConfigCache(): void {
   cached = null;
 }

@@ -18,7 +18,11 @@ import { join } from 'node:path'
 // is swallowed). Persisting the death-explaining events here is what makes that
 // distinction (and a memory-critical `process.exit(137)`, which closes stdin →
 // clean EOF, not SIGTERM) diagnosable after the fact.
-const logDir = join(process.env.HERMES_HOME?.trim() || join(homedir(), '.hermes'), 'logs')
+const AGENTIX_MODE = process.env.AGENTIX_FRONTEND === 'agentix'
+const frontendHome = AGENTIX_MODE
+  ? process.env.AGENTIX_FRONTEND_HOME?.trim() || join(homedir(), '.agentix', 'frontend')
+  : process.env.HERMES_HOME?.trim() || join(homedir(), '.hermes')
+const logDir = join(frontendHome, 'logs')
 const CRASH_LOG = join(logDir, 'tui_gateway_crash.log')
 
 // Skipped under vitest so unit tests exercising start()/kill() can't write into
@@ -51,7 +55,7 @@ export function recordParentLifecycle(line: string): void {
   } catch {
     if (!warned) {
       warned = true
-      process.stderr.write('hermes-tui: parent lifecycle log unavailable\n')
+      process.stderr.write(`${AGENTIX_MODE ? 'agentix' : 'hermes'}-tui: parent lifecycle log unavailable\n`)
     }
   }
 }

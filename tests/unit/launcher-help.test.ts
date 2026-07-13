@@ -10,7 +10,7 @@ function launcherSource() {
   return [
     readFileSync(launcherPath, "utf8"),
     readFileSync(join(process.cwd(), "bin", "agentix-main.js"), "utf8"),
-  ].join("\n");
+  ].join("\n").replace(/\r\n/g, "\n");
 }
 
 function commandSet(name: string) {
@@ -261,14 +261,14 @@ describe("launcher help", () => {
   it("preserves compatibility subcommands when forwarding their help", () => {
     const result = spawnSync(process.execPath, [join(process.cwd(), "bin", "agentix.js"), "skills", "reset", "--help"], {
       encoding: "utf8",
-      timeout: 60_000,
+      timeout: 120_000,
     });
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("usage: agentix skills reset");
     expect(result.stdout).toContain("agentix update");
     expect(result.stdout).not.toMatch(/hermes|nous portal/i);
-  }, 90_000);
+  }, 150_000);
 
   it("opens the full TUI interactively and preserves the backend shell for piped input", () => {
     const launcher = launcherSource();

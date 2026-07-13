@@ -15,6 +15,7 @@ import { PIAgentRegistry } from "../../src/powerhouse/PIAgentRegistry.js";
 import { Powerhouse } from "../../src/powerhouse/Powerhouse.js";
 import { SessionCoordinator } from "../../src/powerhouse/SessionCoordinator.js";
 import { TaskQueue } from "../../src/powerhouse/TaskQueue.js";
+import { SkillRegistry } from "../../src/powerhouse/SkillRegistry.js";
 import { LocalAgentixRuntime } from "../../src/runtime/LocalAgentixRuntime.js";
 import { TaskStore } from "../../src/powerhouse/TaskStore.js";
 import { SchedulerService } from "../../src/scheduler/SchedulerService.js";
@@ -33,7 +34,10 @@ function tempDir(name: string): string {
   return dir;
 }
 
-function makePowerhouse(agent: BasePIAgent = new ConversationAgent()): Powerhouse {
+function makePowerhouse(
+  agent: BasePIAgent = new ConversationAgent(),
+  skills?: SkillRegistry,
+): Powerhouse {
   const dir = tempDir("agentix-powerhouse-");
   const registry = new PIAgentRegistry();
   registry.register(agent);
@@ -48,6 +52,7 @@ function makePowerhouse(agent: BasePIAgent = new ConversationAgent()): Powerhous
     planStore: new PlanStore(join(dir, "plans.json")),
     taskStore: new TaskStore(join(dir, "tasks.json")),
     audit: new AuditLog(join(dir, "audit.jsonl")),
+    skills,
   });
 }
 
@@ -250,6 +255,39 @@ describe("Powerhouse restored runtime", () => {
       toolsets: ["web"],
     });
 
+    powerhouse.stop();
+  });
+
+  it("injects only explicitly enabled Agentix skills into Pi prompts", async () => {
+    const dir = tempDir("agentix-skills-");
+    const skills = new SkillRegistry(join(dir, "skills.json"));
+    const discovered = skills.list("apple-notes").find((skill) => skill.id === "apple-notes");
+    expect(discovered).toBeDefined();
+    expect(discovered?.enabled).toBe(false);
+    expect(skills.setEnabled("apple-notes", true)?.enabled).toBe(true);
+
+    const systemPrompts: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ role?: string; content?: string }>;
+      };
+      systemPrompts.push(String(body.messages?.find((message) => message.role === "system")?.content ?? ""));
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: "skill prompt response" } }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    const powerhouse = makePowerhouse(new ConversationAgent(), skills);
+
+    const enabled = await powerhouse.executeStimulus({ stimulus: "create an Apple note" });
+    expect(enabled.status).toBe("complete");
+    expect(powerhouse.listTasks()[0]?.payload.activeSkills).toEqual(["apple-notes"]);
+    expect(systemPrompts.at(-1)).toContain('<agentix-skill name="apple-notes">');
+    expect(systemPrompts.at(-1)).toContain("Manage Apple Notes");
+
+    expect(skills.setEnabled("apple-notes", false)?.enabled).toBe(false);
+    await powerhouse.executeStimulus({ stimulus: "answer without a skill" });
+    expect(systemPrompts.at(-1)).not.toContain("<agentix-skill");
+    expect(powerhouse.audit.list().some((entry) => entry.type === "session.created")).toBe(true);
     powerhouse.stop();
   });
 
@@ -1067,15 +1105,23 @@ describe("Powerhouse restored runtime", () => {
   it("deletes sessions through the runtime facade", async () => {
     const runtime = new LocalAgentixRuntime();
 
-    const session = runtime.createSession({ model: "test-model" });
-    expect(runtime.listSessions().some((item) => item.id === session.id)).toBe(true);
+    const session = runtime.createSession({
+      model: "test-model",
+      messages: [
+        { role: "user", content: "seeded TUI handoff" },
+        { role: "assistant", content: "seeded response" },
+      ],
+    });
+    const summary = runtime.listSessions().find((item) => item.id === session.id);
+    expect(summary?.messageCount).toBe(2);
+    expect(summary?.preview).toBe("seeded response");
+    expect(runtime.getSession(session.id)?.messages).toHaveLength(2);
     expect(runtime.listAudit().some((item) => item.type === "session.created" && item.subjectId === session.id)).toBe(true);
 
-    runtime.deleteSession(session.id);
+    expect(runtime.deleteSession(session.id)).toEqual({ ok: true, deleted: session.id });
 
-    const archived = runtime.listSessions().find((item) => item.id === session.id);
-    expect(archived?.status).toBe("complete");
-    expect(runtime.listAudit().some((item) => item.type === "session.closed" && item.subjectId === session.id)).toBe(true);
+    expect(runtime.listSessions().some((item) => item.id === session.id)).toBe(false);
+    expect(runtime.listAudit().some((item) => item.type === "session.deleted" && item.subjectId === session.id)).toBe(true);
 
     runtime.shutdown();
   });
@@ -1356,6 +1402,69 @@ describe("Powerhouse restored runtime", () => {
       "flaky-success",
     );
     expect(execution?.taskIds).toHaveLength(3);
+    runtime.shutdown();
+  });
+
+  it("owns session undo, branching, and model-backed compaction in Powerhouse", async () => {
+    const powerhouse = makePowerhouse();
+    const runtime = new LocalAgentixRuntime({ powerhouse, startScheduler: false });
+    const messages = Array.from({ length: 4 }, (_, index) => [
+      { role: "user" as const, content: `request ${index + 1}` },
+      { role: "assistant" as const, content: `response ${index + 1}` },
+    ]).flat();
+    const session = runtime.createSession({
+      model: "test-model",
+      provider: "kilo",
+      baseUrl: "https://api.kilo.ai/api/gateway",
+      skills: ["release-audit"],
+      metadata: { source: "untrusted", workspace: "test" },
+      messages,
+    });
+    expect(runtime.getSession(session.id)?.session.metadata).toMatchObject({
+      source: "agentix-runtime",
+      provider: "kilo",
+      baseUrl: "https://api.kilo.ai/api/gateway",
+      skills: ["release-audit"],
+      workspace: "test",
+    });
+
+    const branched = runtime.branchSession(session.id, "Backend-owned branch");
+    const branchId = String(branched.id);
+    expect(branched).toMatchObject({
+      ok: true,
+      parentSessionId: session.id,
+      title: "Backend-owned branch",
+    });
+    expect(runtime.getSession(branchId)?.messages).toHaveLength(8);
+
+    const editBranch = runtime.branchSession(session.id, "Editable branch");
+    const truncated = runtime.truncateSessionBeforeUserOrdinal(String(editBranch.id), 2);
+    expect(truncated).toMatchObject({ ok: true, ordinal: 2, removed: 4 });
+    expect(runtime.getSession(String(editBranch.id))?.messages).toHaveLength(4);
+    expect(runtime.truncateSessionBeforeUserOrdinal(String(editBranch.id), 8)).toMatchObject({
+      ok: false,
+      error: "target user message is no longer in session history",
+    });
+
+    const undone = runtime.undoSession(branchId);
+    expect(undone).toMatchObject({ ok: true, removed: 2 });
+    expect(runtime.getSession(branchId)?.messages).toHaveLength(6);
+
+    const compacted = await runtime.compactSession(session.id, "retain implementation decisions");
+    expect(compacted).toMatchObject({
+      ok: true,
+      status: "compressed",
+      beforeMessages: 8,
+      afterMessages: 3,
+      removed: 5,
+    });
+    const compactedMessages = runtime.getSession(session.id)?.messages ?? [];
+    expect(compactedMessages[0]).toMatchObject({ role: "system" });
+    expect(compactedMessages[0]?.content).toContain("Earlier session summary");
+    expect(powerhouse.audit.list().some((entry) => entry.type === "session.branched")).toBe(true);
+    expect(powerhouse.audit.list().some((entry) => entry.type === "session.undone")).toBe(true);
+    expect(powerhouse.audit.list().some((entry) => entry.type === "session.history_replaced")).toBe(true);
+
     runtime.shutdown();
   });
 
@@ -2012,12 +2121,52 @@ describe("Powerhouse restored runtime", () => {
       const message = await runtime.receiveGatewayMessage({
         gatewayId: "webhook",
         stimulus: "gateway smoke",
+        metadata: { source: "untrusted", chatId: "channel-1" },
       });
       expect(message.ok).toBe(true);
       expect(message.response).toContain("Powerhouse accepted the task");
       expect(message.delivery).toMatchObject({ attempted: true, ok: true });
       expect(delivered?.gatewayId).toBe("webhook");
       expect(String(delivered?.response)).toContain("Powerhouse accepted the task");
+
+      const gatewaySessionId = String(message.sessionId);
+      const sessionsAfterFirstMessage = runtime.listSessions();
+      const gatewaySession = sessionsAfterFirstMessage.find((session) => session.id === gatewaySessionId);
+      expect(gatewaySession?.metadata).toMatchObject({
+        source: "gateway",
+        gatewayId: "webhook",
+        gatewayPlatform: "webhook",
+        chatId: "channel-1",
+      });
+
+      const followup = await runtime.receiveGatewayMessage({
+        gatewayId: "webhook",
+        stimulus: "gateway followup",
+        sessionId: gatewaySessionId,
+        deliver: false,
+      });
+      expect(followup.sessionId).toBe(gatewaySessionId);
+      expect(followup.delivery).toMatchObject({ attempted: false, error: "delivery disabled" });
+      expect(runtime.listSessions()).toHaveLength(sessionsAfterFirstMessage.length);
+
+      const precreated = runtime.createSession({
+        metadata: { source: "agentix-runtime", transport: "hermes-derived-gateway" },
+      });
+      const sessionCountBeforePrecreatedMessage = runtime.listSessions().length;
+      const precreatedMessage = await runtime.receiveGatewayMessage({
+        gatewayId: "webhook",
+        stimulus: "precreated gateway session",
+        sessionId: precreated.id,
+        metadata: { source: "untrusted", chatId: "channel-2" },
+        deliver: false,
+      });
+      expect(precreatedMessage.sessionId).toBe(precreated.id);
+      expect(runtime.listSessions()).toHaveLength(sessionCountBeforePrecreatedMessage);
+      expect(runtime.getSession(precreated.id)?.session.metadata).toMatchObject({
+        source: "gateway",
+        gatewayId: "webhook",
+        chatId: "channel-2",
+      });
 
       const inbound = await runtime.receiveGatewayInbound({
         gatewayId: "webhook",

@@ -21,6 +21,7 @@ import { PIAgentRegistry } from "./PIAgentRegistry.js";
 import { SessionCoordinator } from "./SessionCoordinator.js";
 import { TaskQueue } from "./TaskQueue.js";
 import { TaskStore } from "./TaskStore.js";
+import { SkillRegistry } from "./SkillRegistry.js";
 import type { Session, Task, TaskAction, TaskResult } from "./types.js";
 
 export interface ExecuteStimulusOptions {
@@ -31,6 +32,7 @@ export interface ExecuteStimulusOptions {
   provider?: string;
   baseUrl?: string;
   toolsets?: unknown;
+  skills?: string[];
   signal?: AbortSignal;
 }
 
@@ -53,6 +55,7 @@ export class Powerhouse {
   readonly taskStore: TaskStore;
   readonly audit: AuditLog;
   readonly agentProfiles: AgentProfileStore;
+  readonly skills: SkillRegistry;
   private started = false;
   private stopping = false;
   private recoveryScheduled = false;
@@ -70,6 +73,7 @@ export class Powerhouse {
     taskStore?: TaskStore;
     audit?: AuditLog;
     agentProfiles?: AgentProfileStore;
+    skills?: SkillRegistry;
   } = {}) {
     this.sessions = opts.sessions ?? new SessionCoordinator();
     this.queue = opts.queue ?? new TaskQueue();
@@ -82,6 +86,7 @@ export class Powerhouse {
     this.taskStore = opts.taskStore ?? new TaskStore();
     this.audit = opts.audit ?? new AuditLog();
     this.agentProfiles = opts.agentProfiles ?? new AgentProfileStore();
+    this.skills = opts.skills ?? new SkillRegistry();
     this.approvals.setTimeoutHandler((task, reason) => {
       this.rejectExpiredApproval(task.id, reason);
     });
@@ -207,9 +212,98 @@ export class Powerhouse {
     EventBus.emit("session:close", { sessionId: id });
   }
 
+  deleteSession(id: string): { ok: boolean; error?: string } {
+    this.start();
+    const session = this.sessions.get(id);
+    if (!session) return { ok: false, error: `unknown session: ${id}` };
+    const openTasks = this.listTasks(id).filter((task) =>
+      ["queued", "running", "awaiting-approval"].includes(task.status),
+    );
+    if (session.pendingTaskIds.length > 0 || openTasks.length > 0) {
+      return { ok: false, error: `session has active work: ${id}` };
+    }
+    if (!this.sessions.delete(id)) return { ok: false, error: `unknown session: ${id}` };
+    this.audit.record({
+      type: "session.deleted",
+      actor: "user",
+      subjectId: id,
+      data: { sessionId: id, metadata: session.metadata },
+    });
+    EventBus.emit("session:close", { sessionId: id });
+    return { ok: true };
+  }
+
   renameSession(id: string, title: string): Session | undefined {
     this.start();
     return this.sessions.updateMetadata(id, { title });
+  }
+
+  undoSession(id: string): { ok: boolean; removed?: number; messages?: Session["messages"]; error?: string } {
+    this.start();
+    const session = this.sessions.get(id);
+    if (!session) return { ok: false, error: `unknown session: ${id}` };
+    const openTasks = this.listTasks(id).filter((task) =>
+      ["queued", "running", "awaiting-approval"].includes(task.status),
+    );
+    if (session.pendingTaskIds.length > 0 || openTasks.length > 0) {
+      return { ok: false, error: `session has active work: ${id}` };
+    }
+    const result = this.sessions.undoLastTurn(id);
+    if (!result) return { ok: false, error: `unknown session: ${id}` };
+    this.audit.record({
+      type: "session.undone",
+      actor: "user",
+      subjectId: id,
+      data: { sessionId: id, removed: result.removed },
+    });
+    return { ok: true, ...result };
+  }
+
+  replaceSessionHistory(
+    id: string,
+    messages: Array<Omit<Session["messages"][number], "ts"> & { ts?: number }>,
+    reason: string,
+  ): { ok: boolean; messages?: Session["messages"]; error?: string } {
+    this.start();
+    const session = this.sessions.get(id);
+    if (!session) return { ok: false, error: `unknown session: ${id}` };
+    const openTasks = this.listTasks(id).filter((task) =>
+      ["queued", "running", "awaiting-approval"].includes(task.status),
+    );
+    if (session.pendingTaskIds.length > 0 || openTasks.length > 0) {
+      return { ok: false, error: `session has active work: ${id}` };
+    }
+    const replaced = this.sessions.replaceMessages(id, messages);
+    if (!replaced) return { ok: false, error: `unknown session: ${id}` };
+    this.audit.record({
+      type: "session.history_replaced",
+      actor: "user",
+      subjectId: id,
+      data: { sessionId: id, reason, messageCount: replaced.length },
+    });
+    return { ok: true, messages: replaced };
+  }
+
+  branchSession(id: string, title?: string): { ok: boolean; session?: Session; error?: string } {
+    this.start();
+    const source = this.sessions.get(id);
+    if (!source) return { ok: false, error: `unknown session: ${id}` };
+    if (source.messages.length === 0) return { ok: false, error: `session has no history: ${id}` };
+    const branch = this.createSession({
+      ...source.metadata,
+      title: title?.trim() || `${String(source.metadata.title || "Session")} (branch)`,
+      parentSessionId: id,
+      source: "agentix-session-branch",
+    });
+    this.sessions.replaceMessages(branch.id, source.messages);
+    const persisted = this.sessions.get(branch.id)!;
+    this.audit.record({
+      type: "session.branched",
+      actor: "user",
+      subjectId: branch.id,
+      data: { sessionId: branch.id, parentSessionId: id },
+    });
+    return { ok: true, session: persisted };
   }
 
   removeAgentProfile(id: string) {
@@ -431,12 +525,13 @@ export class Powerhouse {
   async executeStimulus(opts: ExecuteStimulusOptions): Promise<ExecuteStimulusResult> {
     this.start();
     const session = this.ensureSession(opts.sessionId);
-    if (opts.model || opts.provider || opts.baseUrl || opts.toolsets) {
+    if (opts.model || opts.provider || opts.baseUrl || opts.toolsets || opts.skills) {
       this.sessions.updateMetadata(session.id, {
         model: opts.model ?? session.metadata.model ?? null,
         provider: opts.provider ?? session.metadata.provider ?? null,
         baseUrl: opts.baseUrl ?? session.metadata.baseUrl ?? null,
         toolsets: opts.toolsets ?? session.metadata.toolsets ?? null,
+        skills: opts.skills ?? session.metadata.skills ?? null,
       });
     }
     const taskIds: string[] = [];
@@ -478,7 +573,7 @@ export class Powerhouse {
     let streamedModelResponse = "";
     const rawResult = await this.symphony.runPlan(plan, {
       executeStep: async (step, planId) => {
-        if (opts.model || opts.provider || opts.baseUrl || opts.toolsets) {
+        if (opts.model || opts.provider || opts.baseUrl || opts.toolsets || opts.skills) {
           step = {
             ...step,
             payload: {
@@ -488,6 +583,7 @@ export class Powerhouse {
                 provider: opts.provider,
                 baseUrl: opts.baseUrl,
                 toolsets: opts.toolsets,
+                skills: opts.skills,
               },
             },
           };
@@ -1093,6 +1189,10 @@ export class Powerhouse {
 
   private createTask(sessionId: string, step: PlanStep, planId: string): Task {
     const agent = this.agents.forKind(step.kind);
+    const session = this.sessions.get(sessionId);
+    const skillContext = ["user-message", "luna-message", "terra-message"].includes(step.kind)
+      ? this.skills.promptFor(session?.metadata.skills)
+      : { ids: [], prompt: "" };
     return {
       id: `task-${randomUUID().slice(0, 8)}`,
       sessionId,
@@ -1102,7 +1202,12 @@ export class Powerhouse {
       kind: step.kind,
       priority: step.priority,
       status: "queued",
-      payload: step.payload,
+      payload: {
+        ...step.payload,
+        ...(skillContext.prompt
+          ? { skillInstructions: skillContext.prompt, activeSkills: skillContext.ids }
+          : {}),
+      },
       createdAt: Date.now(),
       attempts: 0,
       maxAttempts: step.maxAttempts,

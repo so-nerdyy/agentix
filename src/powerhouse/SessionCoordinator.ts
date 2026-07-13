@@ -181,6 +181,49 @@ export class SessionCoordinator {
     this.persist(session);
   }
 
+  replaceMessages(
+    sessionId: string,
+    messages: Array<Omit<SessionMessage, "ts"> & { ts?: number }>,
+  ): SessionMessage[] | undefined {
+    const session = this.byId.get(sessionId);
+    if (!session) return undefined;
+    const now = Date.now();
+    session.messages = messages
+      .filter((message) => ["system", "user", "assistant"].includes(message.role))
+      .filter((message) => typeof message.content === "string" && message.content.trim())
+      .slice(-MAX_SESSION_MESSAGES)
+      .map((message, index) => ({
+        role: message.role,
+        content: message.content.slice(0, MAX_MESSAGE_CHARS),
+        ts: Number.isFinite(message.ts) ? Number(message.ts) : now + index,
+      }));
+    session.updatedAt = Date.now();
+    this.persist(session);
+    return session.messages.map((message) => ({ ...message }));
+  }
+
+  undoLastTurn(sessionId: string): { removed: number; messages: SessionMessage[] } | undefined {
+    const session = this.byId.get(sessionId);
+    if (!session) return undefined;
+    let removed = 0;
+    while (session.messages.at(-1)?.role === "assistant") {
+      session.messages.pop();
+      removed += 1;
+    }
+    if (session.messages.at(-1)?.role === "user") {
+      session.messages.pop();
+      removed += 1;
+    }
+    if (removed > 0) {
+      session.updatedAt = Date.now();
+      this.persist(session);
+    }
+    return {
+      removed,
+      messages: session.messages.map((message) => ({ ...message })),
+    };
+  }
+
   removePendingTask(sessionId: string, taskId: string): void {
     const s = this.byId.get(sessionId);
     if (!s) return;
@@ -195,6 +238,15 @@ export class SessionCoordinator {
     s.status = "complete";
     s.updatedAt = Date.now();
     this.persist(s);
+  }
+
+  delete(id: string): boolean {
+    if (!SAFE_SESSION_ID.test(id)) return false;
+    const path = join(this.dir, `${id}.json`);
+    const existed = this.byId.delete(id) || existsSync(path);
+    if (!existed) return false;
+    rmSync(path, { force: true });
+    return true;
   }
 
   /**

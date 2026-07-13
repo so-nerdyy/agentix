@@ -4,9 +4,11 @@ import { launchHermesCommand } from '../../../lib/externalCli.js'
 import { runExternalSetup } from '../../setupHandoff.js'
 import type { SlashCommand } from '../types.js'
 
+const PRODUCT_COMMAND = process.env.AGENTIX_FRONTEND === 'agentix' ? 'agentix' : 'hermes'
+
 export const setupCommands: SlashCommand[] = [
   {
-    help: 'run full setup wizard (launches `hermes setup`)',
+    help: `run full setup wizard (launches \`${PRODUCT_COMMAND} setup\`)`,
     name: 'setup',
     run: (arg, ctx) =>
       void runExternalSetup({

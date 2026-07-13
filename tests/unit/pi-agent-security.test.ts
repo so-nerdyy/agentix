@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CodeAgent } from "../../src/pi/CodeAgent.js";
@@ -170,7 +170,7 @@ describe("Pi agent safety guards", () => {
     }));
 
     expect(result.ok).toBe(true);
-    expect(result.output).toMatchObject({ file: target });
+    expect(result.output).toMatchObject({ file: realpathSync(target) });
   });
 
   it("bounds a hanging CodeAgent TypeScript validation process", async () => {

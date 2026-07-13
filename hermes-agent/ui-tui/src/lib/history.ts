@@ -3,8 +3,11 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 const MAX = 1000
-const dir = process.env.HERMES_HOME ?? join(homedir(), '.hermes')
-const file = join(dir, '.hermes_history')
+const AGENTIX_MODE = process.env.AGENTIX_FRONTEND === 'agentix'
+const dir = AGENTIX_MODE
+  ? process.env.AGENTIX_FRONTEND_HOME ?? join(homedir(), '.agentix', 'frontend')
+  : process.env.HERMES_HOME ?? join(homedir(), '.hermes')
+const file = join(dir, AGENTIX_MODE ? '.agentix_history' : '.hermes_history')
 
 let cache: string[] | null = null
 

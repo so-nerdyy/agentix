@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -105,6 +105,33 @@ describe("HTTP session token auth", () => {
       expect(streamBody).toContain('"type":"result"');
       expect(streamBody).toMatch(/"sessionId":"sess-[^"]+"/);
       expect(streamBody).toContain("data: [DONE]");
+      const gatewayStream = await fetch(`${base}/execute/stream`, {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer secret-token",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          stimulus: "gateway SSE smoke",
+          gatewayId: "webhook",
+          metadata: { source: "untrusted", chatId: "channel-1" },
+          deliver: false,
+        }),
+      });
+      expect(gatewayStream.status).toBe(200);
+      const gatewayStreamBody = await gatewayStream.text();
+      expect(gatewayStreamBody).toContain('"type":"result"');
+      const sessionsResponse = await fetch(`${base}/sessions`, {
+        headers: { Authorization: "Bearer secret-token" },
+      });
+      const sessions = await sessionsResponse.json() as Array<{
+        metadata?: Record<string, unknown>;
+      }>;
+      expect(sessions.some((session) => (
+        session.metadata?.source === "gateway"
+        && session.metadata?.gatewayId === "webhook"
+        && session.metadata?.chatId === "channel-1"
+      ))).toBe(true);
       const malformedStream = await fetch(`${base}/execute/stream`, {
         method: "POST",
         headers: {
@@ -229,6 +256,47 @@ describe("HTTP session token auth", () => {
         },
         body: JSON.stringify({ key: "provider", value: "openai" }),
       })).status).toBe(403);
+
+      expect((await fetch(`${base}/config/secret`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${operator.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ value: "operator-must-not-write" }),
+      })).status).toBe(403);
+
+      const llmSecret = "agentix-admin-secret-never-return";
+      const secretUpdate = await fetch(`${base}/config/secret`, {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer admin-token",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ value: llmSecret }),
+      });
+      expect(secretUpdate.status).toBe(200);
+      const secretPayload = await secretUpdate.text();
+      expect(secretPayload).not.toContain(llmSecret);
+      expect(JSON.parse(secretPayload)).toMatchObject({ ok: true, configured: true });
+      expect(readFileSync(join(process.env.AGENTIX_WORKSPACE_DIR!, ".env.local"), "utf8"))
+        .toContain(`AGENTIX_LLM_API_KEY=${llmSecret}`);
+      const redactedConfig = await fetch(`${base}/config`, {
+        headers: { Authorization: "Bearer admin-token" },
+      });
+      expect(await redactedConfig.json()).toMatchObject({ llmApiKeyConfigured: true });
+
+      const secretRemoval = await fetch(`${base}/config/secret`, {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer admin-token",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ value: null }),
+      });
+      expect(await secretRemoval.json()).toMatchObject({ ok: true, configured: false });
+      expect(readFileSync(join(process.env.AGENTIX_WORKSPACE_DIR!, ".env.local"), "utf8"))
+        .not.toContain("AGENTIX_LLM_API_KEY");
 
       const revoked = await fetch(`${base}/auth/tokens/${encodeURIComponent(operator.record.id)}`, {
         method: "DELETE",

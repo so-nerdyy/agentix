@@ -63,12 +63,18 @@ describe("Agentix backend HTTP client", () => {
         controller.close();
       },
     });
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(body, { status: 200 })));
+    const fetchMock = vi.fn(async () => new Response(body, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
     const backend = new AgentixBackend("http://127.0.0.1:3456");
     const deltas: string[] = [];
 
     const result = await backend.execute({
       stimulus: "test",
+      gatewayId: "discord",
+      metadata: { chatId: "channel-1" },
+      deliver: false,
+      toolsets: [],
+      skills: ["release-audit"],
       streamCallback: (delta) => deltas.push(delta),
     });
 
@@ -78,6 +84,15 @@ describe("Agentix backend HTTP client", () => {
     expect(result.taskIds).toEqual(["task-1"]);
     expect(deltas.join("")).toBe("hello\nworld");
     expect(deltas).not.toContain("[DONE]");
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(request.body))).toMatchObject({
+      stimulus: "test",
+      gatewayId: "discord",
+      metadata: { chatId: "channel-1" },
+      deliver: false,
+      toolsets: [],
+      skills: ["release-audit"],
+    });
   });
 
   it("propagates structured SSE errors", async () => {

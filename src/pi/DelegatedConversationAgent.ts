@@ -53,6 +53,7 @@ export class DelegatedConversationAgent extends BasePIAgent {
     const userRequest = String(task.payload.userRequest ?? stimulus).trim();
     const plannedInstruction = String(task.payload.plannedInstruction ?? "").trim();
     const context = typeof task.payload.context === "string" ? task.payload.context.trim() : "";
+    const skillInstructions = String(task.payload.skillInstructions ?? "").trim();
 
     const completion = await new LLMClient(config).complete([
       {
@@ -61,7 +62,8 @@ export class DelegatedConversationAgent extends BasePIAgent {
           ROLE_PROMPTS[this.role],
           "You are controlled by Agentix Powerhouse and scheduled through Symphony.",
           "You are a Pi execution agent, not the terminal interface or the top-level orchestrator.",
-        ].join(" "),
+          skillInstructions,
+        ].filter(Boolean).join("\n\n"),
       },
       {
         role: "user",
