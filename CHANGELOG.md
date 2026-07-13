@@ -12,10 +12,14 @@ All notable Agentix changes are documented here.
 - Persisted session transcripts, plan recovery, failed-plan retry, and resumed history.
 - Corrupt-state backups and configuration/state integrity diagnostics.
 - Browser security headers and complete dashboard/runtime control coverage.
+- A self-contained Agentix-branded Ink terminal UI derived from Hermes Agent.
+- macOS CI coverage and Python adapter cancellation regression coverage.
 
 ### Changed
 
 - The installed launcher now emits immediate feedback from a thin cold-start bootstrap.
+- Interactive `agentix` launches the full-screen TUI; piped automation retains the
+  deterministic Agentix backend shell.
 - Kilo first-run setup defaults to the live-catalog `kilo-auto/free` model.
 - Provider, Pi, code-validation, scheduler, and gateway operations are bounded and cancellable.
 - Unknown public commands fail locally instead of exposing vendored compatibility commands.
@@ -33,3 +37,7 @@ All notable Agentix changes are documented here.
 - Shell session history and plan detail rendering now match backend contracts.
 - Dashboard command palette, compose, approvals, bodyless actions, forms, counters, and stale details.
 - Support bundles redact nested credentials, authorization values, bearer tokens, and URL passwords.
+- TUI interruption no longer blocks in Python `HTTPResponse.close()` on Windows;
+  immediate SSE headers and bounded heartbeats propagate cancellation to Powerhouse.
+- Simulated terminal paths, editor fallbacks, and local Ink package typing are now
+  deterministic across Windows, Linux, and macOS.

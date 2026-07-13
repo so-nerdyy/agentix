@@ -184,7 +184,7 @@ _stdio_transport = StdioTransport(lambda: _real_stdout, _stdout_lock)
 
 def _using_agentix_backend() -> bool:
     return (
-        os.environ.get("AGENTIX_FRONTEND") == "hermes"
+        os.environ.get("AGENTIX_FRONTEND") in {"agentix", "hermes"}
         and os.environ.get("AGENTIX_DISABLE_BACKEND_CHAT") != "1"
     )
 
@@ -208,6 +208,19 @@ class _AgentixTuiProxy:
         self._backend = AgentixBackend(model=self.model)
         created = self._backend.create_session(model=self.model)
         self.session_id = created.get("id") or session_key
+        backend_tools = self._backend.list_tools()
+        self.tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": str(tool.get("name") or "agentix-tool"),
+                    "description": str(tool.get("description") or "Agentix backend tool"),
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+            for tool in (backend_tools if isinstance(backend_tools, list) else [])
+            if isinstance(tool, dict)
+        ]
         self.session_input_tokens = 0
         self.session_output_tokens = 0
         self.session_total_tokens = 0
@@ -231,12 +244,16 @@ class _AgentixTuiProxy:
         history.append({"role": "user", "content": prompt})
         history.append({"role": "assistant", "content": response})
         self.session_api_calls += 1
+        interrupted = self._backend.was_interrupted
         return {
             "error": None,
             "final_response": response,
-            "interrupted": False,
+            "interrupted": interrupted,
             "messages": history,
         }
+
+    def interrupt(self) -> None:
+        self._backend.interrupt()
 
 
 class _SlashWorker:
@@ -900,7 +917,7 @@ def resolve_skin() -> dict:
 
         init_skin_from_config(_load_cfg())
         skin = get_active_skin()
-        return {
+        payload = {
             "name": skin.name,
             "colors": skin.colors,
             "branding": skin.branding,
@@ -909,6 +926,25 @@ def resolve_skin() -> dict:
             "tool_prefix": skin.tool_prefix,
             "help_header": (skin.branding or {}).get("help_header", ""),
         }
+        if _using_agentix_backend():
+            payload.update(
+                {
+                    "name": "agentix",
+                    "branding": {
+                        **(skin.branding or {}),
+                        "agent_name": "Agentix",
+                        "welcome": "Powerhouse orchestrates. Symphony plans. Pi agents execute.",
+                        "goodbye": "Agentix session closed.",
+                        "prompt_symbol": "agentix>",
+                        "response_label": "Agentix",
+                        "help_header": "Agentix commands",
+                    },
+                    "banner_logo": "AGENTIX",
+                    "banner_hero": "Powerhouse\n  |\nSymphony\n  |\nPi agents",
+                    "help_header": "Agentix commands",
+                }
+            )
+        return payload
     except Exception:
         return {}
 
@@ -1610,6 +1646,9 @@ def _session_info(agent, session: dict | None = None) -> dict:
         info["release_date"] = __release_date__
     except Exception:
         pass
+    if _using_agentix_backend():
+        info["version"] = os.environ.get("AGENTIX_VERSION", "")
+        info["release_date"] = ""
     try:
         from model_tools import get_toolset_for_tool
 
@@ -1623,13 +1662,13 @@ def _session_info(agent, session: dict | None = None) -> dict:
     try:
         from hermes_cli.banner import get_available_skills
 
-        info["skills"] = get_available_skills()
+        info["skills"] = {} if _using_agentix_backend() else get_available_skills()
     except Exception:
         pass
     try:
         from tools.mcp_tool import get_mcp_status
 
-        info["mcp_servers"] = get_mcp_status()
+        info["mcp_servers"] = [] if _using_agentix_backend() else get_mcp_status()
     except Exception:
         info["mcp_servers"] = []
     try:
@@ -1644,6 +1683,9 @@ def _session_info(agent, session: dict | None = None) -> dict:
         info["update_command"] = recommended_update_command()
     except Exception:
         pass
+    if _using_agentix_backend():
+        info["update_behind"] = None
+        info["update_command"] = "agentix update"
     warn = _probe_credentials(agent)
     if warn:
         info["credential_warning"] = warn

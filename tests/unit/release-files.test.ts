@@ -17,16 +17,19 @@ describe("release packaging files", () => {
     const smoke = readFileSync(join(process.cwd(), "scripts", "release-smoke.mjs"), "utf-8");
     const verifier = readFileSync(join(process.cwd(), "scripts", "verify-public-release.mjs"), "utf-8");
     const llmVerifier = readFileSync(join(process.cwd(), "scripts", "verify-live-llm.mjs"), "utf-8");
+    const tuiBuilder = readFileSync(join(process.cwd(), "scripts", "build-tui.mjs"), "utf-8");
     const releaseWorkflow = readFileSync(join(process.cwd(), ".github", "workflows", "release.yml"), "utf-8");
     const ciWorkflow = readFileSync(join(process.cwd(), ".github", "workflows", "ci.yml"), "utf-8");
     const dockerfile = readFileSync(join(process.cwd(), "Dockerfile"), "utf-8");
     const compose = readFileSync(join(process.cwd(), "docker-compose.yml"), "utf-8");
 
-    expect(pkg.scripts.prepack).toBe("npm run build");
+    expect(pkg.scripts.prepack).toBe("npm run build && npm run build:tui");
     expect(pkg.scripts["release:manifest"]).toBe("node scripts/release-manifest.mjs");
     expect(pkg.scripts["release:preflight"]).toBe("node scripts/release-preflight.mjs");
     expect(pkg.scripts["release:verify"]).toBe("node scripts/verify-public-release.mjs");
     expect(pkg.scripts["verify:llm"]).toBe("node scripts/verify-live-llm.mjs");
+    expect(pkg.scripts["build:tui"]).toBe("node scripts/build-tui.mjs");
+    expect(pkg.scripts.prepack).toContain("npm run build:tui");
     expect(pkg.files).toContain("bin");
     expect(pkg.files).toContain("scripts");
     expect(pkg.files).toContain("CHANGELOG.md");
@@ -78,6 +81,7 @@ describe("release packaging files", () => {
     expect(llmVerifier).toContain("AGENTIX_LLM_VERIFY_OUTPUT");
     expect(llmVerifier).toContain("/chat/completions");
     expect(llmVerifier).toContain("/v1/messages");
+    expect(tuiBuilder).toContain('"hermes_cli", "tui_dist", "entry.js"');
     expect(smoke).toContain("public-release-proof.json");
     expect(releaseWorkflow).toContain("npm publish --provenance");
     expect(releaseWorkflow).toContain("@nerdyy/agentix");
@@ -103,6 +107,11 @@ describe("release packaging files", () => {
     expect(dockerfile).toContain("HEALTHCHECK");
     expect(compose).toContain("AGENTIX_SESSION_TOKEN");
     expect(ciWorkflow).toContain("docker build -t agentix:ci .");
+    expect(ciWorkflow).toContain("macos-latest");
+    expect(ciWorkflow).toContain("npm run build:tui");
+    expect(ciWorkflow).toContain("npm run type-check --prefix hermes-agent/ui-tui");
+    expect(ciWorkflow).toContain("npm test --prefix hermes-agent/ui-tui");
+    expect(ciWorkflow).toContain("python -m unittest tests/python/test_agentix_backend_adapter.py");
     expect(ciWorkflow).toContain("actions/checkout@v7");
     expect(ciWorkflow).toContain("actions/setup-node@v6");
     expect(ciWorkflow).toContain("actions/setup-python@v6");

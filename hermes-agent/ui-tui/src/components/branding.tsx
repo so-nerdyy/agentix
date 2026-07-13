@@ -44,9 +44,11 @@ export function ArtLines({ lines }: { lines: [string, string][] }) {
 // Terminals can't scale glyphs, so "responsive" means picking a layout that
 // fits the available columns. Thresholds are picked so each tier reads
 // comfortably without forcing wrap or truncation drift on box-drawing edges.
-const TAG_FULL = 'Nous Research · Messenger of the Digital Gods'
-const TAG_MID = 'Messenger of the Digital Gods'
-const TAG_TINY = 'Nous Research'
+const AGENTIX_FRONTEND = process.env.AGENTIX_FRONTEND === 'agentix'
+const TAG_FULL = AGENTIX_FRONTEND ? 'Powerhouse · Symphony · Pi agents' : 'Nous Research · Messenger of the Digital Gods'
+const TAG_MID = AGENTIX_FRONTEND ? 'Symphony orchestration' : 'Messenger of the Digital Gods'
+const TAG_TINY = AGENTIX_FRONTEND ? 'Agentix' : 'Nous Research'
+const MODEL_VENDOR = AGENTIX_FRONTEND ? 'Agentix backend' : 'Nous Research'
 const HIDE_BELOW = 34
 const COMPACT_FROM = 58
 
@@ -286,7 +288,7 @@ export function SessionPanel({ info, maxWidth, sid, t }: SessionPanelProps) {
 
           <Text color={t.color.accent}>
             {info.model.split('/').pop()}
-            <Text color={t.color.muted}> · Nous Research</Text>
+            <Text color={t.color.muted}> · {MODEL_VENDOR}</Text>
           </Text>
 
           <Text color={t.color.muted} wrap="truncate-end">
@@ -317,7 +319,7 @@ export function SessionPanel({ info, maxWidth, sid, t }: SessionPanelProps) {
           <Box flexDirection="column" marginBottom={1}>
             <Text color={t.color.accent} wrap="truncate-end">
               {info.model.split('/').pop()}
-              <Text color={t.color.muted}> · Nous Research</Text>
+              <Text color={t.color.muted}> · {MODEL_VENDOR}</Text>
             </Text>
             <Text color={t.color.muted} wrap="truncate-end">
               {info.cwd || process.cwd()}

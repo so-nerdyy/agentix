@@ -1,8 +1,10 @@
 # Agentix
 
-Agentix is an AI agent platform with an Agentix-owned shell, setup flow, dashboard, and backend.
+Agentix is an AI agent platform with a Hermes-derived terminal frontend and an
+Agentix-owned orchestration backend.
 
-- Agentix owns the user-facing shell, setup wizard, update flow, cron UX, gateway UX, and command surface.
+- The full-screen terminal UI, setup, update, and integration UX are derived from
+  Hermes Agent and branded for Agentix.
 - Agentix owns LLM-backed Symphony planning, task orchestration, validation, approvals, memory, healing, Pi agents, and runtime services.
 - The web dashboard lives at `/ui` when `agentix server` is running, with live task, Symphony plan, approval, healing, memory, gateway, scheduler, audit, log, doctor, and support-bundle controls.
 
@@ -32,11 +34,16 @@ Verified GitHub release install:
 AGENTIX_VERSION=2.2.0 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
 ```
 
-From any project folder, `agentix` opens the interactive shell. Use `agentix dashboard` if you want the web control surface only, or `agentix server` if you want the backend bridge, event stream, and dashboard/API runtime. Open `http://127.0.0.1:3000/ui/` for the live control surface.
+From any project folder, `agentix` opens the full-screen terminal UI. Use
+`agentix --tui` to request it explicitly. Piped/non-TTY input uses a deterministic
+Agentix shell for automation. Use `agentix dashboard` for the web control surface,
+or `agentix server` for the backend bridge, event stream, and dashboard/API runtime.
+Open `http://127.0.0.1:3000/ui/` for the live control surface.
 
 ## Commands
 
-- `agentix` - open the interactive Agentix shell
+- `agentix` - open the full-screen Agentix terminal UI
+- `agentix --tui` - explicitly open the full-screen terminal UI
 - `agentix -z "<prompt>"` - run a one-shot prompt through Agentix
 - `agentix setup` - first-run setup wizard
 - `agentix model` - configure provider and model
@@ -119,7 +126,8 @@ when the selected provider supports SSE.
 - `src/` - Agentix backend, terminal shell, and bridge
 - `frontend/src/` - editable interactive dashboard source
 - `frontend/dist/` - generated dashboard served by the inbox server
-- `hermes-agent/` - vendored compatibility runtime used internally
+- `hermes-agent/` - vendored Hermes-derived terminal/integration frontend; Agentix
+  mode must delegate backend state and execution to Powerhouse/Symphony/Pi
 - `docs/` - install, operations, and security notes
 
 ## Development
@@ -127,7 +135,9 @@ when the selected provider supports SSE.
 ```powershell
 npm install
 npm run build
+npm run build:tui
 npm test
+npm test --prefix hermes-agent/ui-tui
 npm run smoke:release
 ```
 

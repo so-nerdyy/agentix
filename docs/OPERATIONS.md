@@ -2,7 +2,8 @@
 
 ## Runtime Components
 
-- Agentix shell: user-facing shell, setup, update, cron, gateway, model, options, and command UX
+- Agentix terminal frontend: Hermes-derived TUI plus setup, update, cron, gateway,
+  model, options, and command UX
 - Agentix backend: bridge/API, task orchestration, memory, approvals, validation, and Pi workers
 - Data directory: persistent workspace state under `AGENTIX_DATA_DIR` or `./data`
 
@@ -22,9 +23,11 @@
 
 ## Agentix Command Surface
 
-When `agentix` launches, it starts the Agentix shell and connects it to the Agentix bridge:
+When `agentix` launches interactively, it starts the full-screen terminal UI and
+connects it to the Agentix bridge:
 
-- `agentix` opens the Agentix shell
+- `agentix` opens the full-screen terminal UI
+- `agentix --tui` explicitly selects the same terminal UI
 - `agentix -z/--oneshot` executes prompts through the Agentix bridge
 - `agentix setup` and `agentix model` configure provider/model/base URL/API key for Agentix
 - Kilo Gateway uses provider `kilocode`, base URL `https://api.kilo.ai/api/gateway`, and `AGENTIX_LLM_API_KEY`, `KILOCODE_API_KEY`, or `KILO_API_KEY`

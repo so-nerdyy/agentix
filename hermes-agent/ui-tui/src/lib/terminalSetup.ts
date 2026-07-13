@@ -1,6 +1,6 @@
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { posix, win32 } from 'node:path'
 
 export type SupportedTerminal = 'cursor' | 'vscode' | 'windsurf'
 
@@ -33,6 +33,9 @@ const TERMINAL_META: Record<SupportedTerminal, { appName: string; label: string 
   cursor: { appName: 'Cursor', label: 'Cursor' },
   windsurf: { appName: 'Windsurf', label: 'Windsurf' }
 }
+
+const joinForPlatform = (platform: NodeJS.Platform, ...parts: string[]): string =>
+  (platform === 'win32' ? win32 : posix).join(...parts)
 
 const MAC_COPY_BINDING: Keybinding = {
   key: 'cmd+c',
@@ -165,14 +168,14 @@ export function getVSCodeStyleConfigDir(
   homeDir: string = homedir()
 ): null | string {
   if (platform === 'darwin') {
-    return join(homeDir, 'Library', 'Application Support', appName, 'User')
+    return joinForPlatform(platform, homeDir, 'Library', 'Application Support', appName, 'User')
   }
 
   if (platform === 'win32') {
-    return env['APPDATA'] ? join(env['APPDATA'], appName, 'User') : null
+    return env['APPDATA'] ? joinForPlatform(platform, env['APPDATA'], appName, 'User') : null
   }
 
-  return join(homeDir, '.config', appName, 'User')
+  return joinForPlatform(platform, homeDir, '.config', appName, 'User')
 }
 
 function isKeybinding(value: unknown): value is Keybinding {
@@ -303,7 +306,7 @@ export async function configureTerminalKeybindings(
     }
   }
 
-  const keybindingsFile = join(configDir, 'keybindings.json')
+  const keybindingsFile = joinForPlatform(platform, configDir, 'keybindings.json')
 
   try {
     await ops.mkdir(configDir, { recursive: true })
@@ -428,7 +431,7 @@ export async function shouldPromptForTerminalSetup(options?: {
   }
 
   try {
-    const content = await ops.readFile(join(configDir, 'keybindings.json'), 'utf8')
+    const content = await ops.readFile(joinForPlatform(platform, configDir, 'keybindings.json'), 'utf8')
     const parsed: unknown = JSON.parse(stripJsonComments(content))
 
     if (!Array.isArray(parsed)) {

@@ -25,15 +25,19 @@ orchestration loops.
 - Public baseline: `@nerdyy/agentix@2.1.12` with npm provenance and GitHub release.
 - Release candidate: `2.2.0` on `codex/orchestration-hardening-2.2.0`.
 - A packed global install starts visibly, stays ANSI-clean when piped, creates a
-  real backend session, and cancels active work through the full shell/Symphony/Pi
-  path.
+  real backend session, and cancels active work through the shell/Symphony/Pi path.
+- A self-contained Hermes-derived Ink frontend now launches as `agentix --tui` and
+  is the default for interactive TTY launches. Prompt execution is delegated to
+  Agentix, but TUI session/slash ownership still requires migration from Hermes
+  state and dispatch paths.
 - Real Kilo requests prove primary connectivity, native streaming, and configured
   Luna/Terra delegation with `stepfun/step-3.7-flash:free`.
 - Every dashboard panel/action was exercised in a browser at desktop and mobile
   widths with no console errors or horizontal overflow.
-- Local build, 181 automated tests, final packed `2.2.0` release smoke, dependency
-  audit, path hygiene, and secret-redaction checks pass. PR #21 also proves the
-  Windows/Ubuntu packed flows, both Docker images, and Linux/Windows compose files.
+- Local build, 181 root tests, 896 TUI tests, TUI type-check, dependency audit,
+  path hygiene, secret-redaction checks, and the expanded packed release smoke pass.
+  Prior PR #21 evidence covers Windows, Ubuntu, Docker images, and Linux/Windows
+  compose; macOS is newly required.
 
 ## Release Scope: 2.2.0
 
@@ -51,13 +55,17 @@ orchestration loops.
    exercise, dashboard fixes, browser security headers, and private atomic setup.
 9. Recursive support-bundle redaction, constant-time token checks, and safe gateway
    delivery diagnostics.
+10. Full Agentix-branded Ink TUI packaging, interactive default launch, backend
+    cancellation, and cross-platform terminal behavior.
+11. Migrate TUI sessions, slash commands, skills, plugins, MCP, and compatible
+    upstream workflows so Hermes-derived code cannot own backend state or execution.
 
 ## Release Strategy
 
 - Run build, full tests, dependency audit, packed-install smoke, secret scan, and
   patch hygiene locally.
 - Push only the `codex/orchestration-hardening-2.2.0` branch and open a pull request.
-- Require Windows, Ubuntu, and Docker CI before merge.
+- Require Windows, Ubuntu, macOS, and Docker CI before merge.
 - Publish npm/GitHub artifacts only from the authorized release workflow after merge.
 - Generate fresh live-LLM and public-release proof files for `2.2.0`; proof files
   from prior versions do not satisfy current readiness.

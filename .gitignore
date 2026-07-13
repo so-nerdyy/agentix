@@ -1,5 +1,7 @@
 node_modules/
 dist/
+!hermes-agent/hermes_cli/tui_dist/
+!hermes-agent/hermes_cli/tui_dist/entry.js
 !frontend/dist/
 !frontend/dist/**
 .env

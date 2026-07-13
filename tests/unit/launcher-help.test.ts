@@ -27,7 +27,8 @@ describe("launcher help", () => {
     });
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("open the Agentix interactive shell");
+    expect(result.stdout).toContain("open the Agentix terminal UI");
+    expect(result.stdout).toContain("agentix --tui");
     expect(result.stdout).toContain("Agentix commands:");
     expect(result.stdout).toContain("Agentix backend commands:");
     expect(result.stdout).toContain("setup");
@@ -269,12 +270,13 @@ describe("launcher help", () => {
     expect(result.stdout).not.toMatch(/hermes|nous portal/i);
   }, 90_000);
 
-  it("opens the Agentix-owned shell for no-argument launches", () => {
+  it("opens the full TUI interactively and preserves the backend shell for piped input", () => {
     const launcher = launcherSource();
 
     expect(launcher).toContain("async function spawnNodeShell");
     expect(launcher).toContain("await spawnNodeShell();");
-    expect(launcher).not.toContain("if (!cmd && process.stdin.isTTY) {\n    await ensureBridgeRunning();\n    await spawnFrontendCompatibility([]);");
+    expect(launcher).toContain('cmd === "--tui" || cmd === "tui"');
+    expect(launcher).toContain("if (!cmd && process.stdin.isTTY) {\n    await ensureBridgeRunning();\n    await spawnFrontendCompatibility([\"--tui\"]);");
   });
 
   it("detects Python instead of requiring a literal python command", () => {

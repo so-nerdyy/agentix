@@ -16,8 +16,15 @@ Updated: 2026-07-12
 - Build: pass (`tsc` plus dashboard build).
 - Automated suite: 23 files, 181 tests passed.
 - Dependency audit: zero known vulnerabilities across 149 dependencies.
-- Final packed `2.2.0` release smoke: pass in 312.5 seconds.
-- Installed cold launch: immediate bootstrap, under the 500 ms gate, no piped ANSI.
+- Expanded packed `2.2.0` release smoke: pass in 611.4 seconds, including installed
+  TUI launch, TUI cancellation, provider abort, reinstall, gateways, scheduler,
+  dashboard/API, and support bundle.
+- Installed cold launch: immediate bootstrap, under the 1.5 second cross-platform
+  gate, no piped ANSI.
+- Full TUI: 85 test files and 896 tests pass; TypeScript type-check passes; packaged
+  bundle is 2.9 MB and `agentix --tui` exits cleanly in non-TTY mode.
+- TUI lint baseline: 38 errors and 102 warnings remain in the vendored source;
+  cleanup is required before the final public-release gate.
 - Installed Ctrl+C: provider request aborted; task and plan persisted `cancelled`;
   no orphan shell/backend process.
 - Real Kilo Luna/Terra: `luna-message` returned `LIVE_LUNA_OK`; `terra-message`
@@ -28,7 +35,7 @@ Updated: 2026-07-12
   session, and token create/revoke passed; mobile 390x844 passed; zero console errors.
 - Invalid command: local exit status 2, Agentix-only error, no bridge/Python startup.
 - Full slash-command inventory: real isolated shell subprocess passed.
-- PR #21 CI: Ubuntu and Windows build, 181 tests, packed release
+- Prior PR #21 CI: Ubuntu and Windows build, 181 tests, packed release
   smoke, and native installer dry runs passed; primary/compatibility Docker images
   and Linux/Windows compose validation passed.
 - CI and release workflows use current Node-runtime action majors and no longer run
@@ -55,11 +62,20 @@ Updated: 2026-07-12
   counts, approval-plan terminal state, and mobile behavior were fixed.
 - Support bundles recursively redact configured and structural secrets; auth and
   gateway comparisons are constant-time.
+- Interactive `agentix` now selects the bundled Ink TUI, while non-TTY automation
+  retains the deterministic Agentix shell.
+- TUI interruption now uses immediate SSE headers and bounded heartbeats so the
+  adapter closes on its reader thread and Powerhouse aborts active provider work.
+- TUI path simulation and editor tests no longer inherit the host OS; the complete
+  TUI suite and local Ink package type-check on Windows.
 
 ## Next Action
 
-1. Review and merge PR #21.
-2. Publish only through the authorized tag workflow, then generate fresh public
+1. Push the verified TUI/macOS/release-smoke batch.
+2. Replace Hermes-owned TUI session and slash-command paths with Agentix backend
+   workflows, then close the remaining parity rows in `docs/HERMES_PARITY.md`.
+3. Obtain final Windows, Ubuntu, macOS, and Docker CI evidence.
+4. Publish only through the authorized tag workflow, then generate fresh public
    release proof for `2.2.0`.
 
 ## Subagent Activity

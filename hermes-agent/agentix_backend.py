@@ -4,6 +4,7 @@ Agentix backend adapter for the Hermes frontend.
 
 import json
 import os
+import socket
 import subprocess
 import threading
 import time
@@ -85,7 +86,51 @@ class AgentixBackend:
     ):
         self.model = model or os.environ.get("AGENTIX_MODEL")
         self.session_id = session_id
+        self._interrupt_event = threading.Event()
+        self._response_lock = threading.Lock()
+        self._active_response: Any = None
+        self.was_interrupted = False
         ensure_bridge_running()
+
+    def interrupt(self) -> None:
+        self.was_interrupted = True
+        self._interrupt_event.set()
+        with self._response_lock:
+            response = self._active_response
+        if response is not None:
+            # HTTPResponse.close() can block behind a reader holding the
+            # buffered stream lock. The Agentix bridge sends bounded SSE
+            # heartbeats so execute() observes the interrupt itself; this
+            # socket shutdown is an additional best-effort wake-up for other
+            # compatible endpoints and never blocks the interrupt caller.
+            stream = getattr(response, "fp", None)
+            raw = getattr(stream, "raw", None)
+            transports = (
+                getattr(raw, "_sock", None),
+                getattr(stream, "_sock", None),
+                raw,
+                stream,
+            )
+            for transport in transports:
+                shutdown = getattr(transport, "shutdown", None)
+                if not callable(shutdown):
+                    continue
+                try:
+                    shutdown(socket.SHUT_RDWR)
+                    return
+                except Exception:
+                    continue
+
+            # Unknown response implementations still get a best-effort close,
+            # but never block the UI's interrupt handler on that close.
+            threading.Thread(target=self._close_response, args=(response,), daemon=True).start()
+
+    @staticmethod
+    def _close_response(response: Any) -> None:
+        try:
+            response.close()
+        except Exception:
+            pass
 
     def _post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
         data = json.dumps(body).encode("utf-8")
@@ -141,28 +186,42 @@ class AgentixBackend:
         )
 
         response = ""
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            for raw_line in resp:
-                line = raw_line.decode("utf-8").rstrip("\r\n")
-                if not line.startswith("data: "):
-                    continue
-                payload = line[6:]
-                if payload == "[DONE]":
-                    break
-                try:
-                    parsed = json.loads(payload)
-                    if parsed.get("error"):
-                        raise RuntimeError(parsed["error"])
-                    delta = parsed.get("delta")
-                    if delta:
+        self.was_interrupted = False
+        self._interrupt_event.clear()
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                with self._response_lock:
+                    self._active_response = resp
+                for raw_line in resp:
+                    if self._interrupt_event.is_set():
+                        break
+                    line = raw_line.decode("utf-8").rstrip("\r\n")
+                    if not line.startswith("data: "):
+                        continue
+                    payload = line[6:]
+                    if payload == "[DONE]":
+                        break
+                    try:
+                        parsed = json.loads(payload)
+                        if parsed.get("error"):
+                            raise RuntimeError(parsed["error"])
+                        delta = parsed.get("delta")
+                        if delta:
+                            if stream_callback:
+                                stream_callback(delta)
+                            response += delta
+                    except json.JSONDecodeError:
+                        payload = payload.replace("\\n", "\n")
                         if stream_callback:
-                            stream_callback(delta)
-                        response += delta
-                except json.JSONDecodeError:
-                    payload = payload.replace("\\n", "\n")
-                    if stream_callback:
-                        stream_callback(payload)
-                    response += payload
+                            stream_callback(payload)
+                        response += payload
+        except (OSError, ValueError):
+            if not self._interrupt_event.is_set():
+                raise
+        finally:
+            with self._response_lock:
+                self._active_response = None
+            self.was_interrupted = self._interrupt_event.is_set()
 
         return response
 

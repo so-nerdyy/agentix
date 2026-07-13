@@ -2,12 +2,17 @@
 
 Agentix is split into two layers:
 
-## Agentix Shell Layer
+## Hermes-Derived Frontend Layer
 
-- Owns the user-facing shell
+- Renders the full-screen terminal interface users launch with `agentix`
 - Handles setup, model selection, update checks, cron, gateway, skills, tools, and other interactive commands
-- Provides the terminal UX users launch with `agentix`
-- Uses bundled compatibility internals only where needed for legacy integrations
+- Does not own model execution, planning, tasks, approvals, memory, healing, or
+  durable Agentix sessions
+- Delegates prompt execution to the Agentix bridge through `_AgentixTuiProxy`
+
+The piped/non-TTY fallback shell is implemented directly in TypeScript for stable
+automation. `docs/HERMES_PARITY.md` tracks frontend paths that still require
+migration away from Hermes state or command dispatch.
 
 ## Agentix Backend
 
@@ -18,7 +23,8 @@ Agentix is split into two layers:
 
 ## Agentix Command Bridge
 
-The installed `agentix` command launches the Agentix shell and points it at the Agentix bridge. In that mode:
+The installed `agentix` command starts the Agentix bridge and launches the bundled
+terminal frontend. In that mode:
 
 - `agentix` and `agentix -z/--oneshot` execute prompts through Agentix Powerhouse/Symphony/Pi workers.
 - `agentix setup` and `agentix model` use the Agentix setup wizard, writing secrets to `.env.local` and syncing non-secret model/provider/base URL defaults into Agentix backend config.
@@ -31,7 +37,8 @@ The installed `agentix` command launches the Agentix shell and points it at the 
 - `agentix --agentix-cli plans`, shell `/plans`, and shell `/plan <id>` inspect Agentix Symphony plan executions.
 - Dashboard `/ui` reads Agentix `/plans` and `/plans/:id` to inspect Symphony plan execution, dependencies, approvals, and task linkage.
 
-Bundled compatibility internals are not the public command surface.
+Hermes-derived frontend code is part of the public UX, but its agent loop and
+durable state stores are not part of the Agentix backend.
 
 ## Core Backend Primitives
 
@@ -48,14 +55,15 @@ Bundled compatibility internals are not the public command surface.
 
 ## Data Flow
 
-1. The user types into the Agentix shell.
-2. The shell emits a stimulus or command.
+1. The user types into the Agentix terminal UI or automation shell.
+2. The frontend emits a stimulus or Agentix command.
 3. The Agentix backend receives the request through the bridge.
 4. Symphony builds a safe plan, either from the LLM planner or static fallback.
 5. The backend schedules independent steps in bounded parallel waves, validates each result, and routes focused or complex conversational work to configured Luna or Terra Pi workers.
 6. Downstream steps receive completed dependency results. Approval-gated and interrupted plans persist safely and resume remaining dependent steps.
 7. Failed retryable steps can receive promoted healing guidance before the next attempt; successful and failed procedure applications are fed back into the healing store.
-8. Native model deltas and lifecycle events stream back to the shell; the aggregated final response is persisted under the workspace data directory.
+8. Native model deltas and lifecycle events stream back through the bridge; the
+   aggregated final response is persisted under the workspace data directory.
 
 ## Workspace Layout
 

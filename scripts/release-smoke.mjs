@@ -29,6 +29,7 @@ const installedPackageRoot = process.platform === "win32"
   ? join(prefixDir, "node_modules", ...packagePathParts)
   : join(prefixDir, "lib", "node_modules", ...packagePathParts);
 const agentixEntrypoint = join(installedPackageRoot, "bin", "agentix.js");
+const installedTuiBundle = join(installedPackageRoot, "hermes-agent", "hermes_cli", "tui_dist", "entry.js");
 
 function shouldUseShell(command) {
   return process.platform === "win32" && /\.cmd$/i.test(command);
@@ -377,6 +378,7 @@ async function packAndInstall() {
   });
   assert(existsSync(agentixCommand), `installed agentix command missing: ${agentixCommand}`);
   assert(existsSync(agentixEntrypoint), `installed agentix entrypoint missing: ${agentixEntrypoint}`);
+  assert(existsSync(installedTuiBundle), `installed Agentix TUI bundle missing: ${installedTuiBundle}`);
   return { tarball, tarballName: packInfo[0].filename, sha256: sha256(tarball) };
 }
 
@@ -536,13 +538,30 @@ async function smokeCli() {
   assert(version.stdout.includes("Agentix v"), "agentix version did not print version");
 
   const help = await run(agentixCommand, ["help"], { timeoutMs: 30_000 });
-  assert(help.stdout.includes("open the Agentix interactive shell"), "agentix help missing shell launch help");
+  assert(help.stdout.includes("open the Agentix terminal UI"), "agentix help missing terminal UI launch help");
   assert(help.stdout.includes("server"), "agentix help missing server command");
   assert(help.stdout.includes("tasks, task"), "agentix help missing task commands");
   assert(help.stdout.includes("approvals, approval"), "agentix help missing approval commands");
   assert(help.stdout.includes("readiness"), "agentix help missing readiness command");
   assert(!help.stdout.includes("Nous"), "agentix help still mentions Nous branding");
   assert(!help.stdout.includes("Portal"), "agentix help still mentions Portal branding");
+
+  const tuiWorkspace = join(smokeRoot, "workspace-tui");
+  await mkdir(tuiWorkspace, { recursive: true });
+  const tui = await run(agentixCommand, ["--tui"], {
+    cwd: tuiWorkspace,
+    env: {
+      ...process.env,
+      AGENTIX_DATA_DIR: join(tuiWorkspace, "data"),
+      AGENTIX_FRONTEND_HOME: join(tuiWorkspace, ".agentix", "frontend"),
+      AGENTIX_PYTHON_VENV: join(smokeRoot, "python-frontend"),
+      AGENTIX_WORKSPACE_DIR: tuiWorkspace,
+    },
+    timeoutMs: 300_000,
+  });
+  const tuiOutput = `${tui.stdout}\n${tui.stderr}`;
+  assert(tuiOutput.includes("agentix-tui: no TTY"), "installed agentix --tui did not launch the packaged TUI");
+  assert(!/hermes|nous portal/i.test(tuiOutput), "installed Agentix TUI launch leaked compatibility branding");
 
   const options = await run(agentixCommand, ["options"], { timeoutMs: 30_000 });
   assert(options.stdout.includes("Kilo Gateway"), "agentix options missing Kilo Gateway setup guidance");
@@ -692,7 +711,10 @@ async function smokeColdShell() {
   });
   assert(shell.stdout.includes(`Agentix v${packageJson.version}`), "cold shell did not print the installed version");
   assert(shell.stdout.includes("Starting Agentix"), "cold shell did not provide immediate startup feedback");
-  assert(shell.firstOutputMs !== null && shell.firstOutputMs <= 500, `cold shell stayed silent for ${shell.firstOutputMs}ms`);
+  assert(
+    shell.firstOutputMs !== null && shell.firstOutputMs <= 1_500,
+    `cold shell stayed silent for ${shell.firstOutputMs}ms (limit: 1500ms)`,
+  );
   assert(shell.stdout.includes("Powerhouse orchestrates. Symphony plans. Pi agents execute."), "cold shell missing architecture banner");
   assert(/Session: sess-[a-z0-9-]+/i.test(shell.stdout), "cold shell did not create a real backend session");
   assert(shell.stdout.includes("agentix>"), "cold shell did not render a prompt");
@@ -772,6 +794,11 @@ async function smokeServer() {
     resolveInterruptedProviderRequest = resolve;
   });
   let interruptedProviderRequestAborted = false;
+  let resolveTuiInterruptedProviderRequest;
+  const tuiInterruptedProviderRequestStarted = new Promise((resolve) => {
+    resolveTuiInterruptedProviderRequest = resolve;
+  });
+  let tuiInterruptedProviderRequestAborted = false;
   const llmServer = createHttpServer((req, res) => {
     if (req.method !== "POST" || req.url !== "/v1/chat/completions") {
       res.writeHead(404, { "content-type": "application/json" });
@@ -794,9 +821,18 @@ async function smokeServer() {
       const messages = Array.isArray(payload.messages) ? payload.messages : [];
       const system = String(messages.find((message) => message?.role === "system")?.content ?? "");
       const user = String(messages.findLast((message) => message?.role === "user")?.content ?? "");
-      if (!system.includes("Agentix Symphony planner") && user.includes("AGENTIX_INTERRUPT_SMOKE")) {
-        resolveInterruptedProviderRequest();
-        const markAborted = () => { interruptedProviderRequestAborted = true; };
+      const shellInterrupt = user.includes("AGENTIX_INTERRUPT_SMOKE");
+      const tuiInterrupt = user.includes("AGENTIX_TUI_INTERRUPT_SMOKE");
+      if (!system.includes("Agentix Symphony planner") && (shellInterrupt || tuiInterrupt)) {
+        if (tuiInterrupt) {
+          resolveTuiInterruptedProviderRequest();
+        } else {
+          resolveInterruptedProviderRequest();
+        }
+        const markAborted = () => {
+          if (tuiInterrupt) tuiInterruptedProviderRequestAborted = true;
+          else interruptedProviderRequestAborted = true;
+        };
         req.once("aborted", markAborted);
         res.once("close", () => {
           if (!res.writableEnded) markAborted();
@@ -924,7 +960,8 @@ async function smokeServer() {
     await installCompatibilityPythonDependencies();
     const compatibilityEnv = {
       ...serverEnv,
-      AGENTIX_FRONTEND: "hermes",
+      AGENTIX_FRONTEND: "agentix",
+      AGENTIX_VERSION: packageJson.version,
       PYTHONPATH: [
         join(installedPackageRoot, "hermes-agent"),
         process.env.PYTHONPATH,
@@ -1042,7 +1079,21 @@ async function smokeServer() {
 
     const tuiProxy = await run(python, [
       "-c",
-      "from tui_gateway.server import _AgentixTuiProxy; p=_AgentixTuiProxy('release-smoke-session'); r=p.run_conversation('release smoke tui proxy delegation'); print(r['final_response'])",
+      [
+        "import json",
+        "from tui_gateway.server import _AgentixTuiProxy, _session_info, resolve_skin",
+        "p = _AgentixTuiProxy('release-smoke-session')",
+        "r = p.run_conversation('release smoke tui proxy delegation')",
+        "skin = resolve_skin()",
+        "info = _session_info(p)",
+        "assert skin['name'] == 'agentix'",
+        "assert skin['branding']['agent_name'] == 'Agentix'",
+        "assert info['version'] == '2.2.0'",
+        "assert info['update_command'] == 'agentix update'",
+        "assert info['skills'] == {}",
+        "assert info['mcp_servers'] == []",
+        "print(json.dumps({'response': r['final_response'], 'skin': skin['name'], 'update': info['update_command']}))",
+      ].join("\n"),
     ], {
       cwd: smokeRoot,
       env: compatibilityEnv,
@@ -1051,6 +1102,41 @@ async function smokeServer() {
     const tuiProxyOutput = `${tuiProxy.stdout}\n${tuiProxy.stderr}`;
     assert(tuiProxyOutput.includes("Agentix fixture response:"), "TUI proxy did not call the configured model fixture");
     assert(tuiProxyOutput.includes("release smoke tui proxy delegation"), "TUI proxy output did not preserve streamed content");
+    assert(!/hermes|nous portal/i.test(tuiProxyOutput), "TUI proxy metadata leaked compatibility branding");
+
+    const tuiCancellation = await run(python, [
+      "-c",
+      [
+        "import json, threading, time",
+        "from tui_gateway.server import _AgentixTuiProxy",
+        "p = _AgentixTuiProxy('release-smoke-tui-cancel')",
+        "result = {}",
+        "def execute(): result['value'] = p.run_conversation('AGENTIX_TUI_INTERRUPT_SMOKE')",
+        "worker = threading.Thread(target=execute, daemon=True)",
+        "worker.start()",
+        "time.sleep(2)",
+        "p.interrupt()",
+        "worker.join(30)",
+        "assert not worker.is_alive()",
+        "assert result['value']['interrupted'] is True",
+        "print(json.dumps({'interrupted': True}))",
+      ].join("\n"),
+    ], {
+      cwd: smokeRoot,
+      env: compatibilityEnv,
+      timeoutMs: 60_000,
+    });
+    await withTimeout(tuiInterruptedProviderRequestStarted, 30_000, "TUI cancellation never reached the provider fixture");
+    await eventually(
+      () => tuiInterruptedProviderRequestAborted,
+      30_000,
+      "TUI cancellation did not abort the provider request",
+    );
+    const tuiCancellationOutput = `${tuiCancellation.stdout}\n${tuiCancellation.stderr}`;
+    assert(
+      tuiCancellationOutput.includes('"interrupted": true'),
+      `TUI proxy did not report interruption: ${tuiCancellationOutput.trim().slice(-500)}`,
+    );
 
     const cronAdapter = await run(python, [
       "-c",

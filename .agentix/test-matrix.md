@@ -1,16 +1,19 @@
 # Agentix Capability Test Matrix
 
-Statuses: `PASS` is directly proven. `EXTERNAL` requires credentials, publication,
-or platform infrastructure unavailable in the local environment. No critical local
-capability remains `GAP`.
+Statuses: `PASS` is directly proven. `PARTIAL` has meaningful evidence but an
+end-to-end or ownership gap remains. `GAP` is not implemented correctly. `EXTERNAL`
+requires credentials, publication, or unavailable platform infrastructure.
 
 | Capability | Status | Evidence |
 | --- | --- | --- |
 | Public npm install | PASS | `2.1.12` public install; `2.2.0` packed isolated-prefix install |
-| Cold launch and prompt | PASS | Installed shell bootstrap under 500 ms, banner/session/prompt visible |
+| Cold launch and prompt | PARTIAL | Installed non-TTY shell under 1.5s; interactive TTY selects packaged TUI; PTY proof pending |
 | Help/version/invalid command | PASS | Real subprocess tests; unknown command exits 2 locally without compatibility runtime |
-| Graceful exit and Ctrl+C | PASS | `/exit` plus installed active-provider abort; task/plan cancelled and request closed |
-| Complete slash-command inventory | PASS | Every list/guidance/parser path executed in isolated real shell subprocess |
+| Graceful exit and Ctrl+C | PARTIAL | Installed shell and TUI proxy provider abort paths pass; real interactive PTY keypress proof remains |
+| Complete slash-command inventory | GAP | Backend shell inventory passes, but current upstream has 13 additional commands and TUI still uses Hermes slash worker |
+| Full-screen TUI | PARTIAL | 85 files/896 tests, type-check, bundle, source and packed non-TTY launch pass; PTY/platform proof pending |
+| TUI lint | GAP | Full vendored tree currently reports 38 errors and 102 warnings |
+| TUI backend ownership | GAP | Prompt path uses Agentix; session DB and slash worker still use Hermes state/dispatch |
 | Narrow/color-disabled terminal | PASS | Non-TTY smoke has no ANSI; mobile dashboard 390x844 has no overflow |
 | Config precedence and aliases | PASS | Process > `.env.local` > JSON > defaults; Kilo aliases covered |
 | Malformed configuration | PASS | Tolerant load plus `doctor` fail/warn diagnostics with no content leak |
@@ -33,8 +36,9 @@ capability remains `GAP`.
 | Session transcript/history | PASS | Atomic transcript persistence, restart recovery, shell `/history` release smoke |
 | Corrupt/partial state | PASS | Atomic stores, preserved `.corrupt-*` backup, bounded doctor integrity scan |
 | Process safety | PASS | Missing executable, timeout, process-tree abort, output cap, spaces, path guards |
-| Scheduler/cron | PASS | Recurrence, one-shot, manual/due, scripts, timeout/output cap, stale-lock recovery |
-| Memory | PASS | Persistence, search/ranking, consolidation/reset, browser workflow |
+| Scheduler/cron | PARTIAL | Backend recurrence/one-shot/manual/due/recovery pass; TUI slash ownership pending |
+| Memory | PARTIAL | Backend persistence/search/consolidation/reset pass; complete Agentix TUI workflow pending |
+| Skills/plugins/MCP | GAP | Hermes metadata is suppressed until Agentix-owned lifecycle and Pi integration exist |
 | Gateway framework/webhook | PASS | Auth, parsing, enable/disable, inbound, outbound, timeout/redaction, browser workflow |
 | External Slack/Teams/Discord/Telegram | EXTERNAL | Connectors implemented; live channel credentials are not present locally |
 | Dashboard | PASS | All 18 panels/actions manually exercised desktop/mobile; no console errors |
@@ -44,7 +48,8 @@ capability remains `GAP`.
 | Dependency security | PASS | `npm audit`: zero vulnerabilities |
 | Windows current branch | PASS | Local and PR #21 CI build, 181 tests, packed install/smoke, PowerShell installer |
 | Ubuntu current branch | PASS | PR #21 CI build, 181 tests, packed install/smoke, shell installer |
+| macOS current branch | GAP | Workflow added; no final macOS CI evidence yet |
 | Docker current branch | PASS | PR #21 CI primary/compatibility image builds plus Linux/Windows compose validation |
-| Documentation install path | PASS | Commands and `2.2.0` examples align with the final packed artifact |
+| Documentation install path | PARTIAL | TUI/parity docs updated; final command/session ownership changes still pending |
 | npm/GitHub provenance | PASS | Public `2.1.12` proof; workflow enforces provenance for subsequent tags |
 | `2.2.0` public publication proof | EXTERNAL | Requires merge/tag authorization, npm publish, and GitHub release assets |

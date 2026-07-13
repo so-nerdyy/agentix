@@ -125,7 +125,8 @@ function buildLauncherHelp() {
     `Agentix v${pkg.version}`,
     "",
     "Usage:",
-    "  agentix                 open the Agentix interactive shell",
+    "  agentix                 open the Agentix terminal UI",
+    "  agentix --tui           open the full-screen Agentix terminal UI",
     "  agentix <command>       run a shell or backend command",
     "",
     "Agentix commands:",
@@ -947,6 +948,7 @@ async function spawnFrontendCompatibility(args) {
       AGENTIX_BRIDGE_URL: bridgeUrl(),
       // The bundled frontend is a fork, but its user-facing mode is Agentix.
       AGENTIX_FRONTEND: "agentix",
+      AGENTIX_VERSION: pkg.version,
     }),
   });
   managedForegroundChild = child;
@@ -1445,8 +1447,15 @@ async function main() {
     return;
   }
 
+  if (cmd === "--tui" || cmd === "tui") {
+    await ensureBridgeRunning();
+    await spawnFrontendCompatibility(cmd === "tui" ? ["--tui", ...args] : argv);
+    return;
+  }
+
   if (!cmd && process.stdin.isTTY) {
-    await spawnNodeShell();
+    await ensureBridgeRunning();
+    await spawnFrontendCompatibility(["--tui"]);
     return;
   }
   if (!cmd) {

@@ -101,6 +101,9 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
     raw.setHeader("Cache-Control", "no-cache");
     raw.setHeader("Connection", "keep-alive");
     raw.setHeader("X-Accel-Buffering", "no");
+    raw.flushHeaders();
+    const heartbeat = setInterval(() => writeEvent(": agentix-heartbeat\n\n"), 500);
+    heartbeat.unref?.();
 
     try {
       const result = await runtime().execute({
@@ -127,6 +130,7 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
         writeEvent(`data: ${JSON.stringify({ error: msg })}\n\n`);
       }
     } finally {
+      clearInterval(heartbeat);
       finished = true;
       request.raw.off("aborted", abortDisconnectedRequest);
       raw.off("close", abortDisconnectedRequest);
