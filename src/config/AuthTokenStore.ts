@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { JsonFileStore } from "../storage/JsonFileStore.js";
 import { PATHS } from "./paths.js";
 
@@ -27,6 +27,12 @@ const ROLE_RANK: Record<AuthRole, number> = {
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token, "utf-8").digest("hex");
+}
+
+function hashesEqual(left: string, right: string): boolean {
+  const leftBytes = Buffer.from(left, "hex");
+  const rightBytes = Buffer.from(right, "hex");
+  return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);
 }
 
 function normalizeRole(role: unknown): AuthRole {
@@ -91,18 +97,18 @@ export class AuthTokenStore {
   } {
     if (!token) return { ok: false };
     const hashed = hashToken(token);
-    let matched: StoredAuthToken | undefined;
+    const matched = this.store.read().tokens.find((stored) =>
+      !stored.revokedAt && hashesEqual(stored.tokenHash, hashed),
+    );
+    if (!matched) return { ok: false };
+    const lastUsedAt = Date.now();
     this.store.update((current) => {
       const next = current.tokens.map((stored) => {
-        if (!stored.revokedAt && stored.tokenHash === hashed) {
-          matched = { ...stored, lastUsedAt: Date.now() };
-          return matched;
-        }
+        if (stored.id === matched.id) return { ...stored, lastUsedAt };
         return stored;
       });
       return { tokens: next };
     });
-    if (!matched) return { ok: false };
     return { ok: true, role: matched.role, tokenId: matched.id };
   }
 

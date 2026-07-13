@@ -18,6 +18,12 @@ describe("config", () => {
     KILO_API_KEY: process.env.KILO_API_KEY,
     AGENTIX_SESSION_TOKEN: process.env.AGENTIX_SESSION_TOKEN,
     AGENTIX_WORKSPACE_DIR: process.env.AGENTIX_WORKSPACE_DIR,
+    AGENTIX_SESSION_TTL: process.env.AGENTIX_SESSION_TTL,
+    AGENTIX_APPROVAL_TIMEOUT: process.env.AGENTIX_APPROVAL_TIMEOUT,
+    AGENTIX_INBOX_PORT: process.env.AGENTIX_INBOX_PORT,
+    AGENTIX_BRIDGE_PORT: process.env.AGENTIX_BRIDGE_PORT,
+    AGENTIX_LUNA_MODEL: process.env.AGENTIX_LUNA_MODEL,
+    AGENTIX_TERRA_MODEL: process.env.AGENTIX_TERRA_MODEL,
   };
   const dirs: string[] = [];
 
@@ -40,6 +46,12 @@ describe("config", () => {
     restoreEnv("KILO_API_KEY");
     restoreEnv("AGENTIX_SESSION_TOKEN");
     restoreEnv("AGENTIX_WORKSPACE_DIR");
+    restoreEnv("AGENTIX_SESSION_TTL");
+    restoreEnv("AGENTIX_APPROVAL_TIMEOUT");
+    restoreEnv("AGENTIX_INBOX_PORT");
+    restoreEnv("AGENTIX_BRIDGE_PORT");
+    restoreEnv("AGENTIX_LUNA_MODEL");
+    restoreEnv("AGENTIX_TERRA_MODEL");
     vi.resetModules();
     while (dirs.length > 0) {
       rmSync(dirs.pop()!, { recursive: true, force: true });
@@ -193,6 +205,168 @@ describe("config", () => {
 
     expect(config.model).toBe("process-model");
     expect(config.llmApiKey).toBe("file-secret");
+  });
+
+  it("prefers process and workspace environment over disk configuration", async () => {
+    const workspace = tempDir();
+    dirs.push(workspace);
+    process.env.AGENTIX_WORKSPACE_DIR = workspace;
+    process.env.AGENTIX_DATA_DIR = workspace;
+    process.env.AGENTIX_MODEL = "process-model";
+    process.env.AGENTIX_PROVIDER = "openai";
+    writeFileSync(
+      join(workspace, ".env.local"),
+      "AGENTIX_BASE_URL=https://workspace.example/v1\n",
+      "utf-8",
+    );
+    writeFileSync(
+      join(workspace, "config.json"),
+      JSON.stringify({
+        model: "disk-model",
+        provider: "anthropic",
+        baseUrl: "https://disk.example/v1",
+      }),
+      "utf-8",
+    );
+
+    const configMod = await import("../../src/config/index.js");
+    const config = configMod.loadConfig();
+
+    expect(config.model).toBe("process-model");
+    expect(config.provider).toBe("openai");
+    expect(config.baseUrl).toBe("https://workspace.example/v1");
+  });
+
+  it("reloads workspace setup changes without re-importing the config module", async () => {
+    const workspace = tempDir();
+    dirs.push(workspace);
+    process.env.AGENTIX_WORKSPACE_DIR = workspace;
+    process.env.AGENTIX_DATA_DIR = workspace;
+    delete process.env.AGENTIX_MODEL;
+    delete process.env.AGENTIX_PROVIDER;
+    delete process.env.AGENTIX_LLM_API_KEY;
+
+    const configMod = await import("../../src/config/index.js");
+    expect(configMod.loadConfig().model).toBe("claude-3-5-sonnet");
+
+    writeFileSync(
+      join(workspace, ".env.local"),
+      [
+        "AGENTIX_PROVIDER=openai",
+        "AGENTIX_MODEL=setup-model",
+        "AGENTIX_LLM_API_KEY=setup-secret",
+        "AGENTIX_LUNA_MODEL=luna-worker",
+        "AGENTIX_TERRA_MODEL=terra-worker",
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+    configMod.resetConfigCache();
+
+    expect(configMod.loadConfig()).toMatchObject({
+      provider: "openai",
+      model: "setup-model",
+      llmApiKey: "setup-secret",
+      lunaModel: "luna-worker",
+      terraModel: "terra-worker",
+    });
+  });
+
+  it("synchronizes config-set overrides with workspace environment precedence", async () => {
+    const workspace = tempDir();
+    dirs.push(workspace);
+    process.env.AGENTIX_WORKSPACE_DIR = workspace;
+    process.env.AGENTIX_DATA_DIR = workspace;
+    delete process.env.AGENTIX_PROVIDER;
+    writeFileSync(join(workspace, ".env.local"), "AGENTIX_PROVIDER=openai\n", "utf-8");
+
+    const configMod = await import("../../src/config/index.js");
+    expect(configMod.loadConfig().provider).toBe("openai");
+
+    configMod.saveWorkspaceConfigOverride("provider", "local");
+    configMod.saveConfig({ provider: "local" });
+
+    expect(configMod.loadConfig().provider).toBe("local");
+    expect(readFileSync(join(workspace, ".env.local"), "utf-8")).toContain(
+      "AGENTIX_PROVIDER=local",
+    );
+  });
+
+  it("bounds malformed numeric disk configuration and ignores invalid strings", async () => {
+    const dir = tempDir();
+    dirs.push(dir);
+    process.env.AGENTIX_DATA_DIR = dir;
+    delete process.env.AGENTIX_MODEL;
+    delete process.env.AGENTIX_PROVIDER;
+    writeFileSync(
+      join(dir, "config.json"),
+      JSON.stringify({
+        model: 42,
+        provider: {},
+        baseUrl: [],
+        sessionTtlMs: -10,
+        approvalTimeoutMs: "not-a-number",
+        inboxPort: 99999,
+        bridgePort: 0,
+      }),
+      "utf-8",
+    );
+
+    const configMod = await import("../../src/config/index.js");
+    const config = configMod.loadConfig();
+
+    expect(config.model).toBe("claude-3-5-sonnet");
+    expect(config.provider).toBe("auto");
+    expect(config.baseUrl).toBeNull();
+    expect(config.sessionTtlMs).toBe(1000);
+    expect(config.approvalTimeoutMs).toBe(300000);
+    expect(config.inboxPort).toBe(65535);
+    expect(config.bridgePort).toBe(1);
+    expect(configMod.inspectConfigSources()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        source: "disk-config",
+        severity: "warn",
+        detail: expect.stringContaining("model, provider"),
+      }),
+    ]));
+  });
+
+  it("reports malformed configuration without exposing file contents or blocking startup", async () => {
+    const workspace = tempDir();
+    dirs.push(workspace);
+    process.env.AGENTIX_WORKSPACE_DIR = workspace;
+    process.env.AGENTIX_DATA_DIR = workspace;
+    delete process.env.AGENTIX_MODEL;
+    delete process.env.AGENTIX_PROVIDER;
+    writeFileSync(join(workspace, "config.json"), "{broken-secret-content", "utf-8");
+    writeFileSync(join(workspace, ".env.local"), "AGENTIX_MODEL=valid-model\nBROKEN_LINE\n", "utf-8");
+
+    const configMod = await import("../../src/config/index.js");
+    const config = configMod.loadConfig();
+    const issues = configMod.inspectConfigSources();
+
+    expect(config.model).toBe("valid-model");
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: "disk-config", severity: "fail" }),
+      expect.objectContaining({ source: "workspace-env", severity: "warn" }),
+    ]));
+    expect(JSON.stringify(issues)).not.toContain("broken-secret-content");
+
+    const { LocalAgentixRuntime } = await import("../../src/runtime/LocalAgentixRuntime.js");
+    const runtime = new LocalAgentixRuntime();
+    const doctor = runtime.doctor() as { checks: Array<{ id: string; status: string; detail: string }> };
+    expect(doctor.checks).toContainEqual(expect.objectContaining({
+      id: "config.sources",
+      status: "fail",
+      detail: expect.stringContaining("not valid JSON"),
+    }));
+    expect(doctor.checks).toContainEqual(expect.objectContaining({
+      id: "state.integrity",
+      status: "warn",
+      detail: expect.stringContaining("invalid or unreadable JSON state"),
+    }));
+    expect(JSON.stringify(doctor)).not.toContain("broken-secret-content");
+    runtime.shutdown();
   });
 
   it("treats undefined-like env strings as absent", async () => {

@@ -304,6 +304,8 @@ def handle_config(args: Any) -> bool:
         print("Agentix backend configuration")
         print(f"  Path: {config.get('configFile', _data_dir() / 'config.json')}")
         print(f"  Model: {config.get('provider', 'n/a')} / {config.get('model', 'n/a')}")
+        print(f"  Luna Pi: {config.get('lunaModel') or 'not configured'}")
+        print(f"  Terra Pi: {config.get('terraModel') or 'not configured'}")
         print(f"  LLM key: {'configured' if config.get('llmApiKeyConfigured') else 'missing'}")
         print(f"  Session token: {'configured' if config.get('sessionTokenConfigured') else 'missing'}")
         print(f"  Status: {'incomplete' if missing else 'ok'}")
@@ -314,7 +316,7 @@ def handle_config(args: Any) -> bool:
         value = getattr(args, "value", None)
         if not key or value is None:
             print("Usage: agentix config set <key> <value>")
-            print("Keys: model, provider, baseUrl, sessionTtlMs, approvalTimeoutMs, inboxPort, bridgePort")
+            print("Keys: model, provider, baseUrl, lunaModel, terraModel, sessionTtlMs, approvalTimeoutMs, inboxPort, bridgePort")
             return True
         aliases = {
             "base_url": "baseUrl",
@@ -327,6 +329,10 @@ def handle_config(args: Any) -> bool:
             "inbox-port": "inboxPort",
             "bridge_port": "bridgePort",
             "bridge-port": "bridgePort",
+            "luna_model": "lunaModel",
+            "luna-model": "lunaModel",
+            "terra_model": "terraModel",
+            "terra-model": "terraModel",
         }
         normalized = aliases.get(key, key)
         result = backend.set_config(normalized, value)

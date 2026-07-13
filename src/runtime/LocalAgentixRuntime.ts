@@ -1,10 +1,16 @@
 import { Powerhouse } from "../powerhouse/Powerhouse.js";
 import { SchedulerService } from "../scheduler/SchedulerService.js";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { PATHS } from "../config/paths.js";
 import { EventBus } from "../config/EventBus.js";
-import { loadConfig, saveConfig, type AgentixConfig } from "../config/index.js";
+import {
+  inspectConfigSources,
+  loadConfig,
+  saveConfig,
+  saveWorkspaceConfigOverride,
+  type AgentixConfig,
+} from "../config/index.js";
 import { defaultAuthTokenStore, type AuthRole } from "../config/AuthTokenStore.js";
 import { randomUUID } from "node:crypto";
 import { RuntimeLogStore } from "../logging/RuntimeLogStore.js";
@@ -63,6 +69,57 @@ export type RuntimeSearchResults = {
   gateways: Array<{ id: string; platform: string; name: string; enabled: boolean; status: string; endpoint: string | null; tokenConfigured: boolean; messageCount: number; lastSeenAt: string | null; lastError: string | null }>;
 };
 
+function inspectStateIntegrity(root: string): { issues: string[]; scanned: number; truncated: boolean } {
+  if (!existsSync(root)) return { issues: [], scanned: 0, truncated: false };
+  const issues: string[] = [];
+  const pending: Array<{ dir: string; depth: number }> = [{ dir: root, depth: 0 }];
+  let scanned = 0;
+  let truncated = false;
+
+  while (pending.length > 0 && scanned < 2_000) {
+    const current = pending.pop()!;
+    let entries;
+    try {
+      entries = readdirSync(current.dir, { withFileTypes: true });
+    } catch {
+      issues.push(`${relative(root, current.dir) || "."}: directory could not be read`);
+      continue;
+    }
+    for (const entry of entries) {
+      if (scanned >= 2_000) {
+        truncated = true;
+        break;
+      }
+      const path = join(current.dir, entry.name);
+      if (entry.isDirectory()) {
+        if (current.depth < 8 && entry.name !== "support") {
+          pending.push({ dir: path, depth: current.depth + 1 });
+        }
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      scanned += 1;
+      const display = relative(root, path);
+      if (entry.name.includes(".corrupt-")) {
+        issues.push(`${display}: preserved corrupt-state backup`);
+        continue;
+      }
+      if (!entry.name.endsWith(".json")) continue;
+      try {
+        if (statSync(path).size > 16 * 1024 * 1024) {
+          issues.push(`${display}: JSON state exceeds the 16 MiB validation limit`);
+          continue;
+        }
+        JSON.parse(readFileSync(path, "utf-8"));
+      } catch {
+        issues.push(`${display}: invalid or unreadable JSON state`);
+      }
+    }
+  }
+  if (pending.length > 0) truncated = true;
+  return { issues, scanned, truncated };
+}
+
 export type RuntimeSessionDetail = {
   session: {
     id: string;
@@ -81,6 +138,7 @@ export type RuntimeSessionDetail = {
     finishedAt: string | null;
     error: string | null;
   }>;
+  messages: Array<{ role: string; content: string; ts: number }>;
   memory: Array<Record<string, unknown>>;
   audit: Array<Record<string, unknown>>;
   logs: Array<Record<string, unknown>>;
@@ -288,13 +346,17 @@ export type RuntimePlanDetail = {
 };
 
 export class LocalAgentixRuntime {
-  private readonly powerhouse = new Powerhouse();
-  private readonly scheduler = new SchedulerService(this.powerhouse);
-  private readonly runtimeLogs = new RuntimeLogStore();
-  private readonly gateways = new GatewayRegistry();
+  private readonly powerhouse: Powerhouse;
+  private readonly scheduler: SchedulerService;
+  private readonly runtimeLogs: RuntimeLogStore;
+  private readonly gateways: GatewayRegistry;
 
-  constructor() {
-    this.scheduler.start();
+  constructor(opts: { powerhouse?: Powerhouse; startScheduler?: boolean } = {}) {
+    this.powerhouse = opts.powerhouse ?? new Powerhouse();
+    this.scheduler = new SchedulerService(this.powerhouse);
+    this.runtimeLogs = new RuntimeLogStore();
+    this.gateways = new GatewayRegistry();
+    if (opts.startScheduler ?? true) this.scheduler.start();
   }
 
   listSessions(opts: { limit?: number; recover?: boolean } = {}): Array<{
@@ -819,39 +881,53 @@ export class LocalAgentixRuntime {
           replayStatus: result.status,
         },
       });
-      return { ok: result.status !== "failed", action, sourcePlanId: planId, result };
+      return {
+        ok: !["failed", "cancelled"].includes(result.status),
+        action,
+        sourcePlanId: planId,
+        result,
+      };
     }
 
     if (action === "cancel") {
-      const cancellable = tasks.filter((task) =>
-        ["queued", "running", "awaiting-approval"].includes(task.status),
-      );
-      const results: Array<Record<string, unknown> & { ok?: unknown; taskId: string }> = [];
-      for (const task of cancellable) {
-        results.push({ taskId: task.id, ...(await this.controlTask(task.id, "cancel")) });
-      }
-      this.powerhouse.audit.record({
-        type: "plan.cancelled",
-        actor: "user",
-        subjectId: planId,
-        data: { sessionId: execution.sessionId, taskIds: cancellable.map((task) => task.id) },
-      });
-      return { ok: results.every((item) => item.ok), action, planId, count: results.length, results };
+      const result = this.powerhouse.cancelPlan(planId);
+      return {
+        ...result,
+        action,
+        planId,
+        count: result.taskIds.length,
+      };
     }
 
     if (action === "retry-failed") {
-      const retryable = tasks.filter((task) => ["failed", "rejected"].includes(task.status));
-      const results: Array<Record<string, unknown> & { ok?: unknown; taskId: string }> = [];
-      for (const task of retryable) {
-        results.push({ taskId: task.id, ...(await this.controlTask(task.id, "retry")) });
+      if (execution.status !== "failed") {
+        return { ok: false, error: "plan is not failed: " + planId, status: execution.status };
       }
+      const beforeTaskIds = new Set(tasks.map((task) => task.id));
+      const result = await this.powerhouse.retryPlan(planId);
+      if (!result) return { ok: false, error: "plan could not be retried: " + planId };
+      const createdTaskIds = this.powerhouse
+        .listTasks(execution.sessionId)
+        .filter((task) => task.planId === planId && !beforeTaskIds.has(task.id))
+        .map((task) => task.id);
       this.powerhouse.audit.record({
         type: "plan.retry_failed",
         actor: "user",
         subjectId: planId,
-        data: { sessionId: execution.sessionId, taskIds: retryable.map((task) => task.id) },
+        data: {
+          sessionId: execution.sessionId,
+          taskIds: createdTaskIds,
+          status: result.status,
+        },
       });
-      return { ok: results.every((item) => item.ok), action, planId, count: results.length, results };
+      return {
+        ok: !["failed", "cancelled"].includes(result.status),
+        action,
+        planId,
+        count: createdTaskIds.length,
+        taskIds: createdTaskIds,
+        result,
+      };
     }
 
     return { ok: false, error: `unsupported plan action: ${action}` };
@@ -872,6 +948,7 @@ export class LocalAgentixRuntime {
       error: task.error ?? null,
     }));
     const memory = this.powerhouse.memory.list(sessionId).map((entry) => ({ ...entry }));
+    const messages = this.powerhouse.sessions.getMessages(sessionId).map((message) => ({ ...message }));
     const audit = this.powerhouse
       .audit
       .list(250)
@@ -890,6 +967,7 @@ export class LocalAgentixRuntime {
         metadata: session.metadata,
       },
       tasks,
+      messages,
       memory,
       audit,
       logs,
@@ -1517,6 +1595,8 @@ export class LocalAgentixRuntime {
       model: config.model,
       provider: config.provider,
       baseUrl: config.baseUrl,
+      lunaModel: config.lunaModel,
+      terraModel: config.terraModel,
       sessionTtlMs: config.sessionTtlMs,
       approvalTimeoutMs: config.approvalTimeoutMs,
       inboxPort: config.inboxPort,
@@ -1585,7 +1665,7 @@ export class LocalAgentixRuntime {
       "inboxPort",
       "bridgePort",
     ]);
-    const stringKeys = new Set(["model", "provider", "baseUrl"]);
+    const stringKeys = new Set(["model", "provider", "baseUrl", "lunaModel", "terraModel"]);
     if (!numericKeys.has(normalized) && !stringKeys.has(normalized)) {
       return {
         ok: false,
@@ -1603,12 +1683,13 @@ export class LocalAgentixRuntime {
       parsed = number;
     } else {
       const text = String(value ?? "").trim();
-      parsed = normalized === "baseUrl" && !text ? null : text;
-      if (normalized !== "baseUrl" && !parsed) {
+      parsed = ["baseUrl", "lunaModel", "terraModel"].includes(normalized) && !text ? null : text;
+      if (!["baseUrl", "lunaModel", "terraModel"].includes(normalized) && !parsed) {
         return { ok: false, error: `${normalized} cannot be empty` };
       }
     }
 
+    saveWorkspaceConfigOverride(normalized as keyof AgentixConfig, parsed);
     saveConfig({ [normalized]: parsed } as Partial<AgentixConfig>);
     this.powerhouse.audit.record({
       type: "config.updated",
@@ -1622,12 +1703,14 @@ export class LocalAgentixRuntime {
   doctor(): Record<string, unknown> {
     this.powerhouse.start({ recover: false });
     const config = loadConfig();
+    const configIssues = inspectConfigSources();
     const tasks = this.powerhouse.listTasks();
     const agents = this.powerhouse.agents.list();
     const agentProfiles = this.powerhouse.agentProfiles.list();
     const gateways = this.gateways.list();
     const jobs = this.scheduler.list();
     const healing = this.powerhouse.healing.listProcedures();
+    const stateIntegrity = inspectStateIntegrity(PATHS.dataDir);
     const packageMetadata = PACKAGE_METADATA;
     const requiredInstallAssets = [
       join(PATHS.installRoot, "bin", process.platform === "win32" ? "agentix.js" : "agentix.js"),
@@ -1695,13 +1778,48 @@ export class LocalAgentixRuntime {
       config.model ? undefined : "Run agentix setup or agentix model.",
     );
     add(
+      "state.integrity",
+      "Persisted state integrity",
+      stateIntegrity.issues.length > 0 || stateIntegrity.truncated ? "warn" : "pass",
+      stateIntegrity.issues.length > 0
+        ? `${stateIntegrity.issues.length} issue(s): ${stateIntegrity.issues.slice(0, 5).join("; ")}`
+        : stateIntegrity.truncated
+          ? `Validation stopped after ${stateIntegrity.scanned} files`
+          : `${stateIntegrity.scanned} state file(s) checked`,
+      stateIntegrity.issues.length > 0 || stateIntegrity.truncated
+        ? "Generate a support bundle, inspect preserved corrupt files, and repair or remove them after backup."
+        : undefined,
+    );
+    add(
+      "config.sources",
+      "Configuration files",
+      configIssues.some((issue) => issue.severity === "fail")
+        ? "fail"
+        : configIssues.length > 0
+          ? "warn"
+          : "pass",
+      configIssues.length > 0
+        ? configIssues.map((issue) => issue.detail).join("; ")
+        : "Configuration files are readable and structurally valid",
+      configIssues.length > 0
+        ? "Repair the reported file or rerun agentix setup, then run agentix doctor again."
+        : undefined,
+    );
+    add(
       "config.llm",
       "LLM API key",
       config.llmApiKey ? "pass" : "warn",
-      config.llmApiKey ? "Configured" : "Missing; planner and conversation agents will use deterministic fallbacks.",
+      config.llmApiKey ? "Configured" : "Missing; model-backed planning and conversation tasks will fail with an actionable error.",
       config.llmApiKey ? undefined : "Run agentix setup or export AGENTIX_LLM_API_KEY.",
     );
-    const expectedKinds = ["user-message", "bash", "code-edit", "sandbox-run"];
+    const expectedKinds = [
+      "user-message",
+      "bash",
+      "code-edit",
+      "sandbox-run",
+      ...(config.lunaModel ? ["luna-message"] : []),
+      ...(config.terraModel ? ["terra-message"] : []),
+    ];
     const missingKinds = expectedKinds.filter((kind) => !agents.some((agent) => agent.kind === kind));
     const unhealthyAgents = agents.filter((agent) => !agent.healthy());
     add(
@@ -1711,6 +1829,18 @@ export class LocalAgentixRuntime {
       `${agents.length} registered; missing ${missingKinds.join(", ") || "none"}; unhealthy ${unhealthyAgents.map((agent) => agent.id).join(", ") || "none"}`,
       missingKinds.length || unhealthyAgents.length ? "Restart the backend and inspect tool details." : undefined,
     );
+    for (const [role, model] of [["luna", config.lunaModel], ["terra", config.terraModel]] as const) {
+      const registered = agents.some((agent) => agent.kind === `${role}-message`);
+      add(
+        `delegation.${role}`,
+        `${role[0]!.toUpperCase()}${role.slice(1)} delegation`,
+        model ? (registered ? "pass" : "fail") : "warn",
+        model
+          ? `${model}; ${registered ? "Pi agent registered" : "Pi agent missing"}`
+          : `Not configured; set AGENTIX_${role.toUpperCase()}_MODEL to enable this delegation path.`,
+        model && !registered ? "Restart the Agentix backend after changing delegate model configuration." : undefined,
+      );
+    }
     add(
       "sandbox.isolation",
       "Sandbox isolation",
@@ -1796,6 +1926,8 @@ export class LocalAgentixRuntime {
         provider: config.provider,
         model: config.model,
         baseUrl: config.baseUrl,
+        lunaModel: config.lunaModel,
+        terraModel: config.terraModel,
         llmApiKeyConfigured: Boolean(config.llmApiKey),
         sessionTokenConfigured: Boolean(config.sessionToken),
       },
@@ -1896,7 +2028,7 @@ export class LocalAgentixRuntime {
           ? `verified by ${llmProof.path}`
           : llmConfigured
             ? llmProof.detail
-            : "missing; deterministic fallback active",
+            : "missing; model-backed tasks will fail until a provider key is configured",
         "public-release",
         liveLlmVerified ? undefined : "Run agentix setup or export AGENTIX_LLM_API_KEY, then run npm run verify:llm -- --out data/release/live-llm-proof.json.",
       ),
@@ -2075,16 +2207,53 @@ export class LocalAgentixRuntime {
     const bundleDir = join(PATHS.dataDir, "support", `bundle-${bundleId}`);
     mkdirSync(bundleDir, { recursive: true });
 
+    const config = loadConfig();
+    const knownSecrets = Array.from(new Set([
+      config.llmApiKey,
+      config.sessionToken,
+      ...Object.entries(process.env)
+        .filter(([name, value]) =>
+          /(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)/i.test(name) && Boolean(value && value.length >= 8),
+        )
+        .map(([, value]) => value),
+    ].filter((value): value is string => Boolean(value)))).sort((left, right) => right.length - left.length);
+    const redactText = (value: string): string => {
+      let redacted = value;
+      for (const secret of knownSecrets) redacted = redacted.split(secret).join("[redacted]");
+      return redacted
+        .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+\/-]+=*/gi, "$1 [redacted]")
+        .replace(/(https?:\/\/[^\s/:@]+:)[^\s/@]+@/gi, "$1[redacted]@");
+    };
+    const redactValue = (value: unknown, key = ""): unknown => {
+      if (
+        /(?:api.?key|token|secret|password|credential|authorization|cookie|private.?key)$/i.test(key) &&
+        typeof value === "string"
+      ) {
+        return value ? "[redacted]" : value;
+      }
+      if (typeof value === "string") return redactText(value);
+      if (Array.isArray(value)) return value.map((item) => redactValue(item));
+      if (value && typeof value === "object") {
+        return Object.fromEntries(
+          Object.entries(value as Record<string, unknown>)
+            .map(([name, item]) => [name, redactValue(item, name)]),
+        );
+      }
+      return value;
+    };
     const writeJson = (name: string, value: unknown): string => {
       const file = join(bundleDir, name);
-      writeFileSync(file, JSON.stringify(value, null, 2), "utf-8");
+      writeFileSync(file, JSON.stringify(redactValue(value), null, 2), {
+        encoding: "utf-8",
+        mode: 0o600,
+      });
       return file;
     };
 
-    const config = loadConfig();
     const safeConfig = {
       ...config,
       llmApiKey: config.llmApiKey ? "[redacted]" : null,
+      sessionToken: config.sessionToken ? "[redacted]" : null,
     };
 
     const sessions = this.listSessions();
@@ -2143,7 +2312,7 @@ export class LocalAgentixRuntime {
     writeJson("audit.json", audit);
     writeJson("healing.json", healing);
     writeJson("memory.json", memory);
-    this.copyDirectory(PATHS.logsDir, join(bundleDir, "logs"));
+    this.copyDirectory(PATHS.logsDir, join(bundleDir, "logs"), redactText);
 
     return {
       ok: true,
@@ -2189,6 +2358,7 @@ export class LocalAgentixRuntime {
       provider?: string;
       baseUrl?: string;
       toolsets?: unknown;
+      signal?: AbortSignal;
     },
   ): Promise<{ response: string; sessionId: string; status: string; taskIds: string[] }> {
     const result = await this.powerhouse.executeStimulus(opts);
@@ -2205,16 +2375,23 @@ export class LocalAgentixRuntime {
     this.powerhouse.stop();
   }
 
-  private copyDirectory(sourceDir: string, targetDir: string): void {
+  private copyDirectory(
+    sourceDir: string,
+    targetDir: string,
+    transform: (value: string) => string,
+  ): void {
     if (!existsSync(sourceDir)) return;
     mkdirSync(targetDir, { recursive: true });
     for (const entry of readdirSync(sourceDir, { withFileTypes: true })) {
       const sourcePath = join(sourceDir, entry.name);
       const targetPath = join(targetDir, entry.name);
       if (entry.isDirectory()) {
-        this.copyDirectory(sourcePath, targetPath);
+        this.copyDirectory(sourcePath, targetPath, transform);
       } else if (entry.isFile()) {
-        copyFileSync(sourcePath, targetPath);
+        writeFileSync(targetPath, transform(readFileSync(sourcePath, "utf-8")), {
+          encoding: "utf-8",
+          mode: 0o600,
+        });
       }
     }
   }

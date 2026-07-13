@@ -1,6 +1,6 @@
 {
   "name": "@nerdyy/agentix",
-  "version": "2.1.12",
+  "version": "2.2.0",
   "description": "Agentix CLI - AI coding agent with Agentix shell and orchestration backend",
   "type": "module",
   "license": "MIT",
@@ -47,6 +47,7 @@
     "hermes-agent/tools",
     "hermes-agent/tui_gateway",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
     "install.ps1",
     "install.sh",

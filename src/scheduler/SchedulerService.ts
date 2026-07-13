@@ -7,6 +7,8 @@ import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { PATHS } from "../config/paths.js";
+import { OutputBuffer, resolveOutputLimit } from "../pi/OutputBuffer.js";
+import { terminateProcessTree, USE_DETACHED_PROCESS_GROUP } from "../pi/processControl.js";
 
 interface ScriptRunResult {
   ok: boolean;
@@ -14,6 +16,7 @@ interface ScriptRunResult {
   stderr: string;
   exitCode: number | null;
   error?: string;
+  truncated?: boolean;
 }
 
 export class SchedulerService {
@@ -25,7 +28,10 @@ export class SchedulerService {
     readonly jobs = new ScheduledJobStore(),
     private readonly audit = new AuditLog(),
     private readonly scriptBaseDirs = defaultScriptBaseDirs(),
-  ) {}
+    private readonly processOptions: { scriptTimeoutMs?: number; maxOutputBytes?: number } = {},
+  ) {
+    this.recoverStaleLocks();
+  }
 
   start(intervalMs = 30_000, initialDelayMs = 90_000): void {
     this.stop();
@@ -205,7 +211,11 @@ export class SchedulerService {
       if (scriptResult && !scriptResult.ok) {
         throw new Error(scriptResult.error ?? scriptResult.stderr ?? "scheduled script failed");
       }
-      const scriptOutput = scriptResult?.stdout.trim() ?? "";
+      const scriptOutput = scriptResult
+        ? [scriptResult.stdout.trim(), scriptResult.truncated ? "[output truncated]" : ""]
+            .filter(Boolean)
+            .join("\n")
+        : "";
       const result = fresh.noAgent
         ? {
             status: "complete" as const,
@@ -224,19 +234,20 @@ export class SchedulerService {
         lastRunAt: completedAt,
         now: completedAt,
       });
+      const succeeded = result.status === "complete";
       const completedJob = this.jobs.update(job.id, {
         running: false,
         lastRunAt: completedAt,
         nextRunAt,
         enabled: nextRunAt === null ? false : fresh.enabled,
         runCount: fresh.runCount + 1,
-        lastStatus: result.status === "failed" ? "failure" : "success",
-        lastError: result.status === "failed" ? result.response : undefined,
+        lastStatus: succeeded ? "success" : "failure",
+        lastError: succeeded ? undefined : result.response,
         lastOutput: result.response,
         lastTaskIds: result.taskIds,
       });
       this.audit.record({
-        type: result.status === "failed" ? "scheduler.job_failed" : "scheduler.job_completed",
+        type: succeeded ? "scheduler.job_completed" : "scheduler.job_failed",
         actor: "scheduler",
         subjectId: job.id,
         data: {
@@ -247,7 +258,7 @@ export class SchedulerService {
           script: fresh.script ? basename(fresh.script) : null,
         },
       });
-      return { ok: result.status !== "failed", error: result.status === "failed" ? result.response : undefined };
+      return { ok: succeeded, error: succeeded ? undefined : result.response };
     } catch (err) {
       const completedAt = Date.now();
       const error = err instanceof Error ? err.message : String(err);
@@ -318,40 +329,77 @@ export class SchedulerService {
           AGENTIX_CRON_SCRIPT: "1",
         },
         windowsHide: true,
+        detached: USE_DETACHED_PROCESS_GROUP,
       });
-      let stdout = "";
-      let stderr = "";
+      const outputLimit = resolveOutputLimit(this.processOptions.maxOutputBytes);
+      const stdout = new OutputBuffer(outputLimit);
+      const stderr = new OutputBuffer(outputLimit);
+      const configuredTimeout = Number(
+        this.processOptions.scriptTimeoutMs ?? process.env.AGENTIX_SCHEDULER_SCRIPT_TIMEOUT_MS,
+      );
+      const timeoutMs = Number.isFinite(configuredTimeout)
+        ? Math.min(10 * 60_000, Math.max(100, configuredTimeout))
+        : 60_000;
+      let timedOut = false;
+      let settled = false;
+      const finish = (result: ScriptRunResult) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        resolveResult(result);
+      };
       const timeout = setTimeout(() => {
-        child.kill();
-      }, 60_000);
+        timedOut = true;
+        terminateProcessTree(child);
+      }, timeoutMs);
+      timeout.unref?.();
 
       child.stdout.on("data", (chunk) => {
-        stdout += chunk.toString("utf-8");
+        stdout.append(chunk);
       });
       child.stderr.on("data", (chunk) => {
-        stderr += chunk.toString("utf-8");
+        stderr.append(chunk);
       });
       child.on("error", (err) => {
-        clearTimeout(timeout);
-        resolveResult({
+        finish({
           ok: false,
-          stdout,
-          stderr,
+          stdout: stdout.toString(),
+          stderr: stderr.toString(),
           exitCode: null,
           error: err.message,
+          truncated: stdout.truncated || stderr.truncated,
         });
       });
       child.on("close", (code) => {
-        clearTimeout(timeout);
-        resolveResult({
-          ok: code === 0,
-          stdout,
-          stderr,
+        const stdoutText = stdout.toString();
+        const stderrText = stderr.toString();
+        finish({
+          ok: !timedOut && code === 0,
+          stdout: stdoutText,
+          stderr: stderrText,
           exitCode: code,
-          error: code === 0 ? undefined : stderr.trim() || `script exited with code ${code}`,
+          truncated: stdout.truncated || stderr.truncated,
+          error: timedOut
+            ? `scheduled script timed out after ${timeoutMs}ms`
+            : code === 0
+              ? undefined
+              : stderrText.trim() || `script exited with code ${code}`,
         });
       });
     });
+  }
+
+  private recoverStaleLocks(): void {
+    for (const job of this.jobs.list()) {
+      if (!job.running) continue;
+      this.jobs.update(job.id, { running: false });
+      this.audit.record({
+        type: "scheduler.job_recovered",
+        actor: "system",
+        subjectId: job.id,
+        data: { reason: "cleared stale running state after restart" },
+      });
+    }
   }
 
   private resolveScriptPath(script: string): string {

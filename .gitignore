@@ -12,7 +12,9 @@ tmp/
 temp/
 sandboxes/
 data/
-.agentix/
+.agentix/*
+!.agentix/progress.md
+!.agentix/test-matrix.md
 .smoke/
 *.pyc
 __pycache__/

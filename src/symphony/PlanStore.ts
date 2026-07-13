@@ -7,7 +7,7 @@ export interface StoredPlanExecution {
   plan: SymphonyPlan;
   sessionId: string;
   taskIds: string[];
-  status: "complete" | "awaiting-approval" | "failed";
+  status: "running" | "complete" | "awaiting-approval" | "failed" | "cancelled";
   createdAt: number;
   updatedAt: number;
 }

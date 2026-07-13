@@ -55,6 +55,8 @@ function run(command, args, opts = {}) {
     });
     let stdout = "";
     let stderr = "";
+    const startedAt = Date.now();
+    let firstOutputMs = null;
     const timeout = opts.timeoutMs
       ? setTimeout(() => {
           child.kill();
@@ -63,9 +65,11 @@ function run(command, args, opts = {}) {
       : null;
 
     child.stdout.on("data", (chunk) => {
+      if (firstOutputMs === null) firstOutputMs = Date.now() - startedAt;
       stdout += chunk.toString("utf-8");
     });
     child.stderr.on("data", (chunk) => {
+      if (firstOutputMs === null) firstOutputMs = Date.now() - startedAt;
       stderr += chunk.toString("utf-8");
     });
     if (opts.input !== undefined) child.stdin.end(opts.input);
@@ -76,7 +80,7 @@ function run(command, args, opts = {}) {
     child.on("close", (code) => {
       if (timeout) clearTimeout(timeout);
       if (code === 0) {
-        resolveRun({ stdout, stderr });
+        resolveRun({ stdout, stderr, firstOutputMs });
         return;
       }
       rejectRun(new Error([
@@ -235,6 +239,19 @@ async function fetchJson(url, opts = {}) {
   return JSON.parse(text);
 }
 
+async function fetchJsonResponse(url, opts = {}) {
+  const response = await fetch(url, {
+    ...opts,
+    headers: {
+      "Content-Type": "application/json",
+      ...(opts.headers ?? {}),
+    },
+    signal: AbortSignal.timeout(opts.timeoutMs ?? 10_000),
+  });
+  const text = await response.text();
+  return { ok: response.ok, status: response.status, body: JSON.parse(text), text };
+}
+
 async function waitForJson(url, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   let lastError = null;
@@ -247,6 +264,89 @@ async function waitForJson(url, timeoutMs = 30_000) {
     }
   }
   throw new Error(`timed out waiting for ${url}: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  return new Promise((resolveWait, rejectWait) => {
+    const timeout = setTimeout(() => rejectWait(new Error(message)), timeoutMs);
+    Promise.resolve(promise).then(
+      (value) => {
+        clearTimeout(timeout);
+        resolveWait(value);
+      },
+      (error) => {
+        clearTimeout(timeout);
+        rejectWait(error);
+      },
+    );
+  });
+}
+
+async function eventually(factory, timeoutMs, message) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    try {
+      const value = await factory();
+      if (value) return value;
+    } catch (err) {
+      lastError = err;
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+  }
+  throw new Error(`${message}${lastError ? `: ${lastError instanceof Error ? lastError.message : String(lastError)}` : ""}`);
+}
+
+async function smokeActiveShellInterruption({ env, bridgeUrl, providerStarted, providerWasAborted }) {
+  log("checking Ctrl+C cancellation through installed shell, Symphony, and Pi");
+  const beforeTasks = await fetchJson(`${bridgeUrl}/tasks`);
+  const beforeTaskIds = new Set(beforeTasks.map((task) => task.id));
+  const marker = "AGENTIX_INTERRUPT_SMOKE";
+  const child = spawn(process.execPath, [agentixEntrypoint], {
+    cwd: smokeRoot,
+    env,
+    stdio: ["pipe", "pipe", "pipe"],
+    shell: false,
+    windowsHide: true,
+  });
+  let stdout = "";
+  let stderr = "";
+  const closed = new Promise((resolveClose, rejectClose) => {
+    child.once("error", rejectClose);
+    child.once("close", (code, signal) => resolveClose({ code, signal }));
+  });
+  child.stdout.on("data", (chunk) => { stdout += chunk.toString("utf-8"); });
+  child.stderr.on("data", (chunk) => { stderr += chunk.toString("utf-8"); });
+
+  try {
+    await eventually(() => stdout.includes("agentix>"), 30_000, "installed shell did not render a prompt");
+    child.stdin.write(`${marker}\n`);
+    await withTimeout(providerStarted, 30_000, "interrupt fixture provider request did not start");
+    child.stdin.write("\x03");
+    await eventually(
+      () => stdout.includes("Cancelled active task."),
+      30_000,
+      "installed shell did not acknowledge Ctrl+C cancellation",
+    );
+
+    const cancelledTask = await eventually(async () => {
+      const tasks = await fetchJson(`${bridgeUrl}/tasks`);
+      return tasks.find((task) => !beforeTaskIds.has(task.id) && task.status === "cancelled");
+    }, 30_000, "interrupted shell task was not persisted as cancelled");
+    const plans = await fetchJson(`${bridgeUrl}/plans`);
+    const cancelledPlan = plans.find((plan) => plan.id === cancelledTask.planId);
+    assert(cancelledPlan?.status === "cancelled", "interrupted Symphony plan was not persisted as cancelled");
+    await eventually(providerWasAborted, 10_000, "interrupted provider request remained active");
+
+    child.stdin.end("/tasks\n/exit\n");
+    const exit = await withTimeout(closed, 30_000, "installed shell did not exit after cancellation");
+    assert(exit.code === 0, `installed shell exited ${exit.code ?? exit.signal} after cancellation`);
+    assert(stdout.includes("[cancelled]"), "installed shell task list did not expose cancelled lifecycle state");
+    assert(!/\x1b\[/.test(`${stdout}\n${stderr}`), "interrupted noninteractive shell leaked ANSI control sequences");
+    assert(!stderr.trim(), `installed shell emitted interruption errors: ${stderr}`);
+  } finally {
+    await stopProcess(child);
+  }
 }
 
 async function packAndInstall() {
@@ -485,6 +585,11 @@ async function smokeCli() {
   assert(insightsHelp.stdout.includes("usage: agentix insights"), "installed insights help was not Agentix-branded");
   assert(!/hermes|nous portal/i.test(insightsHelp.stdout), "installed insights help leaked compatibility branding");
 
+  const invalid = await runFailure(agentixCommand, ["run", "--invalid-flag"], { timeoutMs: 60_000 });
+  assert(invalid.code === 2, `invalid installed command exited ${invalid.code} instead of usage status 2`);
+  assert(invalid.stderr.includes("Unknown Agentix command: run"), "invalid installed command did not identify the unsupported command");
+  assert(!/hermes|nous|portal|claw/i.test(`${invalid.stdout}\n${invalid.stderr}`), "invalid installed command leaked compatibility command branding");
+
   const workspaceDir = join(smokeRoot, "workspace-cli");
   await mkdir(workspaceDir, { recursive: true });
   const workspaceEnv = { ...process.env };
@@ -586,9 +691,12 @@ async function smokeColdShell() {
     timeoutMs: 60_000,
   });
   assert(shell.stdout.includes(`Agentix v${packageJson.version}`), "cold shell did not print the installed version");
+  assert(shell.stdout.includes("Starting Agentix"), "cold shell did not provide immediate startup feedback");
+  assert(shell.firstOutputMs !== null && shell.firstOutputMs <= 500, `cold shell stayed silent for ${shell.firstOutputMs}ms`);
   assert(shell.stdout.includes("Powerhouse orchestrates. Symphony plans. Pi agents execute."), "cold shell missing architecture banner");
   assert(/Session: sess-[a-z0-9-]+/i.test(shell.stdout), "cold shell did not create a real backend session");
   assert(shell.stdout.includes("agentix>"), "cold shell did not render a prompt");
+  assert(!/\x1b\[/.test(`${shell.stdout}\n${shell.stderr}`), "cold noninteractive shell leaked ANSI control sequences");
   assert(!/bridge failed to start/i.test(`${shell.stdout}\n${shell.stderr}`), "cold shell bridge startup failed");
 }
 
@@ -627,22 +735,91 @@ async function smokeReinstallPreservesWorkspace(tarball) {
   assert(preserved.provider === "openai", "global reinstall mutated workspace provider config");
   assert(existsSync(join(workspaceFrontend, "config.yaml")), "global reinstall removed Agentix frontend workspace config");
 
+  const preservedEnv = {
+    ...process.env,
+    AGENTIX_WORKSPACE_DIR: workspaceDir,
+  };
+  for (const key of [
+    "AGENTIX_PROVIDER",
+    "AGENTIX_MODEL",
+    "AGENTIX_BASE_URL",
+    "AGENTIX_LLM_API_KEY",
+    "AGENTIX_LUNA_MODEL",
+    "AGENTIX_TERRA_MODEL",
+  ]) {
+    delete preservedEnv[key];
+  }
   const shown = await run(agentixCommand, ["--agentix-cli", "config", "show"], {
     cwd: workspaceDir,
-    env: {
-      ...process.env,
-      AGENTIX_WORKSPACE_DIR: workspaceDir,
-    },
+    env: preservedEnv,
     timeoutMs: 60_000,
   });
-  assert(shown.stdout.includes("\"model\": \"preserved-upgrade-model\""), "reinstalled CLI did not read preserved workspace config");
+  assert(
+    shown.stdout.includes("\"model\": \"preserved-frontend-model\""),
+    "reinstalled CLI did not apply the preserved frontend model as the effective workspace override",
+  );
 }
 
 async function smokeServer() {
   const inboxPort = await freePort();
   const bridgePort = await freePort();
+  const llmPort = await freePort();
   const bridgeUrl = `http://127.0.0.1:${bridgePort}`;
   const inboxUrl = `http://127.0.0.1:${inboxPort}`;
+  const llmBaseUrl = `http://127.0.0.1:${llmPort}/v1`;
+  let resolveInterruptedProviderRequest;
+  const interruptedProviderRequestStarted = new Promise((resolve) => {
+    resolveInterruptedProviderRequest = resolve;
+  });
+  let interruptedProviderRequestAborted = false;
+  const llmServer = createHttpServer((req, res) => {
+    if (req.method !== "POST" || req.url !== "/v1/chat/completions") {
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "not found" }));
+      return;
+    }
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk.toString("utf-8");
+    });
+    req.on("end", () => {
+      let payload = {};
+      try {
+        payload = JSON.parse(body);
+      } catch {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "invalid json" }));
+        return;
+      }
+      const messages = Array.isArray(payload.messages) ? payload.messages : [];
+      const system = String(messages.find((message) => message?.role === "system")?.content ?? "");
+      const user = String(messages.findLast((message) => message?.role === "user")?.content ?? "");
+      if (!system.includes("Agentix Symphony planner") && user.includes("AGENTIX_INTERRUPT_SMOKE")) {
+        resolveInterruptedProviderRequest();
+        const markAborted = () => { interruptedProviderRequestAborted = true; };
+        req.once("aborted", markAborted);
+        res.once("close", () => {
+          if (!res.writableEnded) markAborted();
+        });
+        return;
+      }
+      const content = system.includes("Agentix Symphony planner")
+        ? "release fixture intentionally uses static planning"
+        : "Agentix fixture response: " + user;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ choices: [{ message: { content } }] }));
+    });
+  });
+  await new Promise((resolveListen, rejectListen) => {
+    llmServer.once("error", rejectListen);
+    llmServer.listen(llmPort, "127.0.0.1", resolveListen);
+  });
+  await mkdir(serverDataDir, { recursive: true });
+  await writeFile(join(serverDataDir, "config.json"), JSON.stringify({
+    provider: "local",
+    model: "release-smoke-model",
+    baseUrl: llmBaseUrl,
+  }, null, 2) + "\n", "utf-8");
   const serverEnv = {
     ...process.env,
     AGENTIX_SESSION_TOKEN: "",
@@ -686,12 +863,59 @@ async function smokeServer() {
     const bridgeHealth = await waitForJson(`${bridgeUrl}/health`);
     assert(bridgeHealth.status === "ok", "bridge health did not return ok");
 
+    await smokeActiveShellInterruption({
+      env: serverEnv,
+      bridgeUrl,
+      providerStarted: interruptedProviderRequestStarted,
+      providerWasAborted: () => interruptedProviderRequestAborted,
+    });
+    const resumedShell = await run(agentixCommand, [], {
+      cwd: smokeRoot,
+      env: serverEnv,
+      input: "/history\n/exit\n",
+      timeoutMs: 60_000,
+    });
+    assert(
+      resumedShell.stdout.includes("AGENTIX_INTERRUPT_SMOKE"),
+      "installed shell restart did not restore persisted session history",
+    );
+    assert(
+      resumedShell.stdout.includes("Agentix execution cancelled"),
+      "installed shell history omitted the persisted cancellation response",
+    );
+
     const ui = await fetchText(`${inboxUrl}/ui/`);
     assert(ui.includes("Agentix Control"), "dashboard HTML missing Agentix Control");
     assert(ui.includes("Command palette"), "dashboard HTML missing command palette");
     assert(!ui.includes("Hermes frontend"), "dashboard HTML exposes Hermes frontend branding");
     assert(!ui.includes("Nous"), "dashboard HTML exposes Nous branding");
     assert(!ui.includes("Portal"), "dashboard HTML exposes Portal branding");
+    const dashboardCss = await fetchText(`${inboxUrl}/ui/styles.css`);
+    assert(
+      dashboardCss.includes(".palette-backdrop[hidden]") && dashboardCss.includes("display: none"),
+      "dashboard command palette can block the control surface while hidden",
+    );
+    const dashboardApp = await fetchText(`${inboxUrl}/ui/app.js`);
+    assert(
+      dashboardApp.includes("refs.sessionSelect.value") && !dashboardApp.includes("state.sessionSelect.value"),
+      "dashboard Compose form cannot read the selected session",
+    );
+    assert(
+      dashboardApp.includes("opts.body !== undefined") && !dashboardApp.includes('const headers = { "Content-Type": "application/json"'),
+      "dashboard sends an invalid empty JSON body for bodyless POST actions",
+    );
+    assert(
+      dashboardApp.includes('["queued", "running", "awaiting-approval"].includes(task.status)'),
+      "dashboard counts terminal rejected or cancelled tasks as open",
+    );
+    assert(
+      !dashboardApp.includes("event.currentTarget.reset()"),
+      "dashboard async form handlers lose their form target after a successful request",
+    );
+    assert(
+      dashboardApp.includes("!visibleApprovals.some") && dashboardApp.includes("state.approvalDetail = null"),
+      "dashboard keeps stale approval details after a decision",
+    );
     const openapi = await fetchJson(`${inboxUrl}/openapi.json`);
     assert(openapi.openapi === "3.1.0", "inbox OpenAPI contract missing");
     assert(openapi.paths["/execute/stream"], "OpenAPI contract missing execute stream path");
@@ -753,8 +977,8 @@ async function smokeServer() {
       env: compatibilityEnv,
       timeoutMs: 120_000,
     });
-    assert(installedOneshot.stdout.includes("Agentix is running with the Agentix shell and backend."), "installed agentix -z did not route through Agentix backend");
-    assert(installedOneshot.stdout.includes(`Input: ${installedOneshotPrompt}`), "installed agentix -z output did not preserve input");
+    assert(installedOneshot.stdout.includes("Agentix fixture response:"), "installed agentix -z did not call the configured model fixture");
+    assert(installedOneshot.stdout.includes(installedOneshotPrompt), "installed agentix -z output did not preserve input");
 
     const selectorOneshot = await run(agentixCommand, [
       "-z",
@@ -770,7 +994,7 @@ async function smokeServer() {
       env: compatibilityEnv,
       timeoutMs: 120_000,
     });
-    assert(selectorOneshot.stdout.includes("Input: release-smoke-selector-delegation"), "installed agentix -z selector run did not preserve input");
+    assert(selectorOneshot.stdout.includes("release-smoke-selector-delegation"), "installed agentix -z selector run did not preserve input");
     const selectorSessions = await fetchJson(`${bridgeUrl}/sessions?all=1`, { timeoutMs: 60_000 });
     assert(
       Array.isArray(selectorSessions) && selectorSessions.some((session) =>
@@ -788,14 +1012,14 @@ async function smokeServer() {
     });
     assert(installedUsage.stdout.includes("Agentix backend usage"), "installed agentix usage did not route through Agentix backend");
 
-    const configSet = await run(agentixCommand, ["config", "set", "provider", "openai"], {
+    const configSet = await run(agentixCommand, ["config", "set", "provider", "local"], {
       cwd: smokeRoot,
       env: compatibilityEnv,
       timeoutMs: 120_000,
     });
     const configSetResult = JSON.parse(configSet.stdout);
     assert(
-      configSetResult.ok === true && configSetResult.key === "provider" && configSetResult.value === "openai",
+      configSetResult.ok === true && configSetResult.key === "provider" && configSetResult.value === "local",
       "installed agentix config set did not route through Agentix backend",
     );
     const configShow = await run(agentixCommand, ["config", "show"], {
@@ -803,7 +1027,7 @@ async function smokeServer() {
       env: compatibilityEnv,
       timeoutMs: 120_000,
     });
-    assert(configShow.stdout.includes("\"provider\": \"openai\""), "installed agentix config show did not read Agentix backend config");
+    assert(configShow.stdout.includes("\"provider\": \"local\""), "installed agentix config show did not read Agentix backend config");
 
     const oneshot = await run(python, [
       "-c",
@@ -813,8 +1037,8 @@ async function smokeServer() {
       env: compatibilityEnv,
       timeoutMs: 120_000,
     });
-    assert(oneshot.stdout.includes("Agentix is running with the Agentix shell and backend."), "oneshot did not route through Agentix backend");
-    assert(oneshot.stdout.includes("Input: release smoke oneshot delegation"), "oneshot output did not preserve streamed content");
+    assert(oneshot.stdout.includes("Agentix fixture response:"), "oneshot did not call the configured model fixture");
+    assert(oneshot.stdout.includes("release smoke oneshot delegation"), "oneshot output did not preserve streamed content");
 
     const tuiProxy = await run(python, [
       "-c",
@@ -825,8 +1049,8 @@ async function smokeServer() {
       timeoutMs: 120_000,
     });
     const tuiProxyOutput = `${tuiProxy.stdout}\n${tuiProxy.stderr}`;
-    assert(tuiProxyOutput.includes("Agentix is running with the Agentix shell and backend."), "TUI proxy did not route through Agentix backend");
-    assert(tuiProxyOutput.includes("Input: release smoke tui proxy delegation"), "TUI proxy output did not preserve streamed content");
+    assert(tuiProxyOutput.includes("Agentix fixture response:"), "TUI proxy did not call the configured model fixture");
+    assert(tuiProxyOutput.includes("release smoke tui proxy delegation"), "TUI proxy output did not preserve streamed content");
 
     const cronAdapter = await run(python, [
       "-c",
@@ -893,15 +1117,18 @@ async function smokeServer() {
     assert(Array.isArray(execution.taskIds) && execution.taskIds.length > 0, "execute did not return task ids");
     const plansAfterExecute = await fetchJson(`${inboxUrl}/plans`);
     assert(Array.isArray(plansAfterExecute) && plansAfterExecute.length > 0, "plans endpoint did not return execution");
-    const planAction = await fetchJson(`${inboxUrl}/plans/${encodeURIComponent(plansAfterExecute[0].id)}/action`, {
+    const planAction = await fetchJsonResponse(`${inboxUrl}/plans/${encodeURIComponent(plansAfterExecute[0].id)}/action`, {
       method: "POST",
       body: JSON.stringify({ action: "cancel" }),
       timeoutMs: 60_000,
     });
-    assert(planAction.ok === true, "plan cancel-open-tasks action did not succeed");
+    assert(planAction.status === 400, `completed plan cancellation returned ${planAction.status}`);
+    assert(planAction.body.ok === false, "completed plan cancellation did not fail honestly");
+    assert(planAction.body.status === "complete", "completed plan cancellation did not preserve terminal status");
 
     const streamed = await fetchText(`${inboxUrl}/execute/stream`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ stimulus: "release smoke streamed task" }),
       timeoutMs: 60_000,
     });
@@ -945,6 +1172,7 @@ async function smokeServer() {
     assert(createdToken.ok === true && String(createdToken.token).startsWith("agx_"), "auth token endpoint did not create a workspace token");
   } finally {
     await stopProcess(server);
+    await new Promise((resolveClose) => llmServer.close(resolveClose));
   }
 
   assert(!serverOutput.toLowerCase().includes("error:"), `server emitted error output:\n${serverOutput}`);

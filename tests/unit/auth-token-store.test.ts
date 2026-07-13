@@ -27,7 +27,9 @@ describe("AuthTokenStore", () => {
         role: "operator",
         tokenId: created.record.id,
       });
+      const beforeInvalidAttempt = readFileSync(file, "utf-8");
       expect(store.authenticate("wrong-token")).toMatchObject({ ok: false });
+      expect(readFileSync(file, "utf-8")).toBe(beforeInvalidAttempt);
 
       expect(store.revoke(created.record.id)).toBe(true);
       expect(store.authenticate(created.token)).toMatchObject({ ok: false });

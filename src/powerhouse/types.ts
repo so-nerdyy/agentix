@@ -5,6 +5,7 @@ export type TaskStatus =
   | "running"
   | "awaiting-approval"
   | "complete"
+  | "cancelled"
   | "rejected"
   | "failed";
 
@@ -41,6 +42,14 @@ export interface Task {
 
 export type SessionStatus = "pending" | "active" | "complete" | "failed";
 
+export type SessionMessageRole = "system" | "user" | "assistant";
+
+export interface SessionMessage {
+  role: SessionMessageRole;
+  content: string;
+  ts: number;
+}
+
 export interface Session {
   id: string;
   status: SessionStatus;
@@ -48,6 +57,7 @@ export interface Session {
   updatedAt: number;
   metadata: Record<string, unknown>;
   pendingTaskIds: string[];
+  messages: SessionMessage[];
 }
 
 export interface TaskResult {

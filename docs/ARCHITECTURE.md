@@ -24,7 +24,7 @@ The installed `agentix` command launches the Agentix shell and points it at the 
 - `agentix setup` and `agentix model` use the Agentix setup wizard, writing secrets to `.env.local` and syncing non-secret model/provider/base URL defaults into Agentix backend config.
 - `agentix options` lists provider/model/environment options.
 - `agentix cron` uses Agentix scheduler jobs.
-- `agentix sessions list|stats|export|delete` uses Agentix sessions.
+- `agentix sessions list|delete` uses Agentix sessions.
 - `agentix memory status|search|consolidate` uses Agentix memory.
 - `agentix tools list` lists Agentix Pi agents.
 - `agentix logs` reads Agentix runtime logs.
@@ -36,13 +36,13 @@ Bundled compatibility internals are not the public command surface.
 ## Core Backend Primitives
 
 - `Powerhouse`-style orchestration is represented by the queue/session/approval/agent registry modules
-- `SymphonyEngine` uses an LLM-backed planner when provider credentials are configured, with deterministic static fallback for offline or invalid planner output
-- `PlanStore` persists Symphony plan execution state so approval-gated plans can resume after approval
+- `SymphonyEngine` uses an LLM-backed planner when provider credentials are configured, with deterministic static planning when the planner is unavailable or invalid. Independent steps execute in bounded parallel waves, and completed dependency outputs are supplied to downstream synthesis steps.
+- `PlanStore` persists running, approval-paused, failed, completed, and cancelled Symphony plan execution state. Interrupted plans resume from completed steps, and `retry-failed` reruns failed work before continuing newly unblocked dependents.
 - `TaskQueue` stores and prioritizes work
 - `SessionCoordinator` persists session state
 - `ApprovalWorkflow` gates approval-required work
-- `PIAgentRegistry` binds task kinds to worker implementations, including dynamic command-backed Pi profiles stored under `data/agents/profiles.json`
-- `ConversationAgent` calls the configured LLM provider when credentials are available and falls back to deterministic diagnostics when running offline
+- `PIAgentRegistry` binds task kinds to worker implementations, including configured `luna-message` and `terra-message` model-backed workers plus dynamic command-backed Pi profiles stored under `data/agents/profiles.json`.
+- `ConversationAgent` calls the configured LLM provider, forwards native OpenAI-compatible or Anthropic SSE deltas for single conversational steps, and returns an actionable failed task for missing credentials, authentication errors, timeouts, malformed responses, or cancellation; it never reports provider failure as successful conversation output.
 - `MemoryStore` persists JSONL records and ranks retrieval with local token normalization, synonym expansion, tag boosts, and recency tie-breaks
 - `HealingEngine` fingerprints repeated failures, proposes procedures, auto-promotes stable repeated failures into advisory procedures, applies promoted procedures as retry guidance, and auto-deprecates procedures that keep failing
 
@@ -52,10 +52,10 @@ Bundled compatibility internals are not the public command surface.
 2. The shell emits a stimulus or command.
 3. The Agentix backend receives the request through the bridge.
 4. Symphony builds a safe plan, either from the LLM planner or static fallback.
-5. The backend schedules each step, validates it, and routes it to a PI worker.
-6. Approval-gated plans pause safely and resume remaining dependent steps after approval.
+5. The backend schedules independent steps in bounded parallel waves, validates each result, and routes focused or complex conversational work to configured Luna or Terra Pi workers.
+6. Downstream steps receive completed dependency results. Approval-gated and interrupted plans persist safely and resume remaining dependent steps.
 7. Failed retryable steps can receive promoted healing guidance before the next attempt; successful and failed procedure applications are fed back into the healing store.
-8. Results stream back to the shell and are persisted under the workspace data directory.
+8. Native model deltas and lifecycle events stream back to the shell; the aggregated final response is persisted under the workspace data directory.
 
 ## Workspace Layout
 

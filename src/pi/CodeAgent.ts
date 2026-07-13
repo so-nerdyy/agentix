@@ -7,27 +7,37 @@
 // The edit logic stays intentionally simple: a `find` / `replace` patch with
 // a `replaceAll` flag, and an optional `tsc --noEmit` validation step.
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { isAbsolute, relative, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { BasePIAgent } from "./BasePIAgent.js";
+import type { AgentExecutionContext } from "./BasePIAgent.js";
+import { terminateProcessTree, USE_DETACHED_PROCESS_GROUP } from "./processControl.js";
+import { OutputBuffer, resolveOutputLimit } from "./OutputBuffer.js";
 import type { Task, TaskResult } from "../powerhouse/types.js";
 
 export interface CodeAgentOpts {
   /** Project root for `tsc --noEmit` validation. */
   projectRoot: string;
+  validationTimeoutMs?: number;
+  validationCommand?: string[];
 }
 
 export class CodeAgent extends BasePIAgent {
   private readonly projectRoot: string;
+  private readonly validationTimeoutMs: number;
+  private readonly validationCommand: string[];
 
   constructor(private readonly opts: CodeAgentOpts) {
     super("code-edit");
-    this.projectRoot = resolve(opts.projectRoot);
+    this.projectRoot = realpathSync(resolve(opts.projectRoot));
+    this.validationTimeoutMs = Math.min(10 * 60_000, Math.max(100, opts.validationTimeoutMs ?? 60_000));
+    this.validationCommand = opts.validationCommand ?? ["npx", "tsc", "--noEmit"];
   }
 
-  async execute(task: Task): Promise<TaskResult> {
+  async execute(task: Task, context: AgentExecutionContext = {}): Promise<TaskResult> {
     this.emitStart(task);
+    if (context.signal?.aborted) return { ok: false, error: "cancelled" };
     const payload = task.payload as {
       file?: string;
       find?: string;
@@ -65,7 +75,7 @@ export class CodeAgent extends BasePIAgent {
       }
 
       if (payload.validateTypeScript) {
-        const validation = await this.runTsc();
+        const validation = await this.runTsc(context.signal);
         if (!validation.ok) {
           this.emitError(task, validation.error ?? "tsc failed");
           return validation;
@@ -87,21 +97,70 @@ export class CodeAgent extends BasePIAgent {
     this.alive = false;
   }
 
-  private runTsc(): Promise<TaskResult> {
+  private runTsc(signal?: AbortSignal): Promise<TaskResult> {
     return new Promise((resolve) => {
-      const child = spawn("npx", ["tsc", "--noEmit"], {
+      if (signal?.aborted) {
+        resolve({ ok: false, error: "cancelled" });
+        return;
+      }
+      const [command, ...args] = this.validationCommand;
+      if (!command) {
+        resolve({ ok: false, error: "CodeAgent: validation command is empty" });
+        return;
+      }
+      const child = spawn(command, args, {
         cwd: this.projectRoot,
         stdio: ["ignore", "pipe", "pipe"],
+        detached: USE_DETACHED_PROCESS_GROUP,
+        windowsHide: true,
       });
-      let stderr = "";
-      child.stderr?.on("data", (b) => (stderr += b.toString()));
+      const outputLimit = resolveOutputLimit();
+      const stdout = new OutputBuffer(outputLimit);
+      const stderr = new OutputBuffer(outputLimit);
+      let settled = false;
+      let cancelled = false;
+      let timedOut = false;
+      const finish = (result: TaskResult) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+        resolve(result);
+      };
+      const onAbort = () => {
+        cancelled = true;
+        terminateProcessTree(child);
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      const timer = setTimeout(() => {
+        timedOut = true;
+        terminateProcessTree(child);
+      }, this.validationTimeoutMs);
+      timer.unref?.();
+      child.stdout?.on("data", (chunk) => stdout.append(chunk));
+      child.stderr?.on("data", (chunk) => stderr.append(chunk));
       child.on("error", (err) =>
-        resolve({ ok: false, error: `tsc spawn error: ${err.message}` }),
+        finish({ ok: false, error: `tsc spawn error: ${err.message}` }),
       );
       child.on("close", (code) => {
-        if (code === 0) resolve({ ok: true, output: { validated: true } });
-        else resolve({ ok: false, error: `tsc failed: ${stderr.trim()}` });
+        if (cancelled) finish({ ok: false, error: "cancelled" });
+        else if (timedOut) finish({
+          ok: false,
+          error: `tsc validation timed out after ${this.validationTimeoutMs}ms`,
+          output: {
+            stdout: stdout.toString().trim(),
+            stderr: stderr.toString().trim(),
+            truncated: stdout.truncated || stderr.truncated,
+          },
+        });
+        else if (code === 0) finish({ ok: true, output: { validated: true } });
+        else finish({
+          ok: false,
+          error: `tsc failed: ${stderr.toString().trim() || stdout.toString().trim() || `exit ${code}`}`,
+          output: { truncated: stdout.truncated || stderr.truncated },
+        });
       });
+      if (signal?.aborted) onAbort();
     });
   }
 
@@ -110,6 +169,11 @@ export class CodeAgent extends BasePIAgent {
     const rel = relative(this.projectRoot, candidate);
     if (rel.startsWith("..") || isAbsolute(rel)) {
       throw new Error(`CodeAgent: file is outside project root: ${file}`);
+    }
+    const realAnchor = realpathSync(existsSync(candidate) ? candidate : dirname(candidate));
+    const realRelative = relative(this.projectRoot, realAnchor);
+    if (realRelative.startsWith("..") || isAbsolute(realRelative)) {
+      throw new Error(`CodeAgent: file resolves outside project root: ${file}`);
     }
     return candidate;
   }

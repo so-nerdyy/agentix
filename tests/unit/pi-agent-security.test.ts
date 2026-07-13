@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CodeAgent } from "../../src/pi/CodeAgent.js";
+import { BashAgent } from "../../src/pi/BashAgent.js";
 import { buildDockerSandboxArgs, SandboxAgent } from "../../src/pi/SandboxAgent.js";
 import { AuditLog } from "../../src/audit/AuditLog.js";
 import { HealingEngine } from "../../src/healing/HealingEngine.js";
@@ -60,6 +61,69 @@ afterEach(() => {
 });
 
 describe("Pi agent safety guards", () => {
+  it("reports missing executables without hanging", async () => {
+    const agent = new BashAgent({ cwd: tempDir("agentix-bash-missing-") });
+
+    const result = await agent.execute(makeTask("bash", {
+      command: `agentix-command-that-does-not-exist-${Date.now()}`,
+      args: [],
+    }));
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("spawn error");
+  });
+
+  it("terminates a hanging process at the configured timeout", async () => {
+    const agent = new BashAgent({
+      cwd: tempDir("agentix-bash-timeout-"),
+      timeoutMs: 50,
+    });
+
+    const result = await agent.execute(makeTask("bash", {
+      command: process.execPath,
+      args: ["-e", "setInterval(() => {}, 1000)"],
+    }));
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("timeout after 50ms");
+  });
+
+  it("cancels a running process through AbortSignal", async () => {
+    const agent = new BashAgent({
+      cwd: tempDir("agentix-bash-cancel-"),
+      timeoutMs: 10_000,
+    });
+    const controller = new AbortController();
+    const execution = agent.execute(makeTask("bash", {
+      command: process.execPath,
+      args: ["-e", "setInterval(() => {}, 1000)"],
+    }), { signal: controller.signal });
+    setTimeout(() => controller.abort(new Error("test cancellation")), 50);
+
+    const result = await execution;
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("cancelled");
+  });
+
+  it("caps large subprocess output and supports working paths with spaces", async () => {
+    const root = tempDir("agentix-bash-output-");
+    const cwd = join(root, "folder with spaces");
+    mkdirSync(cwd, { recursive: true });
+    const agent = new BashAgent({ cwd, maxOutputBytes: 1024 });
+
+    const result = await agent.execute(makeTask("bash", {
+      command: process.execPath,
+      args: ["-e", "process.stdout.write(process.cwd() + '\\n' + 'x'.repeat(10000))"],
+    }));
+    const output = result.output as { stdout: string; truncated: boolean };
+
+    expect(result.ok).toBe(true);
+    expect(output.stdout).toContain("folder with spaces");
+    expect(Buffer.byteLength(output.stdout)).toBeLessThanOrEqual(1024);
+    expect(output.truncated).toBe(true);
+  });
+
   it("prevents CodeAgent edits outside the project root", async () => {
     const projectRoot = tempDir("agentix-code-root-");
     const outsideRoot = tempDir("agentix-code-outside-");
@@ -74,6 +138,23 @@ describe("Pi agent safety guards", () => {
     expect(result.ok).toBe(false);
     expect(result.error).toContain("outside project root");
     expect(existsSync(outsideFile)).toBe(false);
+  });
+
+  it("prevents CodeAgent writes through a directory junction", async () => {
+    const projectRoot = tempDir("agentix-code-root-");
+    const outsideRoot = tempDir("agentix-code-junction-outside-");
+    const link = join(projectRoot, "linked-outside");
+    symlinkSync(outsideRoot, link, "junction");
+    const agent = new CodeAgent({ projectRoot });
+
+    const result = await agent.execute(makeTask("code-edit", {
+      file: "linked-outside/escape.txt",
+      newContent: "outside write",
+    }));
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("resolves outside project root");
+    expect(existsSync(join(outsideRoot, "escape.txt"))).toBe(false);
   });
 
   it("allows CodeAgent edits inside the project root", async () => {
@@ -92,6 +173,26 @@ describe("Pi agent safety guards", () => {
     expect(result.output).toMatchObject({ file: target });
   });
 
+  it("bounds a hanging CodeAgent TypeScript validation process", async () => {
+    const projectRoot = tempDir("agentix-code-validation-timeout-");
+    const target = join(projectRoot, "inside.ts");
+    const agent = new CodeAgent({
+      projectRoot,
+      validationTimeoutMs: 100,
+      validationCommand: [process.execPath, "-e", "setInterval(() => {}, 1000)"],
+    });
+
+    const result = await agent.execute(makeTask("code-edit", {
+      file: "inside.ts",
+      newContent: "export const value = 1;",
+      validateTypeScript: true,
+    }));
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("tsc validation timed out after 100ms");
+    expect(existsSync(target)).toBe(true);
+  });
+
   it("prevents SandboxAgent filenames from escaping the sandbox", async () => {
     const rootDir = tempDir("agentix-sandbox-root-");
     const agent = new SandboxAgent({ rootDir });
@@ -105,6 +206,49 @@ describe("Pi agent safety guards", () => {
     expect(result.ok).toBe(false);
     expect(result.error).toContain("escapes sandbox");
     expect(existsSync(join(rootDir, "escape.js"))).toBe(false);
+  });
+
+  it("prevents sandbox session ids and junctions from escaping the root", async () => {
+    const rootDir = tempDir("agentix-sandbox-root-");
+    const outsideRoot = tempDir("agentix-sandbox-outside-");
+    const agent = new SandboxAgent({ rootDir, isolationMode: "local" });
+    const traversalTask = makeTask("sandbox-run", {
+      code: "console.log('escape')",
+      filename: "snippet.js",
+      command: ["node", "snippet.js"],
+    });
+    traversalTask.sessionId = "../../outside-session";
+
+    const traversal = await agent.execute(traversalTask);
+    expect(traversal.ok).toBe(false);
+    expect(traversal.error).toContain("session id escapes sandbox root");
+
+    const sessionDir = join(rootDir, "session-security");
+    mkdirSync(sessionDir, { recursive: true });
+    symlinkSync(outsideRoot, join(sessionDir, "linked-outside"), "junction");
+    const junction = await agent.execute(makeTask("sandbox-run", {
+      code: "console.log('escape')",
+      filename: "linked-outside/snippet.js",
+      command: ["node", "linked-outside/snippet.js"],
+    }));
+
+    expect(junction.ok).toBe(false);
+    expect(junction.error).toContain("resolves outside sandbox");
+    expect(existsSync(join(outsideRoot, "snippet.js"))).toBe(false);
+  });
+
+  it("rejects node commands that bypass the generated sandbox file", async () => {
+    const rootDir = tempDir("agentix-sandbox-root-");
+    const agent = new SandboxAgent({ rootDir, isolationMode: "local" });
+
+    const result = await agent.execute(makeTask("sandbox-run", {
+      code: "console.log('safe file')",
+      filename: "snippet.js",
+      command: ["node", "-e", "console.log('bypass')"],
+    }));
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("must execute the generated sandbox file");
   });
 
   it("keeps SandboxAgent.list compatible with ESM builds", () => {

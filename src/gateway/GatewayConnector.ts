@@ -1,4 +1,5 @@
 import type { GatewayRecord } from "./GatewayRegistry.js";
+import { timingSafeEqual } from "node:crypto";
 
 export interface GatewayInbound {
   stimulus: string;
@@ -30,7 +31,10 @@ export function gatewaySecretConfigured(id: string): boolean {
 export function verifyGatewaySecret(id: string, provided: string | undefined): boolean {
   const expected = readEnv(id, "SECRET", "AGENTIX_GATEWAY_SECRET");
   if (!expected) return process.env.AGENTIX_ALLOW_UNAUTHENTICATED_GATEWAY === "1";
-  return Boolean(provided && provided === expected);
+  if (!provided) return false;
+  const expectedBytes = Buffer.from(expected);
+  const providedBytes = Buffer.from(provided);
+  return expectedBytes.length === providedBytes.length && timingSafeEqual(expectedBytes, providedBytes);
 }
 
 export function gatewayTokenConfigured(gateway: GatewayRecord): boolean {
@@ -108,48 +112,75 @@ export async function deliverGatewayResponse(gateway: GatewayRecord, response: s
     const token = readEnv(gateway.id, "SLACK_BOT_TOKEN", "SLACK_BOT_TOKEN");
     const channel = String(metadata.channel ?? readEnv(gateway.id, "SLACK_CHANNEL_ID", "SLACK_CHANNEL_ID"));
     if (!token || !channel) return { attempted: false, ok: false, target: "slack", error: "missing Slack token/channel" };
-    return postJson("https://slack.com/api/chat.postMessage", { channel, text }, { Authorization: `Bearer ${token}` });
+    return postJson("https://slack.com/api/chat.postMessage", { channel, text }, { Authorization: `Bearer ${token}` }, "slack");
   }
 
   if (gateway.platform === "discord") {
     const url = readEnv(gateway.id, "DISCORD_WEBHOOK_URL", "DISCORD_WEBHOOK_URL");
     if (!url) return { attempted: false, ok: false, target: "discord", error: "missing Discord webhook URL" };
-    return postJson(url, { content: text });
+    return postJson(url, { content: text }, {}, "discord");
   }
 
   if (gateway.platform === "teams") {
     const url = readEnv(gateway.id, "TEAMS_WEBHOOK_URL", "TEAMS_WEBHOOK_URL");
     if (!url) return { attempted: false, ok: false, target: "teams", error: "missing Teams webhook URL" };
-    return postJson(url, { text });
+    return postJson(url, { text }, {}, "teams");
   }
 
   if (gateway.platform === "telegram") {
     const token = readEnv(gateway.id, "TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT_TOKEN");
     const chatId = String(metadata.chatId ?? readEnv(gateway.id, "TELEGRAM_CHAT_ID", "TELEGRAM_CHAT_ID"));
     if (!token || !chatId) return { attempted: false, ok: false, target: "telegram", error: "missing Telegram token/chat" };
-    return postJson(`https://api.telegram.org/bot${token}/sendMessage`, { chat_id: chatId, text });
+    return postJson(`https://api.telegram.org/bot${token}/sendMessage`, { chat_id: chatId, text }, {}, "telegram");
   }
 
   const url = readEnv(gateway.id, "WEBHOOK_URL", "AGENTIX_GATEWAY_WEBHOOK_URL");
   if (!url) return { attempted: false, ok: false, target: "webhook", error: "missing outbound webhook URL" };
-  return postJson(url, { gatewayId: gateway.id, response: text, metadata });
+  return postJson(url, { gatewayId: gateway.id, response: text, metadata }, {}, "webhook");
 }
 
-async function postJson(url: string, body: Record<string, unknown>, headers: Record<string, string> = {}): Promise<GatewayDelivery> {
+async function postJson(
+  url: string,
+  body: Record<string, unknown>,
+  headers: Record<string, string> = {},
+  target = "gateway",
+): Promise<GatewayDelivery> {
+  const configuredTimeout = Number(process.env.AGENTIX_GATEWAY_TIMEOUT_MS);
+  const timeoutMs = Number.isFinite(configuredTimeout)
+    ? Math.min(120_000, Math.max(100, configuredTimeout))
+    : 15_000;
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort(new Error(`gateway request timed out after ${timeoutMs}ms`));
+  }, timeoutMs);
+  timeout.unref?.();
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...headers },
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
+    await res.body?.cancel().catch(() => undefined);
     return {
       attempted: true,
       ok: res.ok,
-      target: url,
+      target,
       status: res.status,
-      ...(res.ok ? {} : { error: await res.text() }),
+      ...(res.ok ? {} : { error: `gateway endpoint returned HTTP ${res.status}` }),
     };
-  } catch (err) {
-    return { attempted: true, ok: false, target: url, error: err instanceof Error ? err.message : String(err) };
+  } catch {
+    return {
+      attempted: true,
+      ok: false,
+      target,
+      error: timedOut
+        ? `gateway request timed out after ${timeoutMs}ms`
+        : "gateway delivery request failed",
+    };
+  } finally {
+    clearTimeout(timeout);
   }
 }

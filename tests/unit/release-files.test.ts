@@ -27,7 +27,9 @@ describe("release packaging files", () => {
     expect(pkg.scripts["release:preflight"]).toBe("node scripts/release-preflight.mjs");
     expect(pkg.scripts["release:verify"]).toBe("node scripts/verify-public-release.mjs");
     expect(pkg.scripts["verify:llm"]).toBe("node scripts/verify-live-llm.mjs");
+    expect(pkg.files).toContain("bin");
     expect(pkg.files).toContain("scripts");
+    expect(pkg.files).toContain("CHANGELOG.md");
     expect(pkg.name).toBe("@nerdyy/agentix");
     expect(pkg.repository).toEqual({
       type: "git",

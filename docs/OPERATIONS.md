@@ -42,7 +42,11 @@ Bundled compatibility internals are implementation detail, not the public comman
 
 Symphony attempts LLM-backed planning when `AGENTIX_LLM_API_KEY` and provider/model settings are available. Planner output is accepted only if it sanitizes into known Pi-agent step kinds. Shell, code-edit, and sandbox steps are approval-gated regardless of what the planner returns. If the LLM planner is unavailable or returns invalid JSON, Agentix falls back to deterministic static planning and records the fallback reason in audit metadata.
 
-Approval-gated plans are persisted in `PlanStore`. When an approval is granted, Powerhouse resumes the saved Symphony plan from completed step IDs and runs any newly unblocked dependent steps. If another approval-gated step is reached, the plan pauses again instead of bypassing approval.
+Set `AGENTIX_LUNA_MODEL` for bounded reviews, tests, documentation, and focused fixes. Set `AGENTIX_TERRA_MODEL` for architecture, concurrency, security, migrations, and other complex work. Both are ordinary Pi agents controlled by Powerhouse and scheduled by Symphony; they do not own a second agent loop. `luna:` and `terra:` prefixes request an explicit delegate. `AGENTIX_SYMPHONY_CONCURRENCY` controls the parallel-wave limit and defaults to 4.
+
+Provider calls use a 60-second per-attempt timeout and up to three bounded attempts by default. The timeout remains active while response bodies and native SSE streams are consumed. Configure `AGENTIX_LLM_TIMEOUT_MS`, `AGENTIX_LLM_MAX_ATTEMPTS`, and `AGENTIX_LLM_RETRY_DELAY_MS` when needed. Authentication and other permanent 4xx errors are not retried. Provider failures remain failed tasks and never become synthetic successful answers.
+
+Plans are persisted as soon as planning completes and updated while tasks launch. On restart, Powerhouse reconstructs completed outputs, reuses interrupted open tasks, and continues newly unblocked dependent steps. When an approval is granted, the same continuation path resumes from completed step IDs. `retry-failed` creates a new attempt for failed work and then runs its dependents instead of retrying an isolated task.
 
 ## Healing
 
@@ -56,9 +60,11 @@ Use `agentix agents` or `/agents/profiles` to manage command-backed Pi agents. P
 
 `sandbox-run` uses `AGENTIX_SANDBOX_MODE=auto` by default. When Docker and the configured image are available, Agentix runs sandbox code through `docker run --network none` with CPU, memory, and PID limits. If Docker or the image is not available, `auto` falls back to the local sandbox runner with command allowlisting, stripped env, timeout, and filesystem path guards. Use `AGENTIX_SANDBOX_MODE=docker` for fail-closed container isolation, or `AGENTIX_SANDBOX_MODE=local` when Docker is intentionally unavailable. `AGENTIX_SANDBOX_DOCKER_IMAGE` defaults to `node:22-alpine`.
 
+Process-backed Pi agents terminate their process tree on timeout, cancellation, and Powerhouse shutdown. Captured stdout and stderr are capped per stream by `AGENTIX_PROCESS_OUTPUT_LIMIT_BYTES` (1 MiB by default) to prevent unbounded memory growth. TypeScript validation uses a 60-second bound. Scheduled scripts use the same output cap and `AGENTIX_SCHEDULER_SCRIPT_TIMEOUT_MS` (60 seconds by default); stale persisted `running` locks are cleared and audited on restart.
+
 ## Gateways
 
-Inbound gateway webhooks use `POST /gateway/<id>/inbound` and must include `X-Agentix-Gateway-Secret` or `?secret=` matching `AGENTIX_GATEWAY_<ID>_SECRET` or `AGENTIX_GATEWAY_SECRET`. Outbound replies are delivered when platform credentials are configured: `SLACK_BOT_TOKEN` plus channel, `DISCORD_WEBHOOK_URL`, `TEAMS_WEBHOOK_URL`, `TELEGRAM_BOT_TOKEN` plus chat, or `AGENTIX_GATEWAY_WEBHOOK_URL` for generic webhooks. Missing outbound config does not fail task execution; it is reported in gateway delivery metadata and doctor details.
+Inbound gateway webhooks use `POST /gateway/<id>/inbound` and must include `X-Agentix-Gateway-Secret` or `?secret=` matching `AGENTIX_GATEWAY_<ID>_SECRET` or `AGENTIX_GATEWAY_SECRET`. Outbound replies are delivered when platform credentials are configured: `SLACK_BOT_TOKEN` plus channel, `DISCORD_WEBHOOK_URL`, `TEAMS_WEBHOOK_URL`, `TELEGRAM_BOT_TOKEN` plus chat, or `AGENTIX_GATEWAY_WEBHOOK_URL` for generic webhooks. Delivery is bounded by `AGENTIX_GATEWAY_TIMEOUT_MS` (15 seconds by default), and persisted diagnostics never contain credential-bearing target URLs or remote response bodies. Missing outbound config does not fail task execution; it is reported in gateway delivery metadata and doctor details.
 
 ## Health Checks
 
@@ -108,10 +114,12 @@ Use `agentix support` to create a timestamped bundle under `data/support/` with:
 - sanitized config
 - sessions, tasks, approvals, jobs, gateways, dynamic agent profiles, audit, healing, doctor, and memory snapshots
 - plan execution snapshots
+- recursively redacted logs and nested runtime values, including authorization/cookie/token/password fields and configured secret values
 
 ## Recovery
 
 - Stop the running shell before upgrading the launcher
 - Keep workspace config files in place during upgrades
 - If the bridge is down, restart it with `agentix server`
+- If `agentix doctor` reports corrupt state, generate a support bundle before removing the preserved `.corrupt-*` backup
 

@@ -20,16 +20,23 @@ interface RawPlannerResponse {
 }
 
 export class TaskPlanner {
-  async plan(stimulus: string): Promise<SymphonyPlan> {
+  async plan(stimulus: string, opts: { signal?: AbortSignal } = {}): Promise<SymphonyPlan> {
+    this.throwIfAborted(opts.signal);
     const trimmed = stimulus.trim();
     const deterministic = this.planStaticSteps(trimmed);
     if (this.shouldUseStaticOnly(trimmed)) {
       return this.buildPlan(stimulus, deterministic, "static");
     }
 
-    const llmPlan = await this.tryPlanWithLlm(trimmed);
+    const llmPlan = await this.tryPlanWithLlm(trimmed, opts.signal);
+    this.throwIfAborted(opts.signal);
     if (llmPlan.steps.length > 0) {
-      return this.buildPlan(stimulus, llmPlan.steps, "llm", llmPlan.reasoning);
+      return this.buildPlan(
+        stimulus,
+        this.applyDelegationPolicy(llmPlan.steps, trimmed),
+        "llm",
+        llmPlan.reasoning,
+      );
     }
 
     return this.buildPlan(stimulus, deterministic, "static", undefined, llmPlan.error);
@@ -83,24 +90,35 @@ export class TaskPlanner {
       lower.startsWith("plan:") ||
       lower.startsWith("run:") ||
       lower.startsWith("sandbox:") ||
+      lower.startsWith("luna:") ||
+      lower.startsWith("terra:") ||
       stimulus.startsWith("!")
     );
   }
 
-  private async tryPlanWithLlm(stimulus: string): Promise<{
+  private async tryPlanWithLlm(stimulus: string, signal?: AbortSignal): Promise<{
     steps: PlanStep[];
     reasoning?: string;
     error?: string;
   }> {
-    const client = new LLMClient(loadConfig());
+    const config = loadConfig();
+    const delegates = this.configuredDelegateKinds(config);
+    const allowedKinds = ["user-message", ...delegates, "bash", "code-edit", "sandbox-run"];
+    const client = new LLMClient(config);
     const completion = await client.complete([
       {
         role: "system",
         content: [
           "You are the Agentix Symphony planner.",
           "Return only JSON with keys steps and reasoning.",
-          "Allowed step kinds: user-message, bash, code-edit, sandbox-run.",
+          `Allowed step kinds: ${allowedKinds.join(", ")}.`,
           "Use user-message for pure conversation or explanation.",
+          ...(config.lunaModel
+            ? ["Use luna-message for focused reviews, tests, documentation, configuration checks, or bounded fixes."]
+            : []),
+          ...(config.terraModel
+            ? ["Use terra-message for architecture, complex debugging, concurrency, security, migrations, or multi-system work."]
+            : []),
           "Use bash only for explicit shell execution and always set requiresApproval true.",
           "Use code-edit only when a concrete file edit is requested and always set requiresApproval true.",
           "Use sandbox-run only for generated code execution and always set requiresApproval true.",
@@ -131,7 +149,9 @@ export class TaskPlanner {
           `Request: ${stimulus}`,
         ].join("\n"),
       },
-    ]);
+    ], { signal });
+
+    this.throwIfAborted(signal);
 
     if (!completion.ok || !completion.text) {
       return { steps: [], error: completion.error ?? "LLM planner returned no text" };
@@ -154,6 +174,13 @@ export class TaskPlanner {
   }
 
   private planSingleStep(stimulus: string): PlanStep {
+    const explicitDelegate = stimulus.match(/^(luna|terra):\s*([\s\S]*)$/i);
+    if (explicitDelegate) {
+      const role = explicitDelegate[1]!.toLowerCase() as "luna" | "terra";
+      const request = explicitDelegate[2]!.trim();
+      return this.conversationStep(`${role}-message`, request || stimulus);
+    }
+
     if (stimulus.startsWith("!")) {
       return {
         id: "step-1",
@@ -194,15 +221,7 @@ export class TaskPlanner {
       };
     }
 
-    return {
-      id: "step-1",
-      kind: "user-message",
-      priority: "user",
-      payload: { stimulus },
-      dependsOn: [],
-      requiresApproval: false,
-      maxAttempts: 1,
-    };
+    return this.conversationStep(this.preferredDelegate(stimulus) ?? "user-message", stimulus);
   }
 
   private tryParsePlan(stimulus: string): PlanStep[] {
@@ -235,7 +254,7 @@ export class TaskPlanner {
   }
 
   private requiresApprovalByDefault(kind?: string): boolean {
-    return kind !== "user-message";
+    return !["user-message", "luna-message", "terra-message"].includes(kind ?? "");
   }
 
   private extractJson(text: string): string {
@@ -288,6 +307,8 @@ export class TaskPlanner {
   private safeKind(value: unknown): TaskKind | null {
     if (
       value === "user-message" ||
+      (value === "luna-message" && Boolean(loadConfig().lunaModel)) ||
+      (value === "terra-message" && Boolean(loadConfig().terraModel)) ||
       value === "bash" ||
       value === "code-edit" ||
       value === "sandbox-run"
@@ -310,6 +331,7 @@ export class TaskPlanner {
 
   private safeApproval(kind: TaskKind, value: unknown): boolean {
     if (kind === "bash" || kind === "code-edit" || kind === "sandbox-run") return true;
+    if (["user-message", "luna-message", "terra-message"].includes(kind)) return false;
     return Boolean(value);
   }
 
@@ -328,7 +350,7 @@ export class TaskPlanner {
       ? { ...(value as Record<string, unknown>) }
       : {};
 
-    if (kind === "user-message") {
+    if (["user-message", "luna-message", "terra-message"].includes(kind)) {
       const plannedInstruction = typeof payload.stimulus === "string" && payload.stimulus.trim()
         ? payload.stimulus.trim()
         : "";
@@ -376,5 +398,61 @@ export class TaskPlanner {
     }
 
     return null;
+  }
+
+  private conversationStep(kind: TaskKind, stimulus: string): PlanStep {
+    return {
+      id: "step-1",
+      kind,
+      priority: "user",
+      payload: { stimulus, userRequest: stimulus },
+      dependsOn: [],
+      requiresApproval: false,
+      maxAttempts: 1,
+    };
+  }
+
+  private configuredDelegateKinds(config = loadConfig()): TaskKind[] {
+    return [
+      ...(config.lunaModel ? ["luna-message" as const] : []),
+      ...(config.terraModel ? ["terra-message" as const] : []),
+    ];
+  }
+
+  private preferredDelegate(stimulus: string): TaskKind | null {
+    const config = loadConfig();
+    if (!config.lunaModel && !config.terraModel) return null;
+
+    const lower = stimulus.toLowerCase();
+    const words = lower.match(/[a-z0-9_-]+/g)?.length ?? 0;
+    const complexTerms = lower.match(
+      /\b(architecture|architect|refactor|migration|concurrency|parallel|deadlock|security|performance|orchestration|multi[- ]?step|end[- ]?to[- ]?end|integration|root cause|redesign|production)\b/g,
+    )?.length ?? 0;
+    const focusedTerms = lower.match(
+      /\b(review|test|tests|documentation|docs|configuration|config|check|audit|summarize|explain|small fix|isolated)\b/g,
+    )?.length ?? 0;
+
+    const needsTerra = complexTerms >= 2 || (complexTerms >= 1 && words >= 10) || words >= 32;
+    if (needsTerra) {
+      if (config.terraModel) return "terra-message";
+      if (config.lunaModel) return "luna-message";
+    }
+    if (focusedTerms > 0 || words >= 10) {
+      if (config.lunaModel) return "luna-message";
+      if (config.terraModel) return "terra-message";
+    }
+    return null;
+  }
+
+  private applyDelegationPolicy(steps: PlanStep[], stimulus: string): PlanStep[] {
+    if (steps.length !== 1 || steps[0]?.kind !== "user-message") return steps;
+    const preferred = this.preferredDelegate(stimulus);
+    return preferred ? [{ ...steps[0], kind: preferred, requiresApproval: false }] : steps;
+  }
+
+  private throwIfAborted(signal?: AbortSignal): void {
+    if (!signal?.aborted) return;
+    if (signal.reason instanceof Error) throw signal.reason;
+    throw new Error("Agentix planning cancelled");
   }
 }

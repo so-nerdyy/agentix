@@ -13,6 +13,13 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
   const server = Fastify({ logger: false });
   const runtime = () => getBackendRuntime();
 
+  server.addHook("onSend", async (_request, reply, payload) => {
+    reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("X-Frame-Options", "DENY");
+    reply.header("Referrer-Policy", "no-referrer");
+    return payload;
+  });
+
   await server.register(cors, {
     origin: false,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -70,26 +77,45 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
   });
 
   server.post("/execute/stream", async (request, reply) => {
-    const body = request.body as Record<string, unknown>;
+    const body = request.body as Record<string, unknown> | undefined;
+    const stimulus = typeof body?.stimulus === "string" ? body.stimulus.trim() : "";
+    if (!stimulus) {
+      reply.status(400);
+      return { ok: false, error: "stimulus must be a non-empty string" };
+    }
+    const raw = reply.raw!;
+    const controller = new AbortController();
+    let finished = false;
+    const abortDisconnectedRequest = () => {
+      if (!finished && !controller.signal.aborted) {
+        controller.abort(new Error("terminal client disconnected"));
+      }
+    };
+    const writeEvent = (event: string) => {
+      if (!raw.destroyed && !raw.writableEnded) raw.write(event);
+    };
+    request.raw.once("aborted", abortDisconnectedRequest);
+    raw.once("close", abortDisconnectedRequest);
 
-    reply.raw!.setHeader("Content-Type", "text/event-stream");
-    reply.raw!.setHeader("Cache-Control", "no-cache");
-    reply.raw!.setHeader("Connection", "keep-alive");
-    reply.raw!.setHeader("X-Accel-Buffering", "no");
+    raw.setHeader("Content-Type", "text/event-stream");
+    raw.setHeader("Cache-Control", "no-cache");
+    raw.setHeader("Connection", "keep-alive");
+    raw.setHeader("X-Accel-Buffering", "no");
 
     try {
       const result = await runtime().execute({
-        stimulus: body.stimulus as string,
-        sessionId: body.sessionId as string | undefined,
-        model: typeof body.model === "string" ? body.model : undefined,
-        provider: typeof body.provider === "string" ? body.provider : undefined,
-        baseUrl: typeof body.baseUrl === "string" ? body.baseUrl : undefined,
-        toolsets: body.toolsets,
+        stimulus,
+        sessionId: body?.sessionId as string | undefined,
+        model: typeof body?.model === "string" ? body.model : undefined,
+        provider: typeof body?.provider === "string" ? body.provider : undefined,
+        baseUrl: typeof body?.baseUrl === "string" ? body.baseUrl : undefined,
+        toolsets: body?.toolsets,
+        signal: controller.signal,
         onDelta: (delta: string) => {
-          reply.raw!.write(`data: ${JSON.stringify({ delta })}\n\n`);
+          writeEvent(`data: ${JSON.stringify({ delta })}\n\n`);
         },
       });
-      reply.raw!.write(`data: ${JSON.stringify({
+      writeEvent(`data: ${JSON.stringify({
         type: "result",
         sessionId: result.sessionId,
         status: result.status,
@@ -97,25 +123,34 @@ export async function startBridge(opts: { port?: number; host?: string } = {}) {
       })}\n\n`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      reply.raw!.write(
-        `data: ${JSON.stringify({ error: msg })}\n\n`,
-      );
+      if (!controller.signal.aborted) {
+        writeEvent(`data: ${JSON.stringify({ error: msg })}\n\n`);
+      }
+    } finally {
+      finished = true;
+      request.raw.off("aborted", abortDisconnectedRequest);
+      raw.off("close", abortDisconnectedRequest);
     }
 
-    reply.raw!.write("data: [DONE]\n\n");
-    reply.raw!.end();
+    writeEvent("data: [DONE]\n\n");
+    if (!raw.destroyed && !raw.writableEnded) raw.end();
     return reply;
   });
 
   server.post("/execute", async (request, reply) => {
-    const body = request.body as Record<string, unknown>;
+    const body = request.body as Record<string, unknown> | undefined;
+    const stimulus = typeof body?.stimulus === "string" ? body.stimulus.trim() : "";
+    if (!stimulus) {
+      reply.status(400);
+      return { ok: false, error: "stimulus must be a non-empty string" };
+    }
     return runtime().execute({
-      stimulus: body.stimulus as string,
-      sessionId: body.sessionId as string | undefined,
-      model: typeof body.model === "string" ? body.model : undefined,
-      provider: typeof body.provider === "string" ? body.provider : undefined,
-      baseUrl: typeof body.baseUrl === "string" ? body.baseUrl : undefined,
-      toolsets: body.toolsets,
+      stimulus,
+      sessionId: body?.sessionId as string | undefined,
+      model: typeof body?.model === "string" ? body.model : undefined,
+      provider: typeof body?.provider === "string" ? body.provider : undefined,
+      baseUrl: typeof body?.baseUrl === "string" ? body.baseUrl : undefined,
+      toolsets: body?.toolsets,
     });
   });
 

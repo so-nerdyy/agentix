@@ -29,7 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh |
 Verified GitHub release install:
 
 ```sh
-AGENTIX_VERSION=2.1.12 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
+AGENTIX_VERSION=2.2.0 curl -fsSL https://raw.githubusercontent.com/so-nerdyy/agentix/main/install.sh | sh
 ```
 
 From any project folder, `agentix` opens the interactive shell. Use `agentix dashboard` if you want the web control surface only, or `agentix server` if you want the backend bridge, event stream, and dashboard/API runtime. Open `http://127.0.0.1:3000/ui/` for the live control surface.
@@ -64,6 +64,10 @@ From any project folder, `agentix` opens the interactive shell. Use `agentix das
 
 Agentix uses workspace-scoped configuration and environment variables:
 
+Configuration precedence is process environment, workspace `.env.local`, then
+non-secret `data/config.json`, then built-in defaults. Secrets are never loaded
+from or persisted to `data/config.json`.
+
 - `AGENTIX_DATA_DIR` - persistent data location
 - `AGENTIX_WORKSPACE_DIR` - workspace root used for tasks and default `data/`
 - `AGENTIX_BRIDGE_URL` - backend bridge URL
@@ -71,8 +75,17 @@ Agentix uses workspace-scoped configuration and environment variables:
 - `AGENTIX_INBOX_PORT` - inbox/dashboard port
 - `AGENTIX_PROVIDER` - provider selected by `agentix setup` or `agentix model`
 - `AGENTIX_MODEL` - default model
+- `AGENTIX_LUNA_MODEL` - optional focused-work Pi model
+- `AGENTIX_TERRA_MODEL` - optional complex-work Pi model
 - `AGENTIX_BASE_URL` - optional OpenAI-compatible or provider-specific base URL
 - `AGENTIX_LLM_API_KEY` - runtime API key
+- `AGENTIX_LLM_TIMEOUT_MS` - per-attempt provider timeout, default 60000
+- `AGENTIX_LLM_MAX_ATTEMPTS` - bounded provider attempts, default 3 and maximum 5
+- `AGENTIX_LLM_RETRY_DELAY_MS` - initial transient-error retry delay, default 250
+- `AGENTIX_SYMPHONY_CONCURRENCY` - independent Symphony steps per wave, default 4
+- `AGENTIX_PROCESS_OUTPUT_LIMIT_BYTES` - stdout/stderr cap per stream, default 1 MiB
+- `AGENTIX_SCHEDULER_SCRIPT_TIMEOUT_MS` - scheduled script timeout, default 60000
+- `AGENTIX_GATEWAY_TIMEOUT_MS` - outbound gateway delivery timeout, default 15000
 - `KILOCODE_API_KEY` or `KILO_API_KEY` - accepted aliases for Kilo Gateway when `AGENTIX_PROVIDER=kilocode`
 - `AGENTIX_SESSION_TOKEN` - optional admin Bearer token for dashboard/API/event access; workspace role tokens can also be created with the backend auth CLI
 - `AGENTIX_SESSION_TTL` - session retention
@@ -82,7 +95,7 @@ Agentix uses workspace-scoped configuration and environment variables:
 - `AGENTIX_SANDBOX_MODE` - `auto`, `docker`, or `local` sandbox execution mode
 - `AGENTIX_SANDBOX_DOCKER_IMAGE` - Docker image for containerized sandbox execution
 
-By default, Agentix stores workspace runtime state under `data/`. `agentix setup` and `agentix model` write API secrets to `.env.local` and sync non-secret provider/model/base URL defaults into `data/config.json`.
+By default, Agentix stores workspace runtime state under `data/`. `agentix setup` and `agentix model` write API secrets to `.env.local` and sync non-secret provider, primary model, Luna/Terra model, and base URL defaults into `data/config.json`.
 
 Kilo Gateway first-class setup:
 
@@ -90,13 +103,20 @@ Kilo Gateway first-class setup:
 agentix config set provider kilocode
 agentix config set model <kilo-model-id>
 agentix config set baseUrl https://api.kilo.ai/api/gateway
+agentix config set lunaModel <focused-worker-model-id>
+agentix config set terraModel <complex-worker-model-id>
 $env:KILOCODE_API_KEY="<kilo-gateway-key>"
 ```
 
+Interactive Kilo setup defaults to `kilo-auto/free`, which was verified against
+the live catalog for this release. Use `agentix model --list` to select another
+current model ID. Single conversational Pi steps stream native provider deltas
+when the selected provider supports SSE.
+
 ## Project Layout
 
-- `bin/` - installed entrypoint
-- `src/` - Agentix backend, shell fallback, and bridge
+- `bin/` - thin installed bootstrap plus full launcher implementation
+- `src/` - Agentix backend, terminal shell, and bridge
 - `frontend/src/` - editable interactive dashboard source
 - `frontend/dist/` - generated dashboard served by the inbox server
 - `hermes-agent/` - vendored compatibility runtime used internally

@@ -53,7 +53,10 @@ describe("CLI help", () => {
 
   it("keeps documented cron pause, resume, and history actions executable", () => {
     const cli = readFileSync(join(process.cwd(), "src", "cli.ts"), "utf8");
-    const launcher = readFileSync(join(process.cwd(), "bin", "agentix.js"), "utf8");
+    const launcher = [
+      readFileSync(join(process.cwd(), "bin", "agentix.js"), "utf8"),
+      readFileSync(join(process.cwd(), "bin", "agentix-main.js"), "utf8"),
+    ].join("\n");
 
     expect(cli).toContain('requestedAction === "pause"');
     expect(cli).toContain('requestedAction === "resume"');

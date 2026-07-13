@@ -20,20 +20,34 @@ export interface SymphonyRunOptions {
   completedStepIds?: Iterable<string>;
   outputs?: SymphonyResult["outputs"];
   validations?: SymphonyResult["validations"];
+  signal?: AbortSignal;
 }
 
 export class SymphonyEngine {
   private readonly planner: TaskPlanner;
   private readonly validator: ResultValidator;
+  private readonly maxConcurrency: number;
 
-  constructor(opts: { planner?: TaskPlanner; validator?: ResultValidator } = {}) {
+  constructor(opts: { planner?: TaskPlanner; validator?: ResultValidator; maxConcurrency?: number } = {}) {
     this.planner = opts.planner ?? new TaskPlanner();
     this.validator = opts.validator ?? new ResultValidator();
+    const configured = Number(opts.maxConcurrency ?? process.env.AGENTIX_SYMPHONY_CONCURRENCY ?? 4);
+    this.maxConcurrency = Number.isFinite(configured)
+      ? Math.min(16, Math.max(1, Math.floor(configured)))
+      : 4;
   }
 
-  async run(stimulus: string, executor: SymphonyExecutor): Promise<SymphonyResult> {
-    const plan = await this.planner.plan(stimulus);
-    return this.runPlan(plan, executor);
+  async run(
+    stimulus: string,
+    executor: SymphonyExecutor,
+    opts: SymphonyRunOptions = {},
+  ): Promise<SymphonyResult> {
+    const plan = await this.createPlan(stimulus, opts.signal);
+    return this.runPlan(plan, executor, opts);
+  }
+
+  async createPlan(stimulus: string, signal?: AbortSignal): Promise<SymphonyResult["plan"]> {
+    return this.planner.plan(stimulus, { signal });
   }
 
   async runPlan(
@@ -44,7 +58,6 @@ export class SymphonyEngine {
     const outputs: SymphonyResult["outputs"] = [...(opts.outputs ?? [])];
     const validations: SymphonyResult["validations"] = [...(opts.validations ?? [])];
     const completed = new Set<string>(opts.completedStepIds ?? []);
-    const failed = new Set<string>();
     const pending = new Map(
       plan.steps
         .filter((step) => !completed.has(step.id))
@@ -52,6 +65,9 @@ export class SymphonyEngine {
     );
 
     while (pending.size > 0) {
+      if (opts.signal?.aborted) {
+        return this.cancelledResult(plan, outputs, validations);
+      }
       const runnable = Array.from(pending.values()).filter((step) =>
         step.dependsOn.every((dep) => completed.has(dep)),
       );
@@ -69,38 +85,66 @@ export class SymphonyEngine {
         };
       }
 
-      for (const step of runnable) {
-        const outcome = await this.executeWithRetries(step, plan.id, executor);
+      const wave = runnable.slice(0, this.maxConcurrency);
+      const outcomes = await Promise.all(
+        wave.map(async (step) => {
+          const preparedStep = this.withDependencyContext(step, outputs);
+          return {
+            step,
+            outcome: await this.executeWithRetries(preparedStep, plan.id, executor, opts.signal),
+          };
+        }),
+      );
+      if (opts.signal?.aborted) {
+        for (const { step, outcome } of outcomes) {
+          outputs.push(outcome.output);
+          validations.push(...outcome.validations);
+          pending.delete(step.id);
+        }
+        return this.cancelledResult(plan, outputs, validations);
+      }
+      let approval: { stepId: string } | null = null;
+      let failure: { stepId: string; error: string } | null = null;
+
+      for (const { step, outcome } of outcomes) {
         outputs.push(outcome.output);
         validations.push(...outcome.validations);
         pending.delete(step.id);
 
         if (outcome.awaitingApproval) {
-          return {
-            ok: false,
-            status: "awaiting-approval",
-            plan,
-            outputs,
-            validations,
-            response: `Approval required before Agentix can continue ${step.id}.`,
-            error: "approval_pending",
+          approval ??= { stepId: step.id };
+        } else if (!outcome.output.ok) {
+          failure ??= {
+            stepId: step.id,
+            error: outcome.output.error ?? "validation failed",
           };
+        } else {
+          completed.add(step.id);
         }
+      }
 
-        if (!outcome.output.ok) {
-          failed.add(step.id);
-          return {
-            ok: false,
-            status: "failed",
-            plan,
-            outputs,
-            validations,
-            response: this.formatFailure(step.id, outcome.output.error ?? "validation failed"),
-            error: outcome.output.error,
-          };
-        }
+      if (failure) {
+        return {
+          ok: false,
+          status: "failed",
+          plan,
+          outputs,
+          validations,
+          response: this.formatFailure(failure.stepId, failure.error),
+          error: failure.error,
+        };
+      }
 
-        completed.add(step.id);
+      if (approval) {
+        return {
+          ok: false,
+          status: "awaiting-approval",
+          plan,
+          outputs,
+          validations,
+          response: `Approval required before Agentix can continue ${approval.stepId}.`,
+          error: "approval_pending",
+        };
       }
     }
 
@@ -118,6 +162,7 @@ export class SymphonyEngine {
     step: PlanStep,
     planId: string,
     executor: SymphonyExecutor,
+    signal?: AbortSignal,
   ): Promise<{
     output: SymphonyResult["outputs"][number];
     validations: SymphonyResult["validations"];
@@ -129,6 +174,19 @@ export class SymphonyEngine {
     let currentStep = step;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (signal?.aborted) {
+        return {
+          output: lastOutput ?? {
+            stepId: currentStep.id,
+            taskId: "",
+            ok: false,
+            error: "cancelled",
+            attempts: Math.max(0, attempt - 1),
+          },
+          validations,
+          awaitingApproval: false,
+        };
+      }
       const { taskId, result } = await executor.executeStep(currentStep, planId);
       const validation = this.validator.validate(currentStep.id, result);
       validations.push(validation);
@@ -143,6 +201,10 @@ export class SymphonyEngine {
 
       if (validation.error === "approval_pending") {
         return { output: lastOutput, validations, awaitingApproval: true };
+      }
+
+      if (signal?.aborted || /cancelled/i.test(result.error ?? "")) {
+        return { output: lastOutput, validations, awaitingApproval: false };
       }
 
       if (validation.ok) {
@@ -188,5 +250,64 @@ export class SymphonyEngine {
 
   private formatFailure(stepId: string, error: string): string {
     return `Agentix failed while executing ${stepId}: ${error}`;
+  }
+
+  private cancelledResult(
+    plan: SymphonyResult["plan"],
+    outputs: SymphonyResult["outputs"],
+    validations: SymphonyResult["validations"],
+  ): SymphonyResult {
+    return {
+      ok: false,
+      status: "cancelled",
+      plan,
+      outputs,
+      validations,
+      response: "Agentix execution cancelled.",
+      error: "cancelled",
+    };
+  }
+
+  private withDependencyContext(
+    step: PlanStep,
+    outputs: SymphonyResult["outputs"],
+  ): PlanStep {
+    if (step.dependsOn.length === 0) return step;
+    const dependencyResults = step.dependsOn
+      .map((dependencyId) => outputs.find((output) => output.stepId === dependencyId))
+      .filter((output): output is SymphonyResult["outputs"][number] => Boolean(output))
+      .map((output) => ({
+        stepId: output.stepId,
+        taskId: output.taskId,
+        ok: output.ok,
+        output: this.serializeDependencyOutput(output.output),
+      }));
+    if (dependencyResults.length === 0) return step;
+
+    const dependencyContext = [
+      "Completed dependency results:",
+      ...dependencyResults.map((result) =>
+        `[${result.stepId} / ${result.taskId}]\n${result.output}`,
+      ),
+    ].join("\n\n").slice(0, 20_000);
+    const existingContext = typeof step.payload.context === "string"
+      ? step.payload.context.trim()
+      : "";
+
+    return {
+      ...step,
+      payload: {
+        ...step.payload,
+        dependencyResults,
+        context: [existingContext, dependencyContext].filter(Boolean).join("\n\n"),
+      },
+    };
+  }
+
+  private serializeDependencyOutput(output: unknown): string {
+    const text = typeof output === "string"
+      ? output
+      : JSON.stringify(output, null, 2);
+    return (text ?? String(output)).slice(0, 6_000);
   }
 }

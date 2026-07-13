@@ -7,6 +7,11 @@ import { EventBus } from "../config/EventBus.js";
 import { randomUUID } from "node:crypto";
 import type { Task, TaskResult } from "../powerhouse/types.js";
 
+export interface AgentExecutionContext {
+  signal?: AbortSignal;
+  onDelta?: (delta: string) => void;
+}
+
 export abstract class BasePIAgent {
   readonly id: string;
   readonly kind: string;
@@ -25,7 +30,7 @@ export abstract class BasePIAgent {
    * Run a task and return the result. Subclasses implement this.
    * Throw on unrecoverable error.
    */
-  abstract execute(task: Task): Promise<TaskResult>;
+  abstract execute(task: Task, context?: AgentExecutionContext): Promise<TaskResult>;
 
   /**
    * Optional hook for cleanup. Called by PIAgentRegistry.shutdown().

@@ -38,6 +38,7 @@ export class AgentixBackend {
     stimulus: string;
     sessionId?: string;
     streamCallback?: (delta: string) => void;
+    signal?: AbortSignal;
   }): Promise<{ response: string; sessionId: string; status?: string; taskIds?: string[] }> {
     const { stimulus, sessionId } = opts;
 
@@ -45,6 +46,7 @@ export class AgentixBackend {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify({ stimulus, sessionId }),
+      signal: opts.signal,
     });
 
     if (!res.ok) throw new Error(`Bridge ${res.status}: ${await res.text()}`);
@@ -134,6 +136,7 @@ export class AgentixBackend {
     stimulus: string;
     sessionId?: string;
     streamCallback: (delta: string) => void;
+    signal?: AbortSignal;
   }): Promise<{ response: string; sessionId: string; status?: string; taskIds?: string[] }> {
     return this.execute(opts);
   }

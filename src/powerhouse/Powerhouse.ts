@@ -2,15 +2,18 @@ import { randomUUID } from "node:crypto";
 import { AuditLog } from "../audit/AuditLog.js";
 import { EventBus } from "../config/EventBus.js";
 import { PATHS } from "../config/paths.js";
+import { loadConfig } from "../config/index.js";
 import { BashAgent } from "../pi/BashAgent.js";
 import { CodeAgent } from "../pi/CodeAgent.js";
 import { AgentProfileStore } from "../pi/AgentProfileStore.js";
 import { CommandAgent } from "../pi/CommandAgent.js";
 import { ConversationAgent } from "../pi/ConversationAgent.js";
+import { DelegatedConversationAgent } from "../pi/DelegatedConversationAgent.js";
 import { SandboxAgent } from "../pi/SandboxAgent.js";
 import { HealingEngine } from "../healing/HealingEngine.js";
 import { MemoryStore } from "../memory/MemoryStore.js";
 import { PlanStore } from "../symphony/PlanStore.js";
+import type { StoredPlanExecution } from "../symphony/PlanStore.js";
 import { SymphonyEngine } from "../symphony/SymphonyEngine.js";
 import type { PlanStep, SymphonyResult } from "../symphony/types.js";
 import { ApprovalWorkflow } from "./ApprovalWorkflow.js";
@@ -28,13 +31,14 @@ export interface ExecuteStimulusOptions {
   provider?: string;
   baseUrl?: string;
   toolsets?: unknown;
+  signal?: AbortSignal;
 }
 
 export interface ExecuteStimulusResult {
   response: string;
   sessionId: string;
   taskIds: string[];
-  status: "complete" | "awaiting-approval" | "failed";
+  status: "complete" | "awaiting-approval" | "failed" | "cancelled";
 }
 
 export class Powerhouse {
@@ -50,7 +54,9 @@ export class Powerhouse {
   readonly audit: AuditLog;
   readonly agentProfiles: AgentProfileStore;
   private started = false;
+  private stopping = false;
   private recoveryScheduled = false;
+  private readonly taskControllers = new Map<string, AbortController>();
 
   constructor(opts: {
     sessions?: SessionCoordinator;
@@ -83,6 +89,7 @@ export class Powerhouse {
 
   start(opts: { recover?: boolean } = {}): void {
     if (this.started) return;
+    this.stopping = false;
     const recover = opts.recover ?? true;
     EventBus.emit("powerhouse:starting", {});
     const recoveredTasks = recover
@@ -94,6 +101,9 @@ export class Powerhouse {
           }
           return task;
         })
+      : [];
+    const recoveredPlans = recover
+      ? this.planStore.list().filter((execution) => execution.status === "running")
       : [];
     if (recover) {
       this.sessions.recover();
@@ -110,12 +120,22 @@ export class Powerhouse {
     this.audit.record({
       type: "powerhouse.started",
       actor: "system",
-      data: { recoveredTasks: recoveredTasks.length },
+      data: { recoveredTasks: recoveredTasks.length, recoveredPlans: recoveredPlans.length },
     });
     EventBus.emit("powerhouse:started", {});
-    if (recoveredTasks.length > 0) {
+    if (recoveredTasks.length > 0 || recoveredPlans.length > 0) {
+      const recoveredPlanIds = new Set(recoveredPlans.map((execution) => execution.plan.id));
+      const standaloneTasks = recoveredTasks.filter((task) =>
+        !task.planId || !recoveredPlanIds.has(task.planId),
+      );
       const recovery = setTimeout(() => {
-        void this.resumeRecoveredWork(recoveredTasks);
+        void this.resumeRecoveredState(recoveredPlans, standaloneTasks).catch((error) => {
+          this.audit.record({
+            type: "recovery.failed",
+            actor: "system",
+            data: { error: error instanceof Error ? error.message : String(error) },
+          });
+        });
       }, 0);
       recovery.unref?.();
     }
@@ -123,7 +143,27 @@ export class Powerhouse {
 
   stop(): void {
     if (!this.started) return;
+    this.stopping = true;
     EventBus.emit("powerhouse:stopping", {});
+    for (const [taskId, controller] of this.taskControllers) {
+      const task = this.queue.get(taskId);
+      if (task?.status === "running") {
+        task.status = "queued";
+        task.startedAt = undefined;
+        task.finishedAt = undefined;
+        task.error = undefined;
+        this.queue.requeue(task);
+        this.taskStore.upsert(task);
+        this.audit.record({
+          type: "task.interrupted",
+          actor: "system",
+          subjectId: task.id,
+          data: { sessionId: task.sessionId, kind: task.kind, reason: "powerhouse stopped" },
+        });
+      }
+      controller.abort(new Error("Powerhouse stopped"));
+    }
+    this.taskControllers.clear();
     this.approvals.shutdown();
     this.agents.shutdown();
     this.started = false;
@@ -183,6 +223,60 @@ export class Powerhouse {
     return this.taskStore.list(sessionId);
   }
 
+  async retryPlan(planId: string): Promise<SymphonyResult | null> {
+    this.start();
+    const execution = this.planStore.get(planId);
+    if (!execution || execution.status !== "failed") return null;
+    return this.continuePlanExecution(execution, {
+      reuseOpenTasks: false,
+      reason: "manual-retry",
+    });
+  }
+
+  cancelPlan(
+    planId: string,
+    reason = "cancelled by user",
+    actor: "user" | "system" = "user",
+  ): { ok: boolean; status?: StoredPlanExecution["status"]; taskIds: string[]; error?: string } {
+    this.start();
+    const execution = this.planStore.get(planId);
+    if (!execution) return { ok: false, taskIds: [], error: `unknown plan: ${planId}` };
+    if (execution.status === "cancelled") {
+      return { ok: true, status: "cancelled", taskIds: [] };
+    }
+    if (["complete", "failed"].includes(execution.status)) {
+      return {
+        ok: false,
+        status: execution.status,
+        taskIds: [],
+        error: `plan cannot be cancelled from ${execution.status}: ${planId}`,
+      };
+    }
+
+    const relatedTasks = this.taskStore
+      .list(execution.sessionId)
+      .filter((task) => task.planId === planId);
+    const cancelledTaskIds: string[] = [];
+    for (const task of relatedTasks) {
+      if (!["queued", "running", "awaiting-approval"].includes(task.status)) continue;
+      if (this.cancelTask(task.id, reason, actor)) cancelledTaskIds.push(task.id);
+    }
+
+    this.recordPlanExecution(
+      execution.plan,
+      execution.sessionId,
+      Array.from(new Set([...execution.taskIds, ...relatedTasks.map((task) => task.id)])),
+      "cancelled",
+    );
+    this.audit.record({
+      type: "plan.cancelled",
+      actor,
+      subjectId: planId,
+      data: { sessionId: execution.sessionId, reason, taskIds: cancelledTaskIds },
+    });
+    return { ok: true, status: "cancelled", taskIds: cancelledTaskIds };
+  }
+
   listApprovals(): Task[] {
     this.start();
     return this.approvals.listPending();
@@ -211,13 +305,13 @@ export class Powerhouse {
     if (!continuation) return approvedResult;
 
     return {
-      ok: continuation.status !== "failed",
+      ok: continuation.status === "complete",
       output: {
         approvedTaskId: task.id,
         approvedOutput: approvedResult.output,
         continuation,
       },
-      error: continuation.status === "failed" ? continuation.response : undefined,
+      error: continuation.status === "complete" ? undefined : continuation.response,
     };
   }
 
@@ -237,6 +331,7 @@ export class Powerhouse {
         subjectId: task.id,
         data: { sessionId: task.sessionId, reason: reason ?? null },
       });
+      this.cancelPlanAfterRejection(task, task.error, "user");
     }
     return rejected;
   }
@@ -254,6 +349,7 @@ export class Powerhouse {
       subjectId: task.id,
       data: { sessionId: task.sessionId, kind: task.kind, reason },
     });
+    this.cancelPlanAfterRejection(task, reason, "system");
     EventBus.emit("task:failed", {
       taskId: task.id,
       sessionId: task.sessionId,
@@ -267,22 +363,11 @@ export class Powerhouse {
     const task = this.queue.get(taskId) ?? this.hydrateStoredTask(taskId);
     if (!task) return { ok: false, error: `unknown task: ${taskId}` };
     if (action === "cancel") {
-      const cancelled = this.queue.cancel(taskId);
+      const cancelled = this.cancelTask(taskId, "cancelled by user", "user");
       if (!cancelled) return { ok: false, error: `task cannot be cancelled: ${taskId}` };
-      cancelled.error = cancelled.error ?? "cancelled";
-      this.taskStore.upsert(cancelled);
-      this.sessions.removePendingTask(cancelled.sessionId, cancelled.id);
-      this.audit.record({
-        type: "task.cancelled",
-        actor: "user",
-        subjectId: cancelled.id,
-        data: { sessionId: cancelled.sessionId, kind: cancelled.kind },
-      });
-      EventBus.emit("task:failed", {
-        taskId: cancelled.id,
-        sessionId: cancelled.sessionId,
-        error: cancelled.error ?? "cancelled",
-      });
+      if (cancelled.planId) {
+        this.cancelPlan(cancelled.planId, "plan cancelled after task cancellation", "user");
+      }
       return { ok: true, output: { action, taskId: cancelled.id, status: cancelled.status } };
     }
     if (action === "retry") {
@@ -357,6 +442,7 @@ export class Powerhouse {
     const taskIds: string[] = [];
     const emitProgress = (message: string) => opts.onDelta?.(`[agentix] ${message}\n`);
 
+    this.sessions.appendMessage(session.id, { role: "user", content: opts.stimulus });
     this.memory.add({
       sessionId: session.id,
       role: "user",
@@ -365,7 +451,32 @@ export class Powerhouse {
     });
 
     emitProgress("Planning task with Symphony...");
-    const result = await this.symphony.run(opts.stimulus, {
+    let plan: SymphonyResult["plan"];
+    try {
+      plan = await this.symphony.createPlan(opts.stimulus, opts.signal);
+    } catch (error) {
+      if (!opts.signal?.aborted) throw error;
+      const response = "Agentix execution cancelled during planning.";
+      this.sessions.appendMessage(session.id, { role: "assistant", content: response });
+      this.memory.add({
+        sessionId: session.id,
+        role: "assistant",
+        content: response,
+        tags: ["cancelled"],
+      });
+      this.audit.record({
+        type: "stimulus.cancelled",
+        actor: "user",
+        subjectId: session.id,
+        data: { phase: "planning", taskIds: [] },
+      });
+      return { response, sessionId: session.id, taskIds, status: "cancelled" };
+    }
+    this.recordPlanExecution(plan, session.id, taskIds, "running");
+    const streamModelOutput = plan.steps.length === 1 &&
+      ["user-message", "luna-message", "terra-message"].includes(plan.steps[0]!.kind);
+    let streamedModelResponse = "";
+    const rawResult = await this.symphony.runPlan(plan, {
       executeStep: async (step, planId) => {
         if (opts.model || opts.provider || opts.baseUrl || opts.toolsets) {
           step = {
@@ -382,8 +493,23 @@ export class Powerhouse {
           };
         }
         emitProgress(`Running step ${step.id} (${step.kind})...`);
-        const { task, result } = await this.executeStep(session.id, step, planId);
+        const { task, result } = await this.executeStep(
+          session.id,
+          step,
+          planId,
+          opts.signal,
+          streamModelOutput
+            ? (delta) => {
+                streamedModelResponse += delta;
+                opts.onDelta?.(delta);
+              }
+            : undefined,
+        );
+        if (streamedModelResponse && !/\s$/.test(streamedModelResponse)) {
+          opts.onDelta?.("\n");
+        }
         taskIds.push(task.id);
+        this.recordPlanExecution(plan, session.id, taskIds, "running");
         if (result.ok) {
           emitProgress(`Step ${step.id} completed as ${task.id}.`);
         } else if (result.error?.includes("approval required")) {
@@ -394,18 +520,25 @@ export class Powerhouse {
         return { taskId: task.id, result };
       },
       recoverStep: (step, failure) => this.recoverStep(step, failure),
+    }, {
+      signal: opts.signal,
     });
 
-    const status = result.status;
-    this.recordPlanExecution(result.plan, session.id, taskIds, status);
+    const result = this.resultWithPersistedCancellation(rawResult);
+    const status = opts.signal?.aborted ? "cancelled" : result.status;
+    this.recordPlanExecution(result.plan, session.id, taskIds, this.stopping ? "running" : status);
 
     const response = status === "awaiting-approval"
       ? this.approvalResponse(taskIds)
-      : result.response;
+      : status === "cancelled"
+        ? "Agentix execution cancelled."
+        : result.response;
 
     emitProgress(`Execution ${status}.`);
-    for (const chunk of this.streamChunks(response)) {
-      opts.onDelta?.(chunk);
+    if (!streamedModelResponse || streamedModelResponse.trim() !== response.trim()) {
+      for (const chunk of this.streamChunks(response)) {
+        opts.onDelta?.(chunk);
+      }
     }
 
     this.memory.add({
@@ -416,6 +549,7 @@ export class Powerhouse {
       taskId: taskIds[taskIds.length - 1],
     });
 
+    this.sessions.appendMessage(session.id, { role: "assistant", content: response });
     this.audit.record({
       type: "stimulus.executed",
       actor: "user",
@@ -433,14 +567,25 @@ export class Powerhouse {
     return { response, sessionId: session.id, taskIds, status };
   }
 
-  private async executeStep(sessionId: string, step: PlanStep, planId: string): Promise<{ task: Task; result: TaskResult }> {
+  private async executeStep(
+    sessionId: string,
+    step: PlanStep,
+    planId: string,
+    signal?: AbortSignal,
+    onDelta?: (delta: string) => void,
+  ): Promise<{ task: Task; result: TaskResult }> {
     const task = this.createTask(sessionId, step, planId);
     this.queue.enqueue(task);
     this.taskStore.upsert(task);
     this.sessions.addPendingTask(sessionId, task.id);
     EventBus.emit("task:queued", { taskId: task.id, sessionId, kind: task.kind });
 
-    const running = this.queue.dequeue(sessionId);
+    if (signal?.aborted) {
+      const cancelled = this.cancelTask(task.id, "cancelled by interrupted request", "user") ?? task;
+      return { task: cancelled, result: { ok: false, error: "cancelled" } };
+    }
+
+    const running = this.queue.dequeueTask(task.id);
     if (!running) {
       return { task, result: { ok: false, error: "failed to dequeue task" } };
     }
@@ -468,7 +613,7 @@ export class Powerhouse {
       };
     }
 
-    return { task: running, result: await this.runTask(running) };
+    return { task: running, result: await this.runTask(running, signal, onDelta) };
   }
 
   private recoverStep(
@@ -488,7 +633,7 @@ export class Powerhouse {
       healingAdvice: guidance,
     };
 
-    if (step.kind === "user-message") {
+    if (["user-message", "luna-message", "terra-message"].includes(step.kind)) {
       const existingContext = typeof payload.context === "string" ? payload.context.trim() : "";
       payload.context = [existingContext, guidance].filter(Boolean).join("\n\n");
     }
@@ -544,7 +689,12 @@ export class Powerhouse {
     });
 
     const taskIds = [...execution.taskIds, ...continuationTaskIds];
-    this.recordPlanExecution(result.plan, task.sessionId, taskIds, result.status);
+    this.recordPlanExecution(
+      result.plan,
+      task.sessionId,
+      taskIds,
+      this.stopping ? "running" : result.status,
+    );
     this.audit.record({
       type: "plan.resumed_after_approval",
       actor: "system",
@@ -558,6 +708,7 @@ export class Powerhouse {
     });
 
     if (result.response) {
+      this.sessions.appendMessage(task.sessionId, { role: "assistant", content: result.response });
       this.memory.add({
         sessionId: task.sessionId,
         role: "assistant",
@@ -574,9 +725,22 @@ export class Powerhouse {
     plan: SymphonyResult["plan"],
     sessionId: string,
     taskIds: string[],
-    status: SymphonyResult["status"],
+    status: StoredPlanExecution["status"],
   ): void {
-    this.planStore.upsert({ plan, sessionId, taskIds, status });
+    const current = this.planStore.get(plan.id);
+    const effectiveStatus = current?.status === "cancelled" ? "cancelled" : status;
+    this.planStore.upsert({ plan, sessionId, taskIds, status: effectiveStatus });
+  }
+
+  private resultWithPersistedCancellation(result: SymphonyResult): SymphonyResult {
+    if (this.planStore.get(result.plan.id)?.status !== "cancelled") return result;
+    return {
+      ...result,
+      ok: false,
+      status: "cancelled",
+      response: "Agentix execution cancelled.",
+      error: "cancelled",
+    };
   }
 
   private async dispatchQueuedTask(task: Task): Promise<TaskResult> {
@@ -607,7 +771,11 @@ export class Powerhouse {
     return this.runTask(running);
   }
 
-  private async runTask(task: Task): Promise<TaskResult> {
+  private async runTask(
+    task: Task,
+    externalSignal?: AbortSignal,
+    onDelta?: (delta: string) => void,
+  ): Promise<TaskResult> {
     const agent = this.agents.pickFor(task);
     if (!agent) {
       const error = `no Pi agent registered for ${task.kind}`;
@@ -615,7 +783,42 @@ export class Powerhouse {
       return { ok: false, error };
     }
 
-    const result = await agent.execute(task);
+    const controller = new AbortController();
+    this.taskControllers.set(task.id, controller);
+    const onExternalAbort = () => {
+      this.cancelTask(task.id, "cancelled by interrupted request", "user");
+    };
+    externalSignal?.addEventListener("abort", onExternalAbort, { once: true });
+    if (externalSignal?.aborted) onExternalAbort();
+    let result: TaskResult;
+    try {
+      if (this.taskIsCancelled(task)) {
+        return { ok: false, error: task.error ?? "cancelled" };
+      }
+      result = await agent.execute(task, { signal: controller.signal, onDelta });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (this.stopping && controller.signal.aborted) {
+        return { ok: false, error: "interrupted by shutdown" };
+      }
+      if (this.taskIsCancelled(task)) {
+        return { ok: false, error: task.error ?? "cancelled" };
+      }
+      this.failTask(task, message);
+      return { ok: false, error: message };
+    } finally {
+      externalSignal?.removeEventListener("abort", onExternalAbort);
+      if (this.taskControllers.get(task.id) === controller) {
+        this.taskControllers.delete(task.id);
+      }
+    }
+
+    if (this.taskIsCancelled(task)) {
+      return { ok: false, error: task.error ?? "cancelled", output: result.output };
+    }
+    if (this.stopping && controller.signal.aborted) {
+      return { ok: false, error: "interrupted by shutdown", output: result.output };
+    }
     task.result = result.output;
     task.error = result.error;
 
@@ -653,42 +856,190 @@ export class Powerhouse {
     return result;
   }
 
-  private async resumeRecoveredWork(tasks: Task[]): Promise<void> {
-    if (this.recoveryScheduled || tasks.length === 0) return;
+  private cancelTask(taskId: string, reason: string, actor: "user" | "system"): Task | undefined {
+    const task = this.queue.get(taskId);
+    if (task?.status === "awaiting-approval") this.approvals.reject(taskId, reason);
+    const cancelled = this.queue.cancel(taskId);
+    if (!cancelled) return undefined;
+    this.taskControllers.get(taskId)?.abort(new Error(reason));
+    cancelled.error = reason;
+    this.taskStore.upsert(cancelled);
+    this.sessions.removePendingTask(cancelled.sessionId, cancelled.id);
+    this.audit.record({
+      type: "task.cancelled",
+      actor,
+      subjectId: cancelled.id,
+      data: { sessionId: cancelled.sessionId, kind: cancelled.kind, reason },
+    });
+    EventBus.emit("task:failed", {
+      taskId: cancelled.id,
+      sessionId: cancelled.sessionId,
+      error: reason,
+    });
+    return cancelled;
+  }
+
+  private taskIsCancelled(task: Task): boolean {
+    return task.status === "cancelled";
+  }
+
+  private cancelPlanAfterRejection(
+    rejectedTask: Task,
+    reason: string,
+    actor: "user" | "system",
+  ): void {
+    if (!rejectedTask.planId) return;
+    const execution = this.planStore.get(rejectedTask.planId);
+    if (!execution || ["complete", "failed", "cancelled"].includes(execution.status)) return;
+
+    const relatedTasks = this.taskStore
+      .list(rejectedTask.sessionId)
+      .filter((task) => task.planId === rejectedTask.planId);
+    const openStatuses = new Set<Task["status"]>(["queued", "running", "awaiting-approval"]);
+    for (const task of relatedTasks) {
+      if (task.id === rejectedTask.id || !openStatuses.has(task.status)) continue;
+      if (task.status === "awaiting-approval") {
+        this.approvals.reject(task.id, reason);
+      }
+      this.cancelTask(task.id, `plan cancelled after approval rejection: ${reason}`, actor);
+    }
+
+    this.recordPlanExecution(
+      execution.plan,
+      execution.sessionId,
+      Array.from(new Set([...execution.taskIds, ...relatedTasks.map((task) => task.id)])),
+      "cancelled",
+    );
+    this.audit.record({
+      type: "plan.cancelled_after_approval_rejection",
+      actor,
+      subjectId: execution.plan.id,
+      data: {
+        rejectedTaskId: rejectedTask.id,
+        sessionId: rejectedTask.sessionId,
+        reason,
+      },
+    });
+  }
+
+  private async resumeRecoveredState(
+    plans: StoredPlanExecution[],
+    standaloneTasks: Task[],
+  ): Promise<void> {
+    if (this.recoveryScheduled) return;
     this.recoveryScheduled = true;
     try {
-      const sessionIds = [...new Set(tasks.map((task) => task.sessionId))];
-      for (const sessionId of sessionIds) {
+      for (const execution of plans) {
         if (!this.started) break;
-        const session = this.sessions.get(sessionId);
-        if (!session || session.status !== "active") continue;
+        await this.continuePlanExecution(execution, {
+          reuseOpenTasks: true,
+          reason: "restart-recovery",
+        });
+      }
 
-        while (this.started) {
-          const next = this.queue.nextForSession(sessionId);
-          if (!next) break;
-          const running = this.queue.dequeue(sessionId);
-          if (!running) break;
-          EventBus.emit("task:running", { taskId: running.id, sessionId });
-          this.taskStore.upsert(running);
-
-          if (running.requiresApproval) {
-            this.approvals.request(running);
-            this.audit.record({
-              type: "approval.requested",
-              actor: "system",
-              subjectId: running.id,
-              data: { sessionId, kind: running.kind, payload: running.payload, recovered: true },
-            });
-            break;
-          }
-
-          const result = await this.runTask(running);
-          if (!result.ok) break;
-        }
+      for (const task of standaloneTasks) {
+        if (!this.started) break;
+        if (task.status === "awaiting-approval") continue;
+        if (task.status !== "queued") continue;
+        await this.dispatchQueuedTask(task);
       }
     } finally {
       this.recoveryScheduled = false;
     }
+  }
+
+  private async continuePlanExecution(
+    execution: StoredPlanExecution,
+    opts: { reuseOpenTasks: boolean; reason: "restart-recovery" | "manual-retry" },
+  ): Promise<SymphonyResult> {
+    const planTasks = this.taskStore
+      .list(execution.sessionId)
+      .filter((task) => task.planId === execution.plan.id);
+    const completedByStep = new Map<string, Task>();
+    const openByStep = new Map<string, Task>();
+    for (const task of planTasks) {
+      if (!task.stepId) continue;
+      if (task.status === "complete") completedByStep.set(task.stepId, task);
+      if (["queued", "awaiting-approval"].includes(task.status)) {
+        openByStep.set(task.stepId, task);
+      }
+    }
+
+    const completedStepIds = new Set(completedByStep.keys());
+    const outputs: SymphonyResult["outputs"] = execution.plan.steps
+      .map((step) => completedByStep.get(step.id))
+      .filter((task): task is Task => Boolean(task))
+      .map((task) => ({
+        stepId: task.stepId!,
+        taskId: task.id,
+        ok: true,
+        output: task.result,
+        attempts: Math.max(1, task.attempts),
+      }));
+    const taskIds = Array.from(new Set([
+      ...execution.taskIds,
+      ...planTasks.map((task) => task.id),
+    ]));
+    this.recordPlanExecution(execution.plan, execution.sessionId, taskIds, "running");
+
+    const result = await this.symphony.runPlan(execution.plan, {
+      executeStep: async (step, planId) => {
+        let task: Task;
+        let taskResult: TaskResult;
+        const recoveredTask = opts.reuseOpenTasks ? openByStep.get(step.id) : undefined;
+        if (recoveredTask?.status === "awaiting-approval") {
+          task = recoveredTask;
+          taskResult = {
+            ok: false,
+            error: "approval required for task " + task.id,
+            output: { awaitingApproval: true, taskId: task.id },
+          };
+        } else if (recoveredTask?.status === "queued") {
+          task = recoveredTask;
+          taskResult = await this.dispatchQueuedTask(task);
+        } else {
+          const created = await this.executeStep(execution.sessionId, step, planId);
+          task = created.task;
+          taskResult = created.result;
+          taskIds.push(task.id);
+        }
+        openByStep.delete(step.id);
+        this.recordPlanExecution(execution.plan, execution.sessionId, taskIds, "running");
+        return { taskId: task.id, result: taskResult };
+      },
+      recoverStep: (step, failure) => this.recoverStep(step, failure),
+    }, {
+      completedStepIds,
+      outputs,
+    });
+
+    this.recordPlanExecution(
+      result.plan,
+      execution.sessionId,
+      taskIds,
+      this.stopping ? "running" : result.status,
+    );
+    this.audit.record({
+      type: opts.reason === "restart-recovery" ? "plan.recovered" : "plan.retry_completed",
+      actor: opts.reason === "restart-recovery" ? "system" : "user",
+      subjectId: execution.plan.id,
+      data: {
+        sessionId: execution.sessionId,
+        status: result.status,
+        taskIds,
+      },
+    });
+    if (result.response) {
+      this.sessions.appendMessage(execution.sessionId, { role: "assistant", content: result.response });
+      this.memory.add({
+        sessionId: execution.sessionId,
+        role: "assistant",
+        content: result.response,
+        tags: [opts.reason, result.status],
+        taskId: taskIds[taskIds.length - 1],
+      });
+    }
+    return result;
   }
 
   private failTask(task: Task, error: string): void {
@@ -723,7 +1074,19 @@ export class Powerhouse {
     this.sessions.recover();
     if (sessionId) {
       const existing = this.sessions.get(sessionId);
-      if (existing) return existing;
+      if (existing) {
+        if (existing.status !== "active") {
+          const previousStatus = existing.status;
+          this.sessions.setStatus(existing.id, "active");
+          this.audit.record({
+            type: "session.reopened",
+            actor: "user",
+            subjectId: existing.id,
+            data: { previousStatus },
+          });
+        }
+        return this.sessions.get(existing.id) ?? existing;
+      }
     }
     return this.createSession({ source: "agentix-shell" });
   }
@@ -748,8 +1111,15 @@ export class Powerhouse {
   }
 
   private registerDefaultAgents(): void {
+    const config = loadConfig();
     if (!this.agents.forKind("user-message")) {
       this.agents.register(new ConversationAgent());
+    }
+    if (config.lunaModel && !this.agents.forKind("luna-message")) {
+      this.agents.register(new DelegatedConversationAgent("luna"));
+    }
+    if (config.terraModel && !this.agents.forKind("terra-message")) {
+      this.agents.register(new DelegatedConversationAgent("terra"));
     }
     if (!this.agents.forKind("bash")) {
       this.agents.register(new BashAgent({ cwd: process.cwd() }));

@@ -26,6 +26,10 @@ describe("HTTP session token auth", () => {
     AGENTIX_ALLOW_UNAUTHENTICATED: process.env.AGENTIX_ALLOW_UNAUTHENTICATED,
     AGENTIX_GATEWAY_SECRET: process.env.AGENTIX_GATEWAY_SECRET,
     AGENTIX_ALLOW_UNAUTHENTICATED_GATEWAY: process.env.AGENTIX_ALLOW_UNAUTHENTICATED_GATEWAY,
+    AGENTIX_PROVIDER: process.env.AGENTIX_PROVIDER,
+    AGENTIX_MODEL: process.env.AGENTIX_MODEL,
+    AGENTIX_LLM_API_KEY: process.env.AGENTIX_LLM_API_KEY,
+    AGENTIX_WORKSPACE_DIR: process.env.AGENTIX_WORKSPACE_DIR,
   };
 
   afterEach(async () => {
@@ -34,6 +38,11 @@ describe("HTTP session token auth", () => {
     restoreEnv("AGENTIX_ALLOW_UNAUTHENTICATED", envBackup.AGENTIX_ALLOW_UNAUTHENTICATED);
     restoreEnv("AGENTIX_GATEWAY_SECRET", envBackup.AGENTIX_GATEWAY_SECRET);
     restoreEnv("AGENTIX_ALLOW_UNAUTHENTICATED_GATEWAY", envBackup.AGENTIX_ALLOW_UNAUTHENTICATED_GATEWAY);
+    restoreEnv("AGENTIX_PROVIDER", envBackup.AGENTIX_PROVIDER);
+    restoreEnv("AGENTIX_MODEL", envBackup.AGENTIX_MODEL);
+    restoreEnv("AGENTIX_LLM_API_KEY", envBackup.AGENTIX_LLM_API_KEY);
+    restoreEnv("AGENTIX_WORKSPACE_DIR", envBackup.AGENTIX_WORKSPACE_DIR);
+    vi.unstubAllGlobals();
     vi.resetModules();
     while (dirs.length > 0) {
       rmSync(dirs.pop()!, { recursive: true, force: true });
@@ -42,6 +51,7 @@ describe("HTTP session token auth", () => {
 
   it("protects inbox control APIs while leaving health public", async () => {
     process.env.AGENTIX_DATA_DIR = tempDir();
+    process.env.AGENTIX_WORKSPACE_DIR = process.env.AGENTIX_DATA_DIR;
     process.env.AGENTIX_SESSION_TOKEN = "secret-token";
     const { startInboxServer } = await import("../../src/config/InboxServer.js");
     const server = await startInboxServer({ port: 0, host: "127.0.0.1" });
@@ -49,6 +59,11 @@ describe("HTTP session token auth", () => {
 
     try {
       expect((await fetch(`${base}/health`)).status).toBe(200);
+      const ui = await fetch(`${base}/ui/`);
+      expect(ui.status).toBe(200);
+      expect(ui.headers.get("content-security-policy")).toContain("default-src 'self'");
+      expect(ui.headers.get("x-frame-options")).toBe("DENY");
+      expect(ui.headers.get("x-content-type-options")).toBe("nosniff");
       const openapi = await fetch(`${base}/openapi.json`);
       expect(openapi.status).toBe(200);
       expect((await openapi.json()) as Record<string, unknown>).toMatchObject({ openapi: "3.1.0" });
@@ -90,6 +105,19 @@ describe("HTTP session token auth", () => {
       expect(streamBody).toContain('"type":"result"');
       expect(streamBody).toMatch(/"sessionId":"sess-[^"]+"/);
       expect(streamBody).toContain("data: [DONE]");
+      const malformedStream = await fetch(`${base}/execute/stream`, {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer secret-token",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ stimulus: "   " }),
+      });
+      expect(malformedStream.status).toBe(400);
+      expect(await malformedStream.json()).toMatchObject({
+        ok: false,
+        error: "stimulus must be a non-empty string",
+      });
       const reset = await fetch(`${base}/memory/reset`, {
         method: "POST",
         headers: {
@@ -124,6 +152,19 @@ describe("HTTP session token auth", () => {
       expect((await fetch(`${base}/usage`, {
         headers: { Authorization: "Bearer bridge-token" },
       })).status).toBe(200);
+      const malformed = await fetch(`${base}/execute`, {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer bridge-token",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({}),
+      });
+      expect(malformed.status).toBe(400);
+      expect(await malformed.json()).toMatchObject({
+        ok: false,
+        error: "stimulus must be a non-empty string",
+      });
     } finally {
       await server.close();
     }
@@ -131,6 +172,7 @@ describe("HTTP session token auth", () => {
 
   it("supports workspace API tokens with roles", async () => {
     process.env.AGENTIX_DATA_DIR = tempDir();
+    process.env.AGENTIX_WORKSPACE_DIR = process.env.AGENTIX_DATA_DIR;
     process.env.AGENTIX_SESSION_TOKEN = "admin-token";
     const { startBridge } = await import("../../src/bridge/server.js");
     const server = await startBridge({ port: 0, host: "127.0.0.1" });
@@ -203,6 +245,19 @@ describe("HTTP session token auth", () => {
     process.env.AGENTIX_DATA_DIR = tempDir();
     process.env.AGENTIX_SESSION_TOKEN = "admin-token";
     process.env.AGENTIX_GATEWAY_SECRET = "gateway-secret";
+    process.env.AGENTIX_PROVIDER = "openai";
+    process.env.AGENTIX_MODEL = "gateway-test-model";
+    process.env.AGENTIX_LLM_API_KEY = "gateway-test-key";
+    const nativeFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith("/chat/completions")) {
+        return new Response(JSON.stringify({
+          choices: [{ message: { content: "signed gateway response" } }],
+        }), { status: 200 });
+      }
+      return nativeFetch(input, init);
+    }));
     const { startBridge } = await import("../../src/bridge/server.js");
     const server = await startBridge({ port: 0, host: "127.0.0.1" });
     const base = `http://127.0.0.1:${server.port}`;
