@@ -42,9 +42,9 @@ capability remains `GAP`.
 | Browser security headers | PASS | CSP, frame denial, MIME sniffing, and referrer policy integration test |
 | Secret handling/support bundle | PASS | Recursive sentinel scan across config/tasks/memory/logs; private output files |
 | Dependency security | PASS | `npm audit`: zero vulnerabilities |
-| Windows current branch | PASS | Local build, 181 tests, packed install/smoke |
-| Ubuntu current branch | EXTERNAL | Required pull-request CI gate |
-| Docker current branch | EXTERNAL | Docker absent locally; required pull-request CI gate |
+| Windows current branch | PASS | Local and PR #21 CI build, 181 tests, packed install/smoke, PowerShell installer |
+| Ubuntu current branch | PASS | PR #21 CI build, 181 tests, packed install/smoke, shell installer |
+| Docker current branch | PASS | PR #21 CI primary/compatibility image builds plus Linux/Windows compose validation |
 | Documentation install path | PASS | Commands and `2.2.0` examples align with the final packed artifact |
 | npm/GitHub provenance | PASS | Public `2.1.12` proof; workflow enforces provenance for subsequent tags |
 | `2.2.0` public publication proof | EXTERNAL | Requires merge/tag authorization, npm publish, and GitHub release assets |

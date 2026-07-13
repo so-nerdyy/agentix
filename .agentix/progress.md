@@ -28,7 +28,13 @@ Updated: 2026-07-12
   session, and token create/revoke passed; mobile 390x844 passed; zero console errors.
 - Invalid command: local exit status 2, Agentix-only error, no bridge/Python startup.
 - Full slash-command inventory: real isolated shell subprocess passed.
-- Docker: not installed on this workstation; current-branch proof is delegated to CI.
+- PR #21 CI run `29215385410`: Ubuntu and Windows build, 181 tests, packed release
+  smoke, and native installer dry runs passed; primary/compatibility Docker images
+  and Linux/Windows compose validation passed.
+- CI and release workflows use current Node-runtime action majors and no longer run
+  duplicate push plus pull-request matrices for the same branch SHA.
+- Release preflight: repository/package/LLM checks pass; local npm auth intentionally
+  remains unavailable because `NPM_TOKEN` is stored only as a GitHub Actions secret.
 
 ## Defects Closed In This Cycle
 
@@ -52,9 +58,8 @@ Updated: 2026-07-12
 
 ## Next Action
 
-1. Commit and push the release branch; open a pull request.
-2. Require Windows, Ubuntu, and Docker CI before merge.
-3. Publish only through the authorized tag workflow, then generate fresh public
+1. Review and merge PR #21.
+2. Publish only through the authorized tag workflow, then generate fresh public
    release proof for `2.2.0`.
 
 ## Subagent Activity

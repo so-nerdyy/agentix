@@ -32,8 +32,8 @@ orchestration loops.
 - Every dashboard panel/action was exercised in a browser at desktop and mobile
   widths with no console errors or horizontal overflow.
 - Local build, 181 automated tests, final packed `2.2.0` release smoke, dependency
-  audit, path hygiene, and secret-redaction checks pass. Ubuntu and Docker
-  validation run in pull-request CI.
+  audit, path hygiene, and secret-redaction checks pass. PR #21 also proves the
+  Windows/Ubuntu packed flows, both Docker images, and Linux/Windows compose files.
 
 ## Release Scope: 2.2.0
 
